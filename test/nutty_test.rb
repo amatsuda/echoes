@@ -9,7 +9,11 @@ class NuttyTest < Test::Unit::TestCase
     end
   end
 
-  test "something useful" do
-    assert_equal("expected", "actual")
+  test "has all components" do
+    assert { ::Nutty.const_defined?(:Cell) }
+    assert { ::Nutty.const_defined?(:Cursor) }
+    assert { ::Nutty.const_defined?(:Screen) }
+    assert { ::Nutty.const_defined?(:Parser) }
+    assert { ::Nutty.const_defined?(:Terminal) }
   end
 end
