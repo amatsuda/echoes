@@ -16,15 +16,33 @@ module Nutty
     end
 
     def put_char(c)
-      if @cursor.col >= @cols
+      w = char_width(c)
+
+      # If wide char doesn't fit at end of line, wrap first
+      if w == 2 && @cursor.col >= @cols - 1
+        if @cursor.col == @cols - 1
+          @grid[@cursor.row][@cursor.col].reset!
+        end
+        @cursor.col = 0
+        line_feed
+      elsif @cursor.col >= @cols
         @cursor.col = 0
         line_feed
       end
+
       cell = @grid[@cursor.row][@cursor.col]
-      cell.char = c
       cell.copy_from(@attrs)
       cell.char = c
-      @cursor.col += 1
+      cell.width = w
+
+      if w == 2 && @cursor.col + 1 < @cols
+        # Mark the next cell as a continuation (width 0)
+        next_cell = @grid[@cursor.row][@cursor.col + 1]
+        next_cell.reset!
+        next_cell.width = 0
+      end
+
+      @cursor.col += w
     end
 
     def move_cursor(row, col)
@@ -260,6 +278,25 @@ module Nutty
 
     def clear_row(r)
       @grid[r].each(&:reset!)
+    end
+
+    def char_width(c)
+      cp = c.ord
+      return 2 if (cp >= 0x1100 && cp <= 0x115F) ||   # Hangul Jamo
+                  cp == 0x2329 || cp == 0x232A ||       # angle brackets
+                  (cp >= 0x2E80 && cp <= 0x303E) ||     # CJK Radicals..CJK Symbols
+                  (cp >= 0x3040 && cp <= 0x33BF) ||     # Hiragana..CJK Compat
+                  (cp >= 0x3400 && cp <= 0x4DBF) ||     # CJK Unified Ext A
+                  (cp >= 0x4E00 && cp <= 0xA4CF) ||     # CJK Unified..Yi
+                  (cp >= 0xA960 && cp <= 0xA97C) ||     # Hangul Jamo Extended-A
+                  (cp >= 0xAC00 && cp <= 0xD7A3) ||     # Hangul Syllables
+                  (cp >= 0xF900 && cp <= 0xFAFF) ||     # CJK Compat Ideographs
+                  (cp >= 0xFE10 && cp <= 0xFE6F) ||     # Vertical forms..CJK Compat Forms
+                  (cp >= 0xFF01 && cp <= 0xFF60) ||     # Fullwidth Forms
+                  (cp >= 0xFFE0 && cp <= 0xFFE6) ||     # Fullwidth Signs
+                  (cp >= 0x1F000 && cp <= 0x1FBFF) ||   # Emoji & symbols
+                  (cp >= 0x20000 && cp <= 0x3FFFF)      # CJK Unified Ext B-G
+      1
     end
   end
 end

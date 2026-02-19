@@ -149,7 +149,11 @@ module Nutty
         y = r * @cell_height  # isFlipped makes y=0 at top
 
         row.each_with_index do |cell, c|
+          # Skip continuation cells (second half of wide chars)
+          next if cell.width == 0
+
           x = c * @cell_width
+          cell_w = cell.width == 2 ? @cell_width * 2 : @cell_width
 
           fg_idx = cell.fg
           bg_idx = cell.bg
@@ -167,7 +171,7 @@ module Nutty
           # Fill cell background (skip if default black)
           if bg_idx
             ObjC::MSG_VOID.call(bg_color, ObjC.sel('setFill'))
-            ObjC::NSRectFill.call(x, y, @cell_width, @cell_height)
+            ObjC::NSRectFill.call(x, y, cell_w, @cell_height)
           end
 
           # Draw character
