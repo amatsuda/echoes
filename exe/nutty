@@ -3,4 +3,8 @@
 
 require "nutty"
 
-Nutty::Terminal.new.run
+if ARGV.delete('--tty') || ARGV.delete('-t')
+  Nutty::Terminal.new.run
+else
+  Nutty::GUI.new.run
+end

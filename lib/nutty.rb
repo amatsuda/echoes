@@ -6,6 +6,8 @@ require_relative "nutty/cursor"
 require_relative "nutty/screen"
 require_relative "nutty/parser"
 require_relative "nutty/terminal"
+require_relative "nutty/objc"
+require_relative "nutty/gui"
 
 module Nutty
   class Error < StandardError; end
