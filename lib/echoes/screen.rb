@@ -4,7 +4,9 @@ module Echoes
   class Screen
     attr_reader :rows, :cols, :cursor, :grid, :scrollback
 
-    SCROLLBACK_LIMIT = 1000
+    def self.scrollback_limit
+      Echoes.config.scrollback_limit
+    end
 
     def initialize(rows: 24, cols: 80)
       @rows = rows
@@ -152,7 +154,7 @@ module Echoes
         if @scroll_top == 0
           row = @grid[@scroll_top]
           @scrollback << row.map { |cell| c = Cell.new; c.copy_from(cell); c.width = cell.width; c }
-          @scrollback.shift if @scrollback.size > SCROLLBACK_LIMIT
+          @scrollback.shift if @scrollback.size > self.class.scrollback_limit
         end
         @grid.delete_at(@scroll_top)
         @grid.insert(@scroll_bottom, Array.new(@cols) { Cell.new })

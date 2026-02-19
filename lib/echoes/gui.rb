@@ -4,9 +4,7 @@ require 'pty'
 
 module Echoes
   class GUI
-    FONT_SIZE = 14.0
-
-    def initialize(command: ENV['SHELL'] || '/bin/bash', rows: 24, cols: 80, font_size: FONT_SIZE)
+    def initialize(command: Echoes.config.shell, rows: Echoes.config.rows, cols: Echoes.config.cols, font_size: Echoes.config.font_size)
       @rows = rows
       @cols = cols
       @font_size = font_size
@@ -14,8 +12,8 @@ module Echoes
       @screen = Screen.new(rows: rows, cols: cols)
       @parser = Parser.new(@screen)
       @colors = build_color_table
-      @default_fg = make_color(0.9, 0.9, 0.9)
-      @default_bg = make_color(0.0, 0.0, 0.0)
+      @default_fg = make_color(*Echoes.config.foreground)
+      @default_bg = make_color(*Echoes.config.background)
       @scroll_offset = 0
       @scroll_accum = 0.0
     end
@@ -64,7 +62,7 @@ module Echoes
         0
       )
 
-      ObjC::MSG_VOID_1.call(@window, ObjC.sel('setTitle:'), ObjC.nsstring('Echoes'))
+      ObjC::MSG_VOID_1.call(@window, ObjC.sel('setTitle:'), ObjC.nsstring(Echoes.config.window_title))
       ObjC::MSG_VOID.call(@window, ObjC.sel('center'))
     end
 
@@ -212,7 +210,7 @@ module Echoes
       if @scroll_offset == 0 && @screen.cursor.visible
         cx = @screen.cursor.col * @cell_width
         cy = @screen.cursor.row * @cell_height
-        cursor_color = make_color(0.7, 0.7, 0.7, 0.5)
+        cursor_color = make_color(*Echoes.config.cursor_color)
         ObjC::MSG_VOID.call(cursor_color, ObjC.sel('setFill'))
         ObjC::NSRectFill.call(cx, cy, @cell_width, @cell_height)
       end
@@ -238,7 +236,7 @@ module Echoes
           update_font(@font_size - 1.0) if @font_size > 4.0
           return
         when "0"
-          update_font(FONT_SIZE)
+          update_font(Echoes.config.font_size)
           return
         end
       end

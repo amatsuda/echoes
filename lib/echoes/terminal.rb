@@ -7,7 +7,7 @@ module Echoes
   class Terminal
     attr_reader :screen
 
-    def initialize(command: ENV['SHELL'] || '/bin/bash', rows: nil, cols: nil)
+    def initialize(command: Echoes.config.shell, rows: nil, cols: nil)
       size = IO.console&.winsize || [24, 80]
       @rows = rows || size[0]
       @cols = cols || size[1]
