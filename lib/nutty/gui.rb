@@ -38,10 +38,10 @@ module Nutty
     end
 
     def create_window
-      @font = ObjC::MSG_PTR_2D.call(
+      @font = ObjC.retain(ObjC::MSG_PTR_2D.call(
         ObjC.cls('NSFont'), ObjC.sel('monospacedSystemFontOfSize:weight:'),
         @font_size, 0.0
-      )
+      ))
 
       # Get cell width from maximumAdvancement (returns NSSize, d0 = width on arm64)
       @cell_width = ObjC::MSG_RET_D.call(@font, ObjC.sel('maximumAdvancement'))
@@ -201,6 +201,23 @@ module Nutty
     def key_down(event_ptr)
       flags = ObjC::MSG_RET_L.call(event_ptr, ObjC.sel('modifierFlags'))
 
+      # Cmd+Plus / Cmd+Minus for font size
+      if (flags & ObjC::NSEventModifierFlagCommand) != 0
+        chars_ns = ObjC::MSG_PTR.call(event_ptr, ObjC.sel('charactersIgnoringModifiers'))
+        chars = ObjC.to_ruby_string(chars_ns)
+        case chars
+        when "+", "="
+          update_font(@font_size + 1.0)
+          return
+        when "-"
+          update_font(@font_size - 1.0) if @font_size > 4.0
+          return
+        when "0"
+          update_font(FONT_SIZE)
+          return
+        end
+      end
+
       if (flags & ObjC::NSEventModifierFlagControl) != 0
         chars_ns = ObjC::MSG_PTR.call(event_ptr, ObjC.sel('charactersIgnoringModifiers'))
         chars = ObjC.to_ruby_string(chars_ns)
@@ -227,6 +244,30 @@ module Nutty
       # No data, skip
     rescue EOFError, Errno::EIO
       ObjC::MSG_VOID_1.call(@app, ObjC.sel('terminate:'), Fiddle::Pointer.new(0))
+    end
+
+    def update_font(new_size)
+      @font_size = new_size
+      old_font = @font
+      @font = ObjC.retain(ObjC::MSG_PTR_2D.call(
+        ObjC.cls('NSFont'), ObjC.sel('monospacedSystemFontOfSize:weight:'),
+        @font_size, 0.0
+      ))
+      ObjC.release(old_font) if old_font
+      @cell_width = ObjC::MSG_RET_D.call(@font, ObjC.sel('maximumAdvancement'))
+      ascender = ObjC::MSG_RET_D.call(@font, ObjC.sel('ascender'))
+      descender = ObjC::MSG_RET_D.call(@font, ObjC.sel('descender'))
+      leading = ObjC::MSG_RET_D.call(@font, ObjC.sel('leading'))
+      @cell_height = ascender - descender + leading
+
+      win_width = @cell_width * @cols
+      win_height = @cell_height * @rows
+
+      # setContentSize: takes NSSize (2 doubles on arm64)
+      msg_void_2d = ObjC.new_msg([ObjC::P, ObjC::P, ObjC::D, ObjC::D], ObjC::V)
+      msg_void_2d.call(@window, ObjC.sel('setContentSize:'), win_width, win_height)
+
+      ObjC::MSG_VOID_I.call(@view, ObjC.sel('setNeedsDisplay:'), 1)
     end
 
     private
@@ -303,10 +344,10 @@ module Nutty
     end
 
     def make_color(r, g, b, a = 1.0)
-      ObjC::MSG_PTR_4D.call(
+      ObjC.retain(ObjC::MSG_PTR_4D.call(
         ObjC.cls('NSColor'), ObjC.sel('colorWithRed:green:blue:alpha:'),
         r, g, b, a
-      )
+      ))
     end
   end
 end

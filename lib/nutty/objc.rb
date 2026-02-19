@@ -33,6 +33,7 @@ module Nutty
     MSG_PTR_L     = new_msg([P, P, L], P)            # id = msg(id, SEL, long)
     MSG_VOID      = new_msg([P, P], V)               # void = msg(id, SEL)
     MSG_VOID_1    = new_msg([P, P, P], V)            # void = msg(id, SEL, id)
+    MSG_VOID_2    = new_msg([P, P, P, P], V)         # void = msg(id, SEL, id, id)
     MSG_VOID_I    = new_msg([P, P, I], V)            # void = msg(id, SEL, int)
     MSG_RET_D     = new_msg([P, P], D)               # double = msg(id, SEL)
     MSG_RET_L     = new_msg([P, P], L)               # long = msg(id, SEL)
@@ -56,9 +57,6 @@ module Nutty
     # scheduledTimerWithTimeInterval:target:selector:userInfo:repeats:
     MSG_PTR_D_P_P_P_I = new_msg([P, P, D, P, P, P, I], P)
 
-    # dictionaryWithObjects:forKeys:count:
-    MSG_PTR_P_P_L = new_msg([P, P, P, P, L], P)
-
     # NSRectFill C function
     NSRectFill = Fiddle::Function.new(APPKIT['NSRectFill'], [D, D, D, D], V)
 
@@ -72,6 +70,7 @@ module Nutty
     NSBackingStoreBuffered = 2
 
     NSEventModifierFlagControl = 1 << 18
+    NSEventModifierFlagCommand = 1 << 20
 
     # Selector cache
     SEL_CACHE = {}
@@ -84,6 +83,14 @@ module Nutty
       SEL_CACHE[name] ||= RegisterName.call(name)
     end
 
+    def self.retain(obj)
+      MSG_PTR.call(obj, sel('retain'))
+    end
+
+    def self.release(obj)
+      MSG_VOID.call(obj, sel('release'))
+    end
+
     def self.nsstring(str)
       MSG_PTR_1.call(cls('NSString'), sel('stringWithUTF8String:'), str)
     end
@@ -94,14 +101,11 @@ module Nutty
     end
 
     def self.nsdict(hash)
-      count = hash.size
-      keys_arr = Fiddle::Pointer.malloc(count * Fiddle::SIZEOF_VOIDP)
-      vals_arr = Fiddle::Pointer.malloc(count * Fiddle::SIZEOF_VOIDP)
-      hash.each_with_index do |(k, v), i|
-        keys_arr[i * Fiddle::SIZEOF_VOIDP, Fiddle::SIZEOF_VOIDP] = [k.to_i].pack('J')
-        vals_arr[i * Fiddle::SIZEOF_VOIDP, Fiddle::SIZEOF_VOIDP] = [v.to_i].pack('J')
+      dict = MSG_PTR.call(cls('NSMutableDictionary'), sel('dictionary'))
+      hash.each do |key, value|
+        MSG_VOID_2.call(dict, sel('setObject:forKey:'), value, key)
       end
-      MSG_PTR_P_P_L.call(cls('NSDictionary'), sel('dictionaryWithObjects:forKeys:count:'), vals_arr, keys_arr, count)
+      dict
     end
 
     def self.nsnumber_int(val)
