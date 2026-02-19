@@ -16,6 +16,8 @@ module Nutty
       @colors = build_color_table
       @default_fg = make_color(0.9, 0.9, 0.9)
       @default_bg = make_color(0.0, 0.0, 0.0)
+      @scroll_offset = 0
+      @scroll_accum = 0.0
     end
 
     def run
@@ -95,12 +97,18 @@ module Nutty
         [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP]
       ) { |_self, _cmd| 1 }
 
+      @scroll_wheel_closure = Fiddle::Closure::BlockCaller.new(
+        Fiddle::TYPE_VOID,
+        [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP]
+      ) { |_self, _cmd, event| gui.scroll_wheel(event) }
+
       @view_class = ObjC.define_class('NuttyTerminalView', 'NSView', {
         'drawRect:'             => ['v@:{CGRect=dddd}', @draw_rect_closure],
         'keyDown:'              => ['v@:@', @key_down_closure],
         'acceptsFirstResponder' => ['c@:', @accepts_fr_closure],
         'timerFired:'           => ['v@:@', @timer_fired_closure],
         'isFlipped'             => ['c@:', @is_flipped_closure],
+        'scrollWheel:'          => ['v@:@', @scroll_wheel_closure],
       })
 
       win_width = @cell_width * @cols
@@ -145,7 +153,17 @@ module Nutty
       ObjC::MSG_VOID.call(@default_bg, ObjC.sel('setFill'))
       ObjC::NSRectFill.call(0.0, 0.0, @cell_width * @cols, @cell_height * @rows)
 
-      @screen.grid.each_with_index do |row, r|
+      scrollback = @screen.scrollback
+      visible_start = scrollback.size - @scroll_offset
+
+      @rows.times do |r|
+        src = visible_start + r
+        row = if src < scrollback.size
+                scrollback[src]
+              else
+                @screen.grid[src - scrollback.size]
+              end
+
         y = r * @cell_height  # isFlipped makes y=0 at top
 
         row.each_with_index do |cell, c|
@@ -190,8 +208,8 @@ module Nutty
         end
       end
 
-      # Draw cursor
-      if @screen.cursor.visible
+      # Draw cursor (only when at live view)
+      if @scroll_offset == 0 && @screen.cursor.visible
         cx = @screen.cursor.col * @cell_width
         cy = @screen.cursor.row * @cell_height
         cursor_color = make_color(0.7, 0.7, 0.7, 0.5)
@@ -203,6 +221,9 @@ module Nutty
     end
 
     def key_down(event_ptr)
+      @scroll_offset = 0
+      @scroll_accum = 0.0
+
       flags = ObjC::MSG_RET_L.call(event_ptr, ObjC.sel('modifierFlags'))
 
       # Cmd+Plus / Cmd+Minus for font size
@@ -248,6 +269,19 @@ module Nutty
       # No data, skip
     rescue EOFError, Errno::EIO
       ObjC::MSG_VOID_1.call(@app, ObjC.sel('terminate:'), Fiddle::Pointer.new(0))
+    end
+
+    def scroll_wheel(event_ptr)
+      delta = ObjC::MSG_RET_D.call(event_ptr, ObjC.sel('deltaY'))
+      @scroll_accum += delta
+
+      if @scroll_accum.abs >= 1.0
+        lines = @scroll_accum.to_i
+        @scroll_offset += lines
+        @scroll_offset = @scroll_offset.clamp(0, @screen.scrollback.size)
+        @scroll_accum -= lines
+        ObjC::MSG_VOID_I.call(@view, ObjC.sel('setNeedsDisplay:'), 1)
+      end
     end
 
     def update_font(new_size)

@@ -2,7 +2,9 @@
 
 module Nutty
   class Screen
-    attr_reader :rows, :cols, :cursor, :grid
+    attr_reader :rows, :cols, :cursor, :grid, :scrollback
+
+    SCROLLBACK_LIMIT = 1000
 
     def initialize(rows: 24, cols: 80)
       @rows = rows
@@ -13,6 +15,7 @@ module Nutty
       @scroll_top = 0
       @scroll_bottom = rows - 1
       @saved_cursor = nil
+      @scrollback = []
     end
 
     def put_char(c)
@@ -146,6 +149,11 @@ module Nutty
 
     def scroll_up(n = 1)
       n.times do
+        if @scroll_top == 0
+          row = @grid[@scroll_top]
+          @scrollback << row.map { |cell| c = Cell.new; c.copy_from(cell); c.width = cell.width; c }
+          @scrollback.shift if @scrollback.size > SCROLLBACK_LIMIT
+        end
         @grid.delete_at(@scroll_top)
         @grid.insert(@scroll_bottom, Array.new(@cols) { Cell.new })
       end
@@ -236,6 +244,7 @@ module Nutty
       @scroll_top = 0
       @scroll_bottom = @rows - 1
       @saved_cursor = nil
+      @scrollback = []
     end
 
     def resize(new_rows, new_cols)
