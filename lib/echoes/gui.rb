@@ -2,7 +2,7 @@
 
 require 'pty'
 
-module Nutty
+module Echoes
   class GUI
     FONT_SIZE = 14.0
 
@@ -64,7 +64,7 @@ module Nutty
         0
       )
 
-      ObjC::MSG_VOID_1.call(@window, ObjC.sel('setTitle:'), ObjC.nsstring('Nutty'))
+      ObjC::MSG_VOID_1.call(@window, ObjC.sel('setTitle:'), ObjC.nsstring('Echoes'))
       ObjC::MSG_VOID.call(@window, ObjC.sel('center'))
     end
 
@@ -102,7 +102,7 @@ module Nutty
         [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP]
       ) { |_self, _cmd, event| gui.scroll_wheel(event) }
 
-      @view_class = ObjC.define_class('NuttyTerminalView', 'NSView', {
+      @view_class = ObjC.define_class('EchoesTerminalView', 'NSView', {
         'drawRect:'             => ['v@:{CGRect=dddd}', @draw_rect_closure],
         'keyDown:'              => ['v@:@', @key_down_closure],
         'acceptsFirstResponder' => ['c@:', @accepts_fr_closure],

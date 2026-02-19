@@ -2,10 +2,10 @@
 
 require "test_helper"
 
-class Nutty::ParserTest < Test::Unit::TestCase
+class Echoes::ParserTest < Test::Unit::TestCase
   setup do
-    @screen = Nutty::Screen.new(rows: 5, cols: 10)
-    @parser = Nutty::Parser.new(@screen)
+    @screen = Echoes::Screen.new(rows: 5, cols: 10)
+    @parser = Echoes::Parser.new(@screen)
   end
 
   def row_text(r)

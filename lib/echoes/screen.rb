@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-module Nutty
+module Echoes
   class Screen
     attr_reader :rows, :cols, :cursor, :grid, :scrollback
 

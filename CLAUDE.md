@@ -4,14 +4,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Nutty is a Ruby gem (currently a freshly scaffolded template at v0.1.0). Author: Akira Matsuda. Requires Ruby >= 3.2.0. Licensed under MIT.
+Echoes is a Ruby gem (currently a freshly scaffolded template at v0.1.0). Author: Akira Matsuda. Requires Ruby >= 3.2.0. Licensed under MIT.
 
 ## Commands
 
 - **Install dependencies:** `bin/setup`
 - **Run all tests:** `bundle exec rake test` (or just `bundle exec rake`, test is the default task)
-- **Run a single test file:** `bundle exec ruby -Ilib:test test/nutty_test.rb`
-- **Run a single test method:** `bundle exec ruby -Ilib:test test/nutty_test.rb -n test_method_name`
+- **Run a single test file:** `bundle exec ruby -Ilib:test test/echoes_test.rb`
+- **Run a single test method:** `bundle exec ruby -Ilib:test test/echoes_test.rb -n test_method_name`
 - **Interactive console:** `bin/console`
 - **Install gem locally:** `bundle exec rake install`
 
@@ -19,9 +19,9 @@ Nutty is a Ruby gem (currently a freshly scaffolded template at v0.1.0). Author:
 
 Standard Ruby gem layout:
 
-- `lib/nutty.rb` — Main module entry point (defines `Nutty` module)
-- `lib/nutty/version.rb` — Version constant
-- `sig/nutty.rbs` — RBS type signatures
+- `lib/echoes.rb` — Main module entry point (defines `Echoes` module)
+- `lib/echoes/version.rb` — Version constant
+- `sig/echoes.rbs` — RBS type signatures
 - `test/` — Tests using **test-unit** framework (not minitest, not rspec)
 
 ## Testing

@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-module Nutty
+module Echoes
   class Cell
     attr_accessor :char, :fg, :bg, :bold, :underline, :inverse, :width
 

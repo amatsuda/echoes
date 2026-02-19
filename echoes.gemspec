@@ -1,21 +1,21 @@
 # frozen_string_literal: true
 
-require_relative "lib/nutty/version"
+require_relative "lib/echoes/version"
 
 Gem::Specification.new do |spec|
-  spec.name = "nutty"
-  spec.version = Nutty::VERSION
+  spec.name = "echoes"
+  spec.version = Echoes::VERSION
   spec.authors = ["Akira Matsuda"]
   spec.email = ["ronnie@dio.jp"]
 
   spec.summary = "TODO: Write a short summary, because RubyGems requires one."
   spec.description = "TODO: Write a longer description or delete this line."
-  spec.homepage = "https://github.com/amatsuda/nutty"
+  spec.homepage = "https://github.com/amatsuda/echoes"
   spec.license = "MIT"
   spec.required_ruby_version = ">= 3.2.0"
   spec.metadata["allowed_push_host"] = "TODO: Set to your gem server 'https://example.com'"
   spec.metadata["homepage_uri"] = spec.homepage
-  spec.metadata["source_code_uri"] = "https://github.com/amatsuda/nutty"
+  spec.metadata["source_code_uri"] = "https://github.com/amatsuda/echoes"
 
   # Specify which files should be added to the gem when it is released.
   # The `git ls-files -z` loads the files in the RubyGem that have been added into git.

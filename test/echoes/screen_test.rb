@@ -2,9 +2,9 @@
 
 require "test_helper"
 
-class Nutty::ScreenTest < Test::Unit::TestCase
+class Echoes::ScreenTest < Test::Unit::TestCase
   setup do
-    @screen = Nutty::Screen.new(rows: 5, cols: 10)
+    @screen = Echoes::Screen.new(rows: 5, cols: 10)
   end
 
   test "initial state" do

@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-module Nutty
+module Echoes
   class Cursor
     attr_accessor :row, :col, :visible
 

@@ -2,7 +2,7 @@
 
 require 'fiddle'
 
-module Nutty
+module Echoes
   module ObjC
     LIBOBJC = Fiddle.dlopen('/usr/lib/libobjc.A.dylib')
     APPKIT = Fiddle.dlopen('/System/Library/Frameworks/AppKit.framework/AppKit')

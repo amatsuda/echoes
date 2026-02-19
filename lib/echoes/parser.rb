@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-module Nutty
+module Echoes
   class Parser
     def initialize(screen)
       @screen = screen

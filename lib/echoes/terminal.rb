@@ -3,7 +3,7 @@
 require 'pty'
 require 'io/console'
 
-module Nutty
+module Echoes
   class Terminal
     attr_reader :screen
 
