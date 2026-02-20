@@ -9,17 +9,18 @@ module Echoes
       @cols = cols
       @font_size = font_size
       @command = command
-      @screen = Screen.new(rows: rows, cols: cols)
-      @parser = Parser.new(@screen)
+      @tabs = []
+      @active_tab = 0
       @colors = build_color_table
       @default_fg = make_color(*Echoes.config.foreground)
       @default_bg = make_color(*Echoes.config.background)
-      @scroll_offset = 0
-      @scroll_accum = 0.0
+      @tab_bg = make_color(0.15, 0.15, 0.15)
+      @tab_active_bg = make_color(0.3, 0.3, 0.3)
+      @tab_fg = make_color(0.8, 0.8, 0.8)
     end
 
     def run
-      spawn_pty
+      create_tab
       setup_app
       create_window
       create_view
@@ -27,9 +28,31 @@ module Echoes
       start_app
     end
 
-    def spawn_pty
-      @pty_read, @pty_write, @pty_pid = PTY.spawn(@command)
-      @pty_read.winsize = [@rows, @cols]
+    def create_tab
+      @tabs << Tab.new(command: @command, rows: @rows, cols: @cols)
+      @active_tab = @tabs.size - 1
+    end
+
+    def close_tab(index)
+      return if index < 0 || index >= @tabs.size
+
+      @tabs[index].close
+      @tabs.delete_at(index)
+
+      if @tabs.empty?
+        ObjC::MSG_VOID_1.call(@app, ObjC.sel('terminate:'), Fiddle::Pointer.new(0))
+        return
+      end
+
+      @active_tab = @active_tab.clamp(0, @tabs.size - 1)
+    end
+
+    def current_tab
+      @tabs[@active_tab]
+    end
+
+    def tab_bar_height
+      @tabs.size > 1 ? @cell_height : 0.0
     end
 
     def setup_app
@@ -56,7 +79,7 @@ module Echoes
 
       ObjC::MSG_VOID_1.call(@window, ObjC.sel('setTitle:'), ObjC.nsstring(Echoes.config.window_title))
       # Enable full screen button
-      ObjC::MSG_VOID_L.call(@window, ObjC.sel('setCollectionBehavior:'), 1 << 7)  # NSWindowCollectionBehaviorFullScreenPrimary
+      ObjC::MSG_VOID_L.call(@window, ObjC.sel('setCollectionBehavior:'), 1 << 7)
       ObjC::MSG_VOID.call(@window, ObjC.sel('center'))
     end
 
@@ -94,6 +117,16 @@ module Echoes
         [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP]
       ) { |_self, _cmd, event| gui.scroll_wheel(event) }
 
+      @mouse_down_closure = Fiddle::Closure::BlockCaller.new(
+        Fiddle::TYPE_VOID,
+        [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP]
+      ) { |_self, _cmd, event| gui.mouse_down(event) }
+
+      @perform_key_equiv_closure = Fiddle::Closure::BlockCaller.new(
+        Fiddle::TYPE_INT,
+        [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP]
+      ) { |_self, _cmd, event| gui.perform_key_equivalent(event) }
+
       # Get NSView's original setFrameSize: IMP so we can call super
       nsview_cls = ObjC.cls('NSView')
       super_imp = ObjC::GetMethodImpl.call(nsview_cls, ObjC.sel('setFrameSize:'))
@@ -114,6 +147,8 @@ module Echoes
         'timerFired:'           => ['v@:@', @timer_fired_closure],
         'isFlipped'             => ['c@:', @is_flipped_closure],
         'scrollWheel:'          => ['v@:@', @scroll_wheel_closure],
+        'mouseDown:'            => ['v@:@', @mouse_down_closure],
+        'performKeyEquivalent:' => ['c@:@', @perform_key_equiv_closure],
         'setFrameSize:'         => ['v@:{CGSize=dd}', @set_frame_size_closure],
       })
 
@@ -155,22 +190,32 @@ module Echoes
       pool = ObjC::MSG_PTR.call(ObjC.cls('NSAutoreleasePool'), ObjC.sel('alloc'))
       pool = ObjC::MSG_PTR.call(pool, ObjC.sel('init'))
 
-      # Fill entire background (use large area to cover any extra pixels beyond grid)
-      ObjC::MSG_VOID.call(@default_bg, ObjC.sel('setFill'))
-      ObjC::NSRectFill.call(0.0, 0.0, @cell_width * (@cols + 1), @cell_height * (@rows + 1))
+      tab = current_tab
+      tbh = tab_bar_height
 
-      scrollback = @screen.scrollback
-      visible_start = scrollback.size - @scroll_offset
+      # Fill entire background
+      ObjC::MSG_VOID.call(@default_bg, ObjC.sel('setFill'))
+      ObjC::NSRectFill.call(0.0, 0.0, @cell_width * (@cols + 1), tbh + @cell_height * (@rows + 1))
+
+      # Draw tab bar
+      if tbh > 0
+        draw_tab_bar(tbh)
+      end
+
+      # Draw terminal grid
+      screen = tab.screen
+      scrollback = screen.scrollback
+      visible_start = scrollback.size - tab.scroll_offset
 
       @rows.times do |r|
         src = visible_start + r
         row = if src < scrollback.size
                 scrollback[src]
               else
-                @screen.grid[src - scrollback.size]
+                screen.grid[src - scrollback.size]
               end
 
-        y = r * @cell_height  # isFlipped makes y=0 at top
+        y = tbh + r * @cell_height
 
         row.each_with_index do |cell, c|
           # Skip continuation cells (second half of wide chars or multicell)
@@ -191,13 +236,11 @@ module Echoes
           end
 
           if cell.multicell.is_a?(Hash)
-            # Multicell anchor: render scaled text in the block area
             mc = cell.multicell
             x = c * @cell_width
             block_w = mc[:cols] * @cell_width
             block_h = mc[:rows] * @cell_height
 
-            # Fill background
             if bg_idx
               ObjC::MSG_VOID.call(bg_color, ObjC.sel('setFill'))
               ObjC::NSRectFill.call(x, y, block_w, block_h)
@@ -205,7 +248,6 @@ module Echoes
 
             next if cell.char == " " && !bg_idx
 
-            # Calculate scaled font size
             effective_scale = mc[:scale].to_f
             if mc[:frac_d] > 0 && mc[:frac_d] > mc[:frac_n]
               effective_scale *= (1.0 + mc[:frac_n].to_f / mc[:frac_d])
@@ -222,42 +264,36 @@ module Echoes
             ns_attrs = ObjC.nsdict(draw_attrs)
             ns_char = ObjC.nsstring(cell.char)
 
-            # Measure text for alignment
             text_w = ObjC::MSG_RET_D_1.call(ns_char, ObjC.sel('sizeWithAttributes:'), ns_attrs)
 
-            # Horizontal alignment
             draw_x = case mc[:halign]
-                      when 1 then x + block_w - text_w  # right
-                      when 2 then x + (block_w - text_w) / 2.0  # center
-                      else x  # left (default)
+                      when 1 then x + block_w - text_w
+                      when 2 then x + (block_w - text_w) / 2.0
+                      else x
                       end
 
-            # Vertical alignment
             scaled_ascender = ObjC::MSG_RET_D.call(scaled_font, ObjC.sel('ascender'))
             scaled_descender = ObjC::MSG_RET_D.call(scaled_font, ObjC.sel('descender'))
             scaled_leading = ObjC::MSG_RET_D.call(scaled_font, ObjC.sel('leading'))
             text_h = scaled_ascender - scaled_descender + scaled_leading
 
             draw_y = case mc[:valign]
-                      when 1 then y + block_h - text_h  # bottom
-                      when 2 then y + (block_h - text_h) / 2.0  # center
-                      else y  # top (default)
+                      when 1 then y + block_h - text_h
+                      when 2 then y + (block_h - text_h) / 2.0
+                      else y
                       end
 
             ObjC::MSG_VOID_PT_1.call(ns_char, ObjC.sel('drawAtPoint:withAttributes:'), draw_x, draw_y, ns_attrs)
             ObjC.release(scaled_font)
           else
-            # Normal cell rendering
             x = c * @cell_width
             cell_w = cell.width == 2 ? @cell_width * 2 : @cell_width
 
-            # Fill cell background (skip if default black)
             if bg_idx
               ObjC::MSG_VOID.call(bg_color, ObjC.sel('setFill'))
               ObjC::NSRectFill.call(x, y, cell_w, @cell_height)
             end
 
-            # Draw character
             next if cell.char == " " && !bg_idx
 
             attrs = {
@@ -275,9 +311,9 @@ module Echoes
       end
 
       # Draw cursor (only when at live view)
-      if @scroll_offset == 0 && @screen.cursor.visible
-        cx = @screen.cursor.col * @cell_width
-        cy = @screen.cursor.row * @cell_height
+      if tab.scroll_offset == 0 && screen.cursor.visible
+        cx = screen.cursor.col * @cell_width
+        cy = tbh + screen.cursor.row * @cell_height
         cursor_color = make_color(*Echoes.config.cursor_color)
         ObjC::MSG_VOID.call(cursor_color, ObjC.sel('setFill'))
         ObjC::NSRectFill.call(cx, cy, @cell_width, @cell_height)
@@ -286,73 +322,142 @@ module Echoes
       ObjC::MSG_VOID.call(pool, ObjC.sel('drain'))
     end
 
+    def perform_key_equivalent(event_ptr)
+      flags = ObjC::MSG_RET_L.call(event_ptr, ObjC.sel('modifierFlags'))
+      return 0 unless (flags & ObjC::NSEventModifierFlagCommand) != 0
+
+      chars_ns = ObjC::MSG_PTR.call(event_ptr, ObjC.sel('charactersIgnoringModifiers'))
+      chars = ObjC.to_ruby_string(chars_ns)
+      key_code = ObjC::MSG_RET_L.call(event_ptr, ObjC.sel('keyCode'))
+
+      case chars
+      when "+", "="
+        update_font(@font_size + 1.0)
+        return 1
+      when "-"
+        update_font(@font_size - 1.0) if @font_size > 4.0
+        return 1
+      when "0"
+        update_font(Echoes.config.font_size)
+        return 1
+      when "t"
+        create_tab
+        ObjC::MSG_VOID_I.call(@view, ObjC.sel('setNeedsDisplay:'), 1)
+        return 1
+      when "w"
+        close_tab(@active_tab)
+        ObjC::MSG_VOID_I.call(@view, ObjC.sel('setNeedsDisplay:'), 1)
+        return 1
+      end
+
+      # Cmd+Shift+[ / Cmd+Shift+] — use keyCode for keyboard layout independence
+      if key_code == 33  # [ key
+        @active_tab = (@active_tab - 1) % @tabs.size
+        ObjC::MSG_VOID_I.call(@view, ObjC.sel('setNeedsDisplay:'), 1)
+        return 1
+      elsif key_code == 30  # ] key
+        @active_tab = (@active_tab + 1) % @tabs.size
+        ObjC::MSG_VOID_I.call(@view, ObjC.sel('setNeedsDisplay:'), 1)
+        return 1
+      end
+
+      0
+    end
+
     def key_down(event_ptr)
-      @scroll_offset = 0
-      @scroll_accum = 0.0
+      tab = current_tab
+      tab.scroll_offset = 0
+      tab.scroll_accum = 0.0
 
       flags = ObjC::MSG_RET_L.call(event_ptr, ObjC.sel('modifierFlags'))
-
-      # Cmd+Plus / Cmd+Minus for font size
-      if (flags & ObjC::NSEventModifierFlagCommand) != 0
-        chars_ns = ObjC::MSG_PTR.call(event_ptr, ObjC.sel('charactersIgnoringModifiers'))
-        chars = ObjC.to_ruby_string(chars_ns)
-        case chars
-        when "+", "="
-          update_font(@font_size + 1.0)
-          return
-        when "-"
-          update_font(@font_size - 1.0) if @font_size > 4.0
-          return
-        when "0"
-          update_font(Echoes.config.font_size)
-          return
-        end
-      end
 
       if (flags & ObjC::NSEventModifierFlagControl) != 0
         chars_ns = ObjC::MSG_PTR.call(event_ptr, ObjC.sel('charactersIgnoringModifiers'))
         chars = ObjC.to_ruby_string(chars_ns)
         unless chars.empty?
           ctrl_char = (chars[0].ord & 0x1F).chr
-          @pty_write.write(ctrl_char)
+          tab.pty_write.write(ctrl_char)
         end
       else
         chars_ns = ObjC::MSG_PTR.call(event_ptr, ObjC.sel('characters'))
         chars = ObjC.to_ruby_string(chars_ns)
         unless chars.empty?
-          @pty_write.write(map_special_keys(chars))
+          tab.pty_write.write(map_special_keys(chars))
         end
       end
     rescue Errno::EIO, IOError
-      ObjC::MSG_VOID_1.call(@app, ObjC.sel('terminate:'), Fiddle::Pointer.new(0))
+      close_tab(@active_tab)
     end
 
     def timer_fired
-      data = @pty_read.read_nonblock(4096)
-      @parser.feed(data)
-      ObjC::MSG_VOID_I.call(@view, ObjC.sel('setNeedsDisplay:'), 1)
-    rescue IO::WaitReadable
-      # No data, skip
-    rescue EOFError, Errno::EIO
-      ObjC::MSG_VOID_1.call(@app, ObjC.sel('terminate:'), Fiddle::Pointer.new(0))
+      need_redraw = false
+
+      @tabs.each do |tab|
+        begin
+          data = tab.pty_read.read_nonblock(4096)
+          tab.parser.feed(data)
+          need_redraw = true
+        rescue IO::WaitReadable
+          # No data for this tab
+        rescue EOFError, Errno::EIO
+          # Tab's process exited — will be cleaned up
+        end
+      end
+
+      # Clean up dead tabs
+      dead = @tabs.reject(&:alive?)
+      if dead.any?
+        dead.each { |t| t.close }
+        @tabs -= dead
+        if @tabs.empty?
+          ObjC::MSG_VOID_1.call(@app, ObjC.sel('terminate:'), Fiddle::Pointer.new(0))
+          return
+        end
+        @active_tab = @active_tab.clamp(0, @tabs.size - 1)
+        need_redraw = true
+      end
+
+      ObjC::MSG_VOID_I.call(@view, ObjC.sel('setNeedsDisplay:'), 1) if need_redraw
     end
 
     def scroll_wheel(event_ptr)
+      tab = current_tab
       delta = ObjC::MSG_RET_D.call(event_ptr, ObjC.sel('deltaY'))
-      @scroll_accum += delta
+      tab.scroll_accum += delta
 
-      if @scroll_accum.abs >= 1.0
-        lines = @scroll_accum.to_i
-        @scroll_offset += lines
-        @scroll_offset = @scroll_offset.clamp(0, @screen.scrollback.size)
-        @scroll_accum -= lines
+      if tab.scroll_accum.abs >= 1.0
+        lines = tab.scroll_accum.to_i
+        tab.scroll_offset += lines
+        tab.scroll_offset = tab.scroll_offset.clamp(0, tab.screen.scrollback.size)
+        tab.scroll_accum -= lines
         ObjC::MSG_VOID_I.call(@view, ObjC.sel('setNeedsDisplay:'), 1)
       end
     end
 
+    def mouse_down(event_ptr)
+      tbh = tab_bar_height
+      return if tbh == 0
+
+      click_x, click_y_in_window = event_location(event_ptr)
+      view_height = @view_height || (tbh + @rows * @cell_height)
+      # Window coords are non-flipped (y=0 at bottom); our view is flipped (y=0 at top)
+      click_y = view_height - click_y_in_window
+
+      return unless click_y < tbh
+
+      tab_w = (@cell_width * @cols) / @tabs.size
+      clicked_tab = (click_x / tab_w).to_i.clamp(0, @tabs.size - 1)
+      @active_tab = clicked_tab
+      ObjC::MSG_VOID_I.call(@view, ObjC.sel('setNeedsDisplay:'), 1)
+    end
+
     def handle_resize(w, h)
+      @view_height = h
+      tbh = tab_bar_height
+      grid_height = h - tbh
+
       new_cols = (w / @cell_width).to_i
-      new_rows = (h / @cell_height).to_i
+      new_rows = (grid_height / @cell_height).to_i
       new_cols = 1 if new_cols < 1
       new_rows = 1 if new_rows < 1
 
@@ -360,10 +465,7 @@ module Echoes
 
       @rows = new_rows
       @cols = new_cols
-      @screen.resize(@rows, @cols)
-      @pty_read.winsize = [@rows, @cols]
-    rescue Errno::EIO, IOError
-      # PTY already closed
+      @tabs.each { |tab| tab.resize(@rows, @cols) }
     end
 
     def update_font(new_size)
@@ -374,16 +476,68 @@ module Echoes
       update_cell_metrics
 
       win_width = @cell_width * @cols
-      win_height = @cell_height * @rows
+      win_height = tab_bar_height + @cell_height * @rows
 
-      # setContentSize: takes NSSize (2 doubles on arm64)
-      msg_void_2d = ObjC.new_msg([ObjC::P, ObjC::P, ObjC::D, ObjC::D], ObjC::V)
-      msg_void_2d.call(@window, ObjC.sel('setContentSize:'), win_width, win_height)
-
+      ObjC::MSG_VOID_2D.call(@window, ObjC.sel('setContentSize:'), win_width, win_height)
       ObjC::MSG_VOID_I.call(@view, ObjC.sel('setNeedsDisplay:'), 1)
     end
 
     private
+
+    def draw_tab_bar(tbh)
+      total_w = @cell_width * @cols
+      tab_w = total_w / @tabs.size
+
+      # Tab bar background
+      ObjC::MSG_VOID.call(@tab_bg, ObjC.sel('setFill'))
+      ObjC::NSRectFill.call(0.0, 0.0, total_w + @cell_width, tbh)
+
+      @tabs.each_with_index do |tab, i|
+        x = i * tab_w
+
+        # Active tab highlight
+        if i == @active_tab
+          ObjC::MSG_VOID.call(@tab_active_bg, ObjC.sel('setFill'))
+          ObjC::NSRectFill.call(x, 0.0, tab_w, tbh)
+        end
+
+        # Tab title
+        label = tab.title
+        label = "#{label} " if label.length < 12
+        ns_label = ObjC.nsstring(label)
+        ns_attrs = ObjC.nsdict({
+          ObjC::NSFontAttributeName => @font,
+          ObjC::NSForegroundColorAttributeName => @tab_fg,
+        })
+        text_x = x + @cell_width * 0.5
+        ObjC::MSG_VOID_PT_1.call(ns_label, ObjC.sel('drawAtPoint:withAttributes:'), text_x, 0.0, ns_attrs)
+
+        # Separator line between tabs
+        if i < @tabs.size - 1
+          sep_color = make_color(0.4, 0.4, 0.4)
+          ObjC::MSG_VOID.call(sep_color, ObjC.sel('setFill'))
+          ObjC::NSRectFill.call(x + tab_w - 0.5, 2.0, 1.0, tbh - 4.0)
+        end
+      end
+    end
+
+    # Extract NSPoint (x, y) from [event locationInWindow] via NSInvocation
+    # to work around Fiddle only capturing d0 (not d1) on arm64
+    def event_location(event_ptr)
+      event_class = ObjC::MSG_PTR.call(event_ptr, ObjC.sel('class'))
+      sig = ObjC::MSG_PTR_1.call(
+        event_class, ObjC.sel('instanceMethodSignatureForSelector:'),
+        ObjC.sel('locationInWindow')
+      )
+      inv = ObjC::MSG_PTR_1.call(
+        ObjC.cls('NSInvocation'), ObjC.sel('invocationWithMethodSignature:'), sig
+      )
+      ObjC::MSG_VOID_1.call(inv, ObjC.sel('setSelector:'), ObjC.sel('locationInWindow'))
+      ObjC::MSG_VOID_1.call(inv, ObjC.sel('invokeWithTarget:'), event_ptr)
+      buf = Fiddle::Pointer.malloc(16, Fiddle::RUBY_FREE)
+      ObjC::MSG_VOID_1.call(inv, ObjC.sel('getReturnValue:'), buf)
+      buf[0, 16].unpack('dd')
+    end
 
     def create_nsfont(size)
       if (family = Echoes.config.font_family)
@@ -401,12 +555,10 @@ module Echoes
 
     def update_cell_metrics
       if Echoes.config.font_family
-        # Measure "M" with sizeWithAttributes: for proportional fonts
         attrs = ObjC.nsdict({ObjC::NSFontAttributeName => @font})
         ns_m = ObjC.nsstring("M")
         @cell_width = ObjC::MSG_RET_D_1.call(ns_m, ObjC.sel('sizeWithAttributes:'), attrs)
       else
-        # maximumAdvancement is accurate for monospaced fonts
         @cell_width = ObjC::MSG_RET_D.call(@font, ObjC.sel('maximumAdvancement'))
       end
       ascender = ObjC::MSG_RET_D.call(@font, ObjC.sel('ascender'))
