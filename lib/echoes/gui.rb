@@ -17,6 +17,9 @@ module Echoes
       @tab_bg = make_color(0.15, 0.15, 0.15)
       @tab_active_bg = make_color(0.3, 0.3, 0.3)
       @tab_fg = make_color(0.8, 0.8, 0.8)
+      @selection_color = make_color(0.2, 0.4, 0.7)
+      @selection_anchor = nil
+      @selection_end = nil
     end
 
     def run
@@ -122,6 +125,11 @@ module Echoes
         [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP]
       ) { |_self, _cmd, event| gui.mouse_down(event) }
 
+      @mouse_dragged_closure = Fiddle::Closure::BlockCaller.new(
+        Fiddle::TYPE_VOID,
+        [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP]
+      ) { |_self, _cmd, event| gui.mouse_dragged(event) }
+
       @perform_key_equiv_closure = Fiddle::Closure::BlockCaller.new(
         Fiddle::TYPE_INT,
         [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP]
@@ -148,6 +156,7 @@ module Echoes
         'isFlipped'             => ['c@:', @is_flipped_closure],
         'scrollWheel:'          => ['v@:@', @scroll_wheel_closure],
         'mouseDown:'            => ['v@:@', @mouse_down_closure],
+        'mouseDragged:'         => ['v@:@', @mouse_dragged_closure],
         'performKeyEquivalent:' => ['c@:@', @perform_key_equiv_closure],
         'setFrameSize:'         => ['v@:{CGSize=dd}', @set_frame_size_closure],
       })
@@ -235,13 +244,18 @@ module Echoes
             fg_color = @colors[fg_idx + 8]
           end
 
+          selected = cell_selected?(r, c)
+
           if cell.multicell.is_a?(Hash)
             mc = cell.multicell
             x = c * @cell_width
             block_w = mc[:cols] * @cell_width
             block_h = mc[:rows] * @cell_height
 
-            if bg_idx
+            if selected
+              ObjC::MSG_VOID.call(@selection_color, ObjC.sel('setFill'))
+              ObjC::NSRectFill.call(x, y, block_w, block_h)
+            elsif bg_idx
               ObjC::MSG_VOID.call(bg_color, ObjC.sel('setFill'))
               ObjC::NSRectFill.call(x, y, block_w, block_h)
             end
@@ -289,12 +303,15 @@ module Echoes
             x = c * @cell_width
             cell_w = cell.width == 2 ? @cell_width * 2 : @cell_width
 
-            if bg_idx
+            if selected
+              ObjC::MSG_VOID.call(@selection_color, ObjC.sel('setFill'))
+              ObjC::NSRectFill.call(x, y, cell_w, @cell_height)
+            elsif bg_idx
               ObjC::MSG_VOID.call(bg_color, ObjC.sel('setFill'))
               ObjC::NSRectFill.call(x, y, cell_w, @cell_height)
             end
 
-            next if cell.char == " " && !bg_idx
+            next if cell.char == " " && !bg_idx && !selected
 
             attrs = {
               ObjC::NSFontAttributeName => @font,
@@ -371,6 +388,9 @@ module Echoes
     end
 
     def key_down(event_ptr)
+      @selection_anchor = nil
+      @selection_end = nil
+
       tab = current_tab
       tab.scroll_offset = 0
       tab.scroll_accum = 0.0
@@ -441,19 +461,37 @@ module Echoes
     end
 
     def mouse_down(event_ptr)
-      tbh = tab_bar_height
-      return if tbh == 0
+      pos = grid_position(event_ptr)
+      click_count = ObjC::MSG_RET_L.call(event_ptr, ObjC.sel('clickCount'))
 
-      click_x, click_y_in_window = event_location(event_ptr)
-      view_height = @view_height || (tbh + @rows * @cell_height)
-      # Window coords are non-flipped (y=0 at bottom); our view is flipped (y=0 at top)
-      click_y = view_height - click_y_in_window
+      if pos.nil?
+        # Click in tab bar
+        click_x, = event_location(event_ptr)
+        tab_w = (@cell_width * @cols) / @tabs.size
+        clicked_tab = (click_x / tab_w).to_i.clamp(0, @tabs.size - 1)
+        @active_tab = clicked_tab
+      elsif click_count == 2
+        # Double-click: select word
+        row, col = pos
+        bounds = current_tab.screen.word_boundaries_at(row, col)
+        if bounds
+          @selection_anchor = [row, bounds[0]]
+          @selection_end = [row, bounds[1]]
+        end
+      else
+        # Single click: start drag selection
+        @selection_anchor = pos
+        @selection_end = nil
+      end
 
-      return unless click_y < tbh
+      ObjC::MSG_VOID_I.call(@view, ObjC.sel('setNeedsDisplay:'), 1)
+    end
 
-      tab_w = (@cell_width * @cols) / @tabs.size
-      clicked_tab = (click_x / tab_w).to_i.clamp(0, @tabs.size - 1)
-      @active_tab = clicked_tab
+    def mouse_dragged(event_ptr)
+      pos = grid_position(event_ptr)
+      return unless pos
+
+      @selection_end = pos
       ObjC::MSG_VOID_I.call(@view, ObjC.sel('setNeedsDisplay:'), 1)
     end
 
@@ -491,7 +529,10 @@ module Echoes
     private
 
     def copy_to_clipboard
-      text = current_tab.screen.to_text
+      sr, sc, er, ec = selection_range
+      return unless sr
+
+      text = current_tab.screen.selected_text(sr, sc, er, ec)
       return if text.empty?
 
       pb = ObjC::MSG_PTR.call(ObjC.cls('NSPasteboard'), ObjC.sel('generalPasteboard'))
@@ -544,6 +585,44 @@ module Echoes
           ObjC::NSRectFill.call(x + tab_w - 0.5, 2.0, 1.0, tbh - 4.0)
         end
       end
+    end
+
+    def grid_position(event_ptr)
+      x, y_in_window = event_location(event_ptr)
+      view_height = @view_height || (tab_bar_height + @rows * @cell_height)
+      y = view_height - y_in_window
+      tbh = tab_bar_height
+      grid_y = y - tbh
+      return nil if grid_y < 0
+
+      row = (grid_y / @cell_height).to_i.clamp(0, @rows - 1)
+      col = (x / @cell_width).to_i.clamp(0, @cols - 1)
+      [row, col]
+    end
+
+    def selection_range
+      return nil unless @selection_anchor && @selection_end
+
+      a_r, a_c = @selection_anchor
+      b_r, b_c = @selection_end
+      if a_r < b_r || (a_r == b_r && a_c <= b_c)
+        [a_r, a_c, b_r, b_c]
+      else
+        [b_r, b_c, a_r, a_c]
+      end
+    end
+
+    def cell_selected?(row, col)
+      range = selection_range
+      return false unless range
+
+      sr, sc, er, ec = range
+      return false if row < sr || row > er
+      return col >= sc && col <= ec if sr == er
+      return col >= sc if row == sr
+      return col <= ec if row == er
+
+      true
     end
 
     # Extract NSPoint (x, y) from [event locationInWindow] via NSInvocation

@@ -261,6 +261,31 @@ module Echoes
       @grid.map { |row| row.map { |cell| cell.char }.join.rstrip }.join("\n").rstrip
     end
 
+    def selected_text(sr, sc, er, ec)
+      lines = []
+      (sr..er).each do |r|
+        from = (r == sr) ? sc : 0
+        to = (r == er) ? ec : @cols - 1
+        lines << @grid[r][from..to].map { |cell| cell.char }.join.rstrip
+      end
+      lines.join("\n")
+    end
+
+    def word_boundaries_at(row, col)
+      return nil if row < 0 || row >= @rows || col < 0 || col >= @cols
+
+      line = @grid[row]
+      cls = char_class(line[col].char)
+
+      start_col = col
+      start_col -= 1 while start_col > 0 && char_class(line[start_col - 1].char) == cls
+
+      end_col = col
+      end_col += 1 while end_col < @cols - 1 && char_class(line[end_col + 1].char) == cls
+
+      [start_col, end_col]
+    end
+
     def reset
       @cursor = Cursor.new
       @attrs = Cell.new
@@ -311,6 +336,16 @@ module Echoes
 
     def clear_row(r)
       @grid[r].each(&:reset!)
+    end
+
+    def char_class(c)
+      if c =~ /\s/
+        :space
+      elsif c =~ /\w/
+        :word
+      else
+        :other
+      end
     end
 
     def place_multicell_block(text, mc_cols, mc_rows, scale, frac_n, frac_d, valign, halign)

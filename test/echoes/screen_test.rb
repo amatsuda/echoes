@@ -388,4 +388,99 @@ class Echoes::ScreenTest < Test::Unit::TestCase
     @screen.put_char("B")
     assert_equal("\u{3042} B", @screen.to_text)
   end
+
+  # --- selected_text ---
+
+  test "selected_text single line" do
+    "Hello World".each_char { |c| @screen.put_char(c) }
+    # row 0 is "Hello Worl" (10 cols), row 1 is "d"
+    assert_equal("llo W", @screen.selected_text(0, 2, 0, 6))
+  end
+
+  test "selected_text multi-line" do
+    "ABCDEFGHIJ".each_char { |c| @screen.put_char(c) }
+    @screen.carriage_return
+    @screen.line_feed
+    "KLMNOPQRST".each_char { |c| @screen.put_char(c) }
+    @screen.carriage_return
+    @screen.line_feed
+    "UVWXYZ".each_char { |c| @screen.put_char(c) }
+    # row 0: "ABCDEFGHIJ", row 1: "KLMNOPQRST", row 2: "UVWXYZ    "
+    text = @screen.selected_text(0, 5, 2, 3)
+    assert_equal("FGHIJ\nKLMNOPQRST\nUVWX", text)
+  end
+
+  test "selected_text single cell" do
+    "ABC".each_char { |c| @screen.put_char(c) }
+    assert_equal("B", @screen.selected_text(0, 1, 0, 1))
+  end
+
+  test "selected_text strips trailing spaces" do
+    "Hi".each_char { |c| @screen.put_char(c) }
+    @screen.carriage_return
+    @screen.line_feed
+    "Bye".each_char { |c| @screen.put_char(c) }
+    # Select from col 0 to col 9 (full lines)
+    text = @screen.selected_text(0, 0, 1, 9)
+    assert_equal("Hi\nBye", text)
+  end
+
+  test "selected_text entire row" do
+    "ABCDEFGHIJ".each_char { |c| @screen.put_char(c) }
+    assert_equal("ABCDEFGHIJ", @screen.selected_text(0, 0, 0, 9))
+  end
+
+  # --- word_boundaries_at ---
+
+  test "word_boundaries_at selects word" do
+    "foo bar".each_char { |c| @screen.put_char(c) }
+    assert_equal([0, 2], @screen.word_boundaries_at(0, 1))
+  end
+
+  test "word_boundaries_at at word start" do
+    "foo bar".each_char { |c| @screen.put_char(c) }
+    assert_equal([0, 2], @screen.word_boundaries_at(0, 0))
+  end
+
+  test "word_boundaries_at at word end" do
+    "foo bar".each_char { |c| @screen.put_char(c) }
+    assert_equal([0, 2], @screen.word_boundaries_at(0, 2))
+  end
+
+  test "word_boundaries_at second word" do
+    "foo bar".each_char { |c| @screen.put_char(c) }
+    assert_equal([4, 6], @screen.word_boundaries_at(0, 5))
+  end
+
+  test "word_boundaries_at on space between words" do
+    "foo bar".each_char { |c| @screen.put_char(c) }
+    # Single space at col 3, bounded by word chars on both sides
+    assert_equal([3, 3], @screen.word_boundaries_at(0, 3))
+  end
+
+  test "word_boundaries_at on trailing spaces" do
+    "foo".each_char { |c| @screen.put_char(c) }
+    # Cols 3-9 are all default spaces
+    assert_equal([3, 9], @screen.word_boundaries_at(0, 5))
+  end
+
+  test "word_boundaries_at with punctuation" do
+    "foo(bar)".each_char { |c| @screen.put_char(c) }
+    # "foo" is word class, "(" is other class, "bar" is word, ")" is other
+    assert_equal([0, 2], @screen.word_boundaries_at(0, 0))
+    assert_equal([3, 3], @screen.word_boundaries_at(0, 3))
+    assert_equal([4, 6], @screen.word_boundaries_at(0, 4))
+    assert_equal([7, 7], @screen.word_boundaries_at(0, 7))
+  end
+
+  test "word_boundaries_at with underscore" do
+    "foo_bar x".each_char { |c| @screen.put_char(c) }
+    # underscore is a word char
+    assert_equal([0, 6], @screen.word_boundaries_at(0, 3))
+  end
+
+  test "word_boundaries_at out of bounds" do
+    assert_nil(@screen.word_boundaries_at(-1, 0))
+    assert_nil(@screen.word_boundaries_at(0, 20))
+  end
 end
