@@ -55,6 +55,8 @@ module Echoes
       )
 
       ObjC::MSG_VOID_1.call(@window, ObjC.sel('setTitle:'), ObjC.nsstring(Echoes.config.window_title))
+      # Enable full screen button
+      ObjC::MSG_VOID_L.call(@window, ObjC.sel('setCollectionBehavior:'), 1 << 7)  # NSWindowCollectionBehaviorFullScreenPrimary
       ObjC::MSG_VOID.call(@window, ObjC.sel('center'))
     end
 
@@ -92,6 +94,19 @@ module Echoes
         [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP]
       ) { |_self, _cmd, event| gui.scroll_wheel(event) }
 
+      # Get NSView's original setFrameSize: IMP so we can call super
+      nsview_cls = ObjC.cls('NSView')
+      super_imp = ObjC::GetMethodImpl.call(nsview_cls, ObjC.sel('setFrameSize:'))
+      @super_set_frame_size = Fiddle::Function.new(super_imp, [ObjC::P, ObjC::P, ObjC::D, ObjC::D], ObjC::V)
+
+      @set_frame_size_closure = Fiddle::Closure::BlockCaller.new(
+        Fiddle::TYPE_VOID,
+        [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_DOUBLE, Fiddle::TYPE_DOUBLE]
+      ) { |_self, _cmd, w, h|
+        @super_set_frame_size.call(_self, _cmd, w, h)
+        gui.handle_resize(w, h)
+      }
+
       @view_class = ObjC.define_class('EchoesTerminalView', 'NSView', {
         'drawRect:'             => ['v@:{CGRect=dddd}', @draw_rect_closure],
         'keyDown:'              => ['v@:@', @key_down_closure],
@@ -99,6 +114,7 @@ module Echoes
         'timerFired:'           => ['v@:@', @timer_fired_closure],
         'isFlipped'             => ['c@:', @is_flipped_closure],
         'scrollWheel:'          => ['v@:@', @scroll_wheel_closure],
+        'setFrameSize:'         => ['v@:{CGSize=dd}', @set_frame_size_closure],
       })
 
       win_width = @cell_width * @cols
@@ -139,9 +155,9 @@ module Echoes
       pool = ObjC::MSG_PTR.call(ObjC.cls('NSAutoreleasePool'), ObjC.sel('alloc'))
       pool = ObjC::MSG_PTR.call(pool, ObjC.sel('init'))
 
-      # Fill entire background
+      # Fill entire background (use large area to cover any extra pixels beyond grid)
       ObjC::MSG_VOID.call(@default_bg, ObjC.sel('setFill'))
-      ObjC::NSRectFill.call(0.0, 0.0, @cell_width * @cols, @cell_height * @rows)
+      ObjC::NSRectFill.call(0.0, 0.0, @cell_width * (@cols + 1), @cell_height * (@rows + 1))
 
       scrollback = @screen.scrollback
       visible_start = scrollback.size - @scroll_offset
@@ -332,6 +348,22 @@ module Echoes
         @scroll_accum -= lines
         ObjC::MSG_VOID_I.call(@view, ObjC.sel('setNeedsDisplay:'), 1)
       end
+    end
+
+    def handle_resize(w, h)
+      new_cols = (w / @cell_width).to_i
+      new_rows = (h / @cell_height).to_i
+      new_cols = 1 if new_cols < 1
+      new_rows = 1 if new_rows < 1
+
+      return if new_rows == @rows && new_cols == @cols
+
+      @rows = new_rows
+      @cols = new_cols
+      @screen.resize(@rows, @cols)
+      @pty_read.winsize = [@rows, @cols]
+    rescue Errno::EIO, IOError
+      # PTY already closed
     end
 
     def update_font(new_size)

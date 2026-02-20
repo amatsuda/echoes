@@ -21,6 +21,7 @@ module Echoes
     AllocateClassPair = Fiddle::Function.new(LIBOBJC['objc_allocateClassPair'], [P, P, I], P)
     AddMethod = Fiddle::Function.new(LIBOBJC['class_addMethod'], [P, P, P, P], I)
     RegisterClassPair = Fiddle::Function.new(LIBOBJC['objc_registerClassPair'], [P], V)
+    GetMethodImpl = Fiddle::Function.new(LIBOBJC['class_getMethodImplementation'], [P, P], P)
 
     # objc_msgSend variants for different signatures
     def self.new_msg(args, ret)
@@ -35,6 +36,8 @@ module Echoes
     MSG_VOID_1    = new_msg([P, P, P], V)            # void = msg(id, SEL, id)
     MSG_VOID_2    = new_msg([P, P, P, P], V)         # void = msg(id, SEL, id, id)
     MSG_VOID_I    = new_msg([P, P, I], V)            # void = msg(id, SEL, int)
+    MSG_VOID_L    = new_msg([P, P, L], V)            # void = msg(id, SEL, long)
+    MSG_VOID_2D   = new_msg([P, P, D, D], V)         # void = msg(id, SEL, double, double)
     MSG_RET_D     = new_msg([P, P], D)               # double = msg(id, SEL)
     MSG_RET_D_1   = new_msg([P, P, P], D)            # double = msg(id, SEL, id)
     MSG_RET_L     = new_msg([P, P], L)               # long = msg(id, SEL)
