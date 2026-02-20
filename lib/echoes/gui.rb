@@ -348,6 +348,12 @@ module Echoes
         close_tab(@active_tab)
         ObjC::MSG_VOID_I.call(@view, ObjC.sel('setNeedsDisplay:'), 1)
         return 1
+      when "c"
+        copy_to_clipboard
+        return 1
+      when "v"
+        paste_from_clipboard
+        return 1
       end
 
       # Cmd+Shift+[ / Cmd+Shift+] — use keyCode for keyboard layout independence
@@ -483,6 +489,25 @@ module Echoes
     end
 
     private
+
+    def copy_to_clipboard
+      text = current_tab.screen.to_text
+      return if text.empty?
+
+      pb = ObjC::MSG_PTR.call(ObjC.cls('NSPasteboard'), ObjC.sel('generalPasteboard'))
+      ObjC::MSG_PTR.call(pb, ObjC.sel('clearContents'))
+      ObjC::MSG_PTR_2.call(pb, ObjC.sel('setString:forType:'), ObjC.nsstring(text), ObjC::NSPasteboardTypeString)
+    end
+
+    def paste_from_clipboard
+      pb = ObjC::MSG_PTR.call(ObjC.cls('NSPasteboard'), ObjC.sel('generalPasteboard'))
+      ns_str = ObjC::MSG_PTR_1.call(pb, ObjC.sel('stringForType:'), ObjC::NSPasteboardTypeString)
+      return if ns_str.null?
+
+      str = ObjC.to_ruby_string(ns_str)
+      current_tab.pty_write.write(str) unless str.empty?
+    rescue Errno::EIO, IOError
+    end
 
     def draw_tab_bar(tbh)
       total_w = @cell_width * @cols

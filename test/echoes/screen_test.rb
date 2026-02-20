@@ -349,4 +349,43 @@ class Echoes::ScreenTest < Test::Unit::TestCase
     assert_equal(2, @screen.grid[0][2].multicell[:cols])
     assert_equal(4, @screen.cursor.col)
   end
+
+  # --- to_text ---
+
+  test "to_text on empty screen" do
+    assert_equal("", @screen.to_text)
+  end
+
+  test "to_text with single line" do
+    "Hello".each_char { |c| @screen.put_char(c) }
+    assert_equal("Hello", @screen.to_text)
+  end
+
+  test "to_text with multiple lines" do
+    "AB".each_char { |c| @screen.put_char(c) }
+    @screen.carriage_return
+    @screen.line_feed
+    "CD".each_char { |c| @screen.put_char(c) }
+    assert_equal("AB\nCD", @screen.to_text)
+  end
+
+  test "to_text strips trailing spaces per line" do
+    @screen.put_char("A")
+    # rest of row 0 is spaces — should be stripped
+    assert_equal("A", @screen.to_text)
+  end
+
+  test "to_text strips trailing blank lines" do
+    @screen.put_char("X")
+    # rows 1-4 are all blank — should be stripped
+    text = @screen.to_text
+    assert_false(text.end_with?("\n"))
+    assert_equal("X", text)
+  end
+
+  test "to_text with wide characters" do
+    @screen.put_char("\u{3042}") # あ (width 2)
+    @screen.put_char("B")
+    assert_equal("\u{3042} B", @screen.to_text)
+  end
 end

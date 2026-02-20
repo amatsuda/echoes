@@ -257,6 +257,10 @@ module Echoes
       @cursor.visible = false
     end
 
+    def to_text
+      @grid.map { |row| row.map { |cell| cell.char }.join.rstrip }.join("\n").rstrip
+    end
+
     def reset
       @cursor = Cursor.new
       @attrs = Cell.new

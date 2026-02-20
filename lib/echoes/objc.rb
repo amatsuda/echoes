@@ -138,5 +138,6 @@ module Echoes
     NSFontAttributeName            = appkit_const('NSFontAttributeName')
     NSForegroundColorAttributeName = appkit_const('NSForegroundColorAttributeName')
     NSUnderlineStyleAttributeName  = appkit_const('NSUnderlineStyleAttributeName')
+    NSPasteboardTypeString         = appkit_const('NSPasteboardTypeString')
   end
 end
