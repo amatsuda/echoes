@@ -1,0 +1,2 @@
+#!/bin/bash
+exec "/Users/a_matsuda/.rbenv/versions/ruby-dev/bin/ruby" -I"/Users/a_matsuda/src/github.com/amatsuda/echoes/lib" "/Users/a_matsuda/src/github.com/amatsuda/echoes/exe/echoes"
