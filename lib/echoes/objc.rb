@@ -36,6 +36,7 @@ module Echoes
     MSG_VOID_2    = new_msg([P, P, P, P], V)         # void = msg(id, SEL, id, id)
     MSG_VOID_I    = new_msg([P, P, I], V)            # void = msg(id, SEL, int)
     MSG_RET_D     = new_msg([P, P], D)               # double = msg(id, SEL)
+    MSG_RET_D_1   = new_msg([P, P, P], D)            # double = msg(id, SEL, id)
     MSG_RET_L     = new_msg([P, P], L)               # long = msg(id, SEL)
 
     # CGRect as 4 doubles
@@ -50,6 +51,9 @@ module Echoes
 
     # colorWithRed:green:blue:alpha: (4 doubles)
     MSG_PTR_4D = new_msg([P, P, D, D, D, D], P)
+
+    # fontWithName:size: (id, double)
+    MSG_PTR_1D = new_msg([P, P, P, D], P)
 
     # monospacedSystemFontOfSize:weight: (2 doubles)
     MSG_PTR_2D = new_msg([P, P, D, D], P)

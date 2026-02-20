@@ -9,6 +9,7 @@ class Echoes::ConfigurationTest < Test::Unit::TestCase
   end
 
   test "default values" do
+    assert_nil(@config.font_family)
     assert_equal(14.0, @config.font_size)
     assert_equal(24, @config.rows)
     assert_equal(80, @config.cols)
@@ -22,6 +23,7 @@ class Echoes::ConfigurationTest < Test::Unit::TestCase
 
   test "DSL setters" do
     @config.instance_eval do
+      font_family 'Menlo'
       font_size 18
       rows 30
       cols 120
@@ -33,6 +35,7 @@ class Echoes::ConfigurationTest < Test::Unit::TestCase
       window_title 'My Terminal'
     end
 
+    assert_equal('Menlo', @config.font_family)
     assert_equal(18.0, @config.font_size)
     assert_equal(30, @config.rows)
     assert_equal(120, @config.cols)

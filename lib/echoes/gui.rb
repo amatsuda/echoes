@@ -38,17 +38,9 @@ module Echoes
     end
 
     def create_window
-      @font = ObjC.retain(ObjC::MSG_PTR_2D.call(
-        ObjC.cls('NSFont'), ObjC.sel('monospacedSystemFontOfSize:weight:'),
-        @font_size, 0.0
-      ))
+      @font = ObjC.retain(create_nsfont(@font_size))
 
-      # Get cell width from maximumAdvancement (returns NSSize, d0 = width on arm64)
-      @cell_width = ObjC::MSG_RET_D.call(@font, ObjC.sel('maximumAdvancement'))
-      ascender = ObjC::MSG_RET_D.call(@font, ObjC.sel('ascender'))
-      descender = ObjC::MSG_RET_D.call(@font, ObjC.sel('descender'))
-      leading = ObjC::MSG_RET_D.call(@font, ObjC.sel('leading'))
-      @cell_height = ascender - descender + leading
+      update_cell_metrics
 
       win_width = @cell_width * @cols
       win_height = @cell_height * @rows
@@ -285,16 +277,9 @@ module Echoes
     def update_font(new_size)
       @font_size = new_size
       old_font = @font
-      @font = ObjC.retain(ObjC::MSG_PTR_2D.call(
-        ObjC.cls('NSFont'), ObjC.sel('monospacedSystemFontOfSize:weight:'),
-        @font_size, 0.0
-      ))
+      @font = ObjC.retain(create_nsfont(@font_size))
       ObjC.release(old_font) if old_font
-      @cell_width = ObjC::MSG_RET_D.call(@font, ObjC.sel('maximumAdvancement'))
-      ascender = ObjC::MSG_RET_D.call(@font, ObjC.sel('ascender'))
-      descender = ObjC::MSG_RET_D.call(@font, ObjC.sel('descender'))
-      leading = ObjC::MSG_RET_D.call(@font, ObjC.sel('leading'))
-      @cell_height = ascender - descender + leading
+      update_cell_metrics
 
       win_width = @cell_width * @cols
       win_height = @cell_height * @rows
@@ -307,6 +292,36 @@ module Echoes
     end
 
     private
+
+    def create_nsfont(size)
+      if (family = Echoes.config.font_family)
+        ObjC::MSG_PTR_1D.call(
+          ObjC.cls('NSFont'), ObjC.sel('fontWithName:size:'),
+          ObjC.nsstring(family), size
+        )
+      else
+        ObjC::MSG_PTR_2D.call(
+          ObjC.cls('NSFont'), ObjC.sel('monospacedSystemFontOfSize:weight:'),
+          size, 0.0
+        )
+      end
+    end
+
+    def update_cell_metrics
+      if Echoes.config.font_family
+        # Measure "M" with sizeWithAttributes: for proportional fonts
+        attrs = ObjC.nsdict({ObjC::NSFontAttributeName => @font})
+        ns_m = ObjC.nsstring("M")
+        @cell_width = ObjC::MSG_RET_D_1.call(ns_m, ObjC.sel('sizeWithAttributes:'), attrs)
+      else
+        # maximumAdvancement is accurate for monospaced fonts
+        @cell_width = ObjC::MSG_RET_D.call(@font, ObjC.sel('maximumAdvancement'))
+      end
+      ascender = ObjC::MSG_RET_D.call(@font, ObjC.sel('ascender'))
+      descender = ObjC::MSG_RET_D.call(@font, ObjC.sel('descender'))
+      leading = ObjC::MSG_RET_D.call(@font, ObjC.sel('leading'))
+      @cell_height = ascender - descender + leading
+    end
 
     def map_special_keys(chars)
       case chars

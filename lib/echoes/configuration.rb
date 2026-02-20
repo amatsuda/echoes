@@ -11,7 +11,12 @@ module Echoes
       @foreground = [0.9, 0.9, 0.9]
       @background = [0.0, 0.0, 0.0]
       @cursor_color = [0.7, 0.7, 0.7, 0.5]
+      @font_family = nil
       @window_title = 'Echoes'
+    end
+
+    def font_family(val = nil)
+      val ? @font_family = val : @font_family
     end
 
     def font_size(val = nil)
