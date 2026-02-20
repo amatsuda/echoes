@@ -162,12 +162,40 @@ module Echoes
     def osc_string(byte)
       case byte
       when 0x07 # BEL terminates OSC
+        dispatch_osc
         @state = :ground
       when 0x1B # ESC (potential ST = ESC \)
+        dispatch_osc
         @state = :ground
       else
         @osc_string << byte
       end
+    end
+
+    def dispatch_osc
+      return unless @osc_string.start_with?('66;')
+
+      rest = @osc_string[3..]
+      meta_str, text = rest.split(';', 2)
+      return unless text
+
+      text.force_encoding('UTF-8')
+      params = {scale: 1, width: 0, frac_n: 0, frac_d: 0, valign: 0, halign: 0}
+      meta_str.split(':').each do |pair|
+        k, v = pair.split('=', 2)
+        next unless v
+        val = v.to_i
+        case k
+        when 's' then params[:scale] = val.clamp(1, 7)
+        when 'w' then params[:width] = val.clamp(0, 7)
+        when 'n' then params[:frac_n] = val.clamp(0, 15)
+        when 'd' then params[:frac_d] = val.clamp(0, 15)
+        when 'v' then params[:valign] = val.clamp(0, 2)
+        when 'h' then params[:halign] = val.clamp(0, 2)
+        end
+      end
+
+      @screen.put_multicell(text, **params)
     end
 
     def dispatch_csi(final)

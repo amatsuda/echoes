@@ -157,11 +157,9 @@ module Echoes
         y = r * @cell_height  # isFlipped makes y=0 at top
 
         row.each_with_index do |cell, c|
-          # Skip continuation cells (second half of wide chars)
+          # Skip continuation cells (second half of wide chars or multicell)
           next if cell.width == 0
-
-          x = c * @cell_width
-          cell_w = cell.width == 2 ? @cell_width * 2 : @cell_width
+          next if cell.multicell == :cont
 
           fg_idx = cell.fg
           bg_idx = cell.bg
@@ -176,25 +174,87 @@ module Echoes
             fg_color = @colors[fg_idx + 8]
           end
 
-          # Fill cell background (skip if default black)
-          if bg_idx
-            ObjC::MSG_VOID.call(bg_color, ObjC.sel('setFill'))
-            ObjC::NSRectFill.call(x, y, cell_w, @cell_height)
-          end
+          if cell.multicell.is_a?(Hash)
+            # Multicell anchor: render scaled text in the block area
+            mc = cell.multicell
+            x = c * @cell_width
+            block_w = mc[:cols] * @cell_width
+            block_h = mc[:rows] * @cell_height
 
-          # Draw character
-          next if cell.char == " " && !bg_idx
+            # Fill background
+            if bg_idx
+              ObjC::MSG_VOID.call(bg_color, ObjC.sel('setFill'))
+              ObjC::NSRectFill.call(x, y, block_w, block_h)
+            end
 
-          attrs = {
-            ObjC::NSFontAttributeName => @font,
-            ObjC::NSForegroundColorAttributeName => fg_color,
-          }
-          if cell.underline
-            attrs[ObjC::NSUnderlineStyleAttributeName] = ObjC.nsnumber_int(1)
+            next if cell.char == " " && !bg_idx
+
+            # Calculate scaled font size
+            effective_scale = mc[:scale].to_f
+            if mc[:frac_d] > 0 && mc[:frac_d] > mc[:frac_n]
+              effective_scale *= (1.0 + mc[:frac_n].to_f / mc[:frac_d])
+            end
+            scaled_font = ObjC.retain(create_nsfont(@font_size * effective_scale))
+
+            draw_attrs = {
+              ObjC::NSFontAttributeName => scaled_font,
+              ObjC::NSForegroundColorAttributeName => fg_color,
+            }
+            if cell.underline
+              draw_attrs[ObjC::NSUnderlineStyleAttributeName] = ObjC.nsnumber_int(1)
+            end
+            ns_attrs = ObjC.nsdict(draw_attrs)
+            ns_char = ObjC.nsstring(cell.char)
+
+            # Measure text for alignment
+            text_w = ObjC::MSG_RET_D_1.call(ns_char, ObjC.sel('sizeWithAttributes:'), ns_attrs)
+
+            # Horizontal alignment
+            draw_x = case mc[:halign]
+                      when 1 then x + block_w - text_w  # right
+                      when 2 then x + (block_w - text_w) / 2.0  # center
+                      else x  # left (default)
+                      end
+
+            # Vertical alignment
+            scaled_ascender = ObjC::MSG_RET_D.call(scaled_font, ObjC.sel('ascender'))
+            scaled_descender = ObjC::MSG_RET_D.call(scaled_font, ObjC.sel('descender'))
+            scaled_leading = ObjC::MSG_RET_D.call(scaled_font, ObjC.sel('leading'))
+            text_h = scaled_ascender - scaled_descender + scaled_leading
+
+            draw_y = case mc[:valign]
+                      when 1 then y + block_h - text_h  # bottom
+                      when 2 then y + (block_h - text_h) / 2.0  # center
+                      else y  # top (default)
+                      end
+
+            ObjC::MSG_VOID_PT_1.call(ns_char, ObjC.sel('drawAtPoint:withAttributes:'), draw_x, draw_y, ns_attrs)
+            ObjC.release(scaled_font)
+          else
+            # Normal cell rendering
+            x = c * @cell_width
+            cell_w = cell.width == 2 ? @cell_width * 2 : @cell_width
+
+            # Fill cell background (skip if default black)
+            if bg_idx
+              ObjC::MSG_VOID.call(bg_color, ObjC.sel('setFill'))
+              ObjC::NSRectFill.call(x, y, cell_w, @cell_height)
+            end
+
+            # Draw character
+            next if cell.char == " " && !bg_idx
+
+            attrs = {
+              ObjC::NSFontAttributeName => @font,
+              ObjC::NSForegroundColorAttributeName => fg_color,
+            }
+            if cell.underline
+              attrs[ObjC::NSUnderlineStyleAttributeName] = ObjC.nsnumber_int(1)
+            end
+            ns_attrs = ObjC.nsdict(attrs)
+            ns_char = ObjC.nsstring(cell.char)
+            ObjC::MSG_VOID_PT_1.call(ns_char, ObjC.sel('drawAtPoint:withAttributes:'), x, y, ns_attrs)
           end
-          ns_attrs = ObjC.nsdict(attrs)
-          ns_char = ObjC.nsstring(cell.char)
-          ObjC::MSG_VOID_PT_1.call(ns_char, ObjC.sel('drawAtPoint:withAttributes:'), x, y, ns_attrs)
         end
       end
 

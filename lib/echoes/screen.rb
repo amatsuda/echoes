@@ -35,6 +35,8 @@ module Echoes
         line_feed
       end
 
+      erase_multicell_at(@cursor.row, @cursor.col)
+
       cell = @grid[@cursor.row][@cursor.col]
       cell.copy_from(@attrs)
       cell.char = c
@@ -48,6 +50,22 @@ module Echoes
       end
 
       @cursor.col += w
+    end
+
+    def put_multicell(text, scale:, width:, frac_n:, frac_d:, valign:, halign:)
+      mc_rows = scale
+
+      if width > 0
+        # Explicit width: entire text in one block of scale*width cols × scale rows
+        place_multicell_block(text, scale * width, mc_rows, scale, frac_n, frac_d, valign, halign)
+      else
+        # Auto width: each grapheme gets its own block
+        text.each_grapheme_cluster do |grapheme|
+          cw = char_width(grapheme)
+          mc_cols = scale * cw
+          place_multicell_block(grapheme, mc_cols, mc_rows, scale, frac_n, frac_d, valign, halign)
+        end
+      end
     end
 
     def move_cursor(row, col)
@@ -289,6 +307,93 @@ module Echoes
 
     def clear_row(r)
       @grid[r].each(&:reset!)
+    end
+
+    def place_multicell_block(text, mc_cols, mc_rows, scale, frac_n, frac_d, valign, halign)
+      # Discard if block is larger than screen
+      return if mc_cols > @cols || mc_rows > @rows
+
+      # Wrap if it doesn't fit on current line
+      if @cursor.col + mc_cols > @cols
+        @cursor.col = 0
+        line_feed
+      end
+
+      # Scroll if block doesn't fit vertically from cursor
+      while @cursor.row + mc_rows > @rows
+        scroll_up(1)
+        @cursor.row = [@cursor.row - 1, 0].max
+      end
+
+      anchor_row = @cursor.row
+      anchor_col = @cursor.col
+
+      # Erase any existing multicells in the block area
+      mc_rows.times do |dr|
+        mc_cols.times do |dc|
+          erase_multicell_at(anchor_row + dr, anchor_col + dc)
+        end
+      end
+
+      # Set anchor cell
+      anchor = @grid[anchor_row][anchor_col]
+      anchor.copy_from(@attrs)
+      anchor.char = text
+      anchor.width = 1
+      anchor.multicell = {
+        cols: mc_cols, rows: mc_rows, scale: scale,
+        frac_n: frac_n, frac_d: frac_d, valign: valign, halign: halign
+      }
+
+      # Mark continuation cells
+      mc_rows.times do |dr|
+        mc_cols.times do |dc|
+          next if dr == 0 && dc == 0
+          cont = @grid[anchor_row + dr][anchor_col + dc]
+          cont.reset!
+          cont.multicell = :cont
+        end
+      end
+
+      @cursor.col += mc_cols
+    end
+
+    def erase_multicell_at(row, col)
+      cell = @grid[row][col]
+      return unless cell.multicell
+
+      if cell.multicell.is_a?(Hash)
+        # This is the anchor — erase the whole block
+        mc = cell.multicell
+        mc[:rows].times do |dr|
+          mc[:cols].times do |dc|
+            @grid[row + dr][col + dc].reset!
+          end
+        end
+      elsif cell.multicell == :cont
+        # Find the anchor by scanning up and left
+        find_multicell_anchor(row, col)&.then do |ar, ac|
+          erase_multicell_at(ar, ac)
+        end
+      end
+    end
+
+    def find_multicell_anchor(row, col)
+      # Scan backwards to find the anchor cell
+      (row).downto(0) do |r|
+        start_col = (r == row) ? col : @cols - 1
+        start_col.downto(0) do |c|
+          cell = @grid[r][c]
+          if cell.multicell.is_a?(Hash)
+            mc = cell.multicell
+            # Check if (row, col) falls within this anchor's block
+            if row < r + mc[:rows] && col >= c && col < c + mc[:cols]
+              return [r, c]
+            end
+          end
+        end
+      end
+      nil
     end
 
     def char_width(c)

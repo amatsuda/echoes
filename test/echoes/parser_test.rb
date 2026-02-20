@@ -191,4 +191,47 @@ class Echoes::ParserTest < Test::Unit::TestCase
     assert_equal(0, @screen.cursor.row)
     assert_equal(0, @screen.cursor.col)
   end
+
+  test "OSC 66 multicell with scale" do
+    @parser.feed("\e]66;s=2;A\x07")
+    cell = @screen.grid[0][0]
+    assert_equal("A", cell.char)
+    assert_equal({cols: 2, rows: 2, scale: 2, frac_n: 0, frac_d: 0, valign: 0, halign: 0}, cell.multicell)
+    # Continuation cells
+    assert_equal(:cont, @screen.grid[0][1].multicell)
+    assert_equal(:cont, @screen.grid[1][0].multicell)
+    assert_equal(:cont, @screen.grid[1][1].multicell)
+    # Cursor advanced by 2 cols
+    assert_equal(2, @screen.cursor.col)
+  end
+
+  test "OSC 66 multicell with explicit width" do
+    @parser.feed("\e]66;s=2:w=3;Hi\x07")
+    cell = @screen.grid[0][0]
+    assert_equal("Hi", cell.char)
+    assert_equal(6, cell.multicell[:cols])  # s*w = 2*3 = 6
+    assert_equal(2, cell.multicell[:rows])
+    assert_equal(6, @screen.cursor.col)
+  end
+
+  test "OSC 66 with ESC ST terminator" do
+    @parser.feed("\e]66;s=2;B\e\\")
+    cell = @screen.grid[0][0]
+    assert_equal("B", cell.char)
+    assert_equal(2, cell.multicell[:scale])
+  end
+
+  test "OSC 66 with alignment" do
+    @parser.feed("\e]66;s=2:v=2:h=1;X\x07")
+    mc = @screen.grid[0][0].multicell
+    assert_equal(2, mc[:valign])
+    assert_equal(1, mc[:halign])
+  end
+
+  test "OSC 66 with fractional scaling" do
+    @parser.feed("\e]66;s=2:n=1:d=4;Y\x07")
+    mc = @screen.grid[0][0].multicell
+    assert_equal(1, mc[:frac_n])
+    assert_equal(4, mc[:frac_d])
+  end
 end

@@ -2,7 +2,7 @@
 
 module Echoes
   class Cell
-    attr_accessor :char, :fg, :bg, :bold, :underline, :inverse, :width
+    attr_accessor :char, :fg, :bg, :bold, :underline, :inverse, :width, :multicell
 
     def initialize(char = " ", fg: nil, bg: nil, bold: false, underline: false, inverse: false, width: 1)
       @char = char
@@ -22,6 +22,7 @@ module Echoes
       @underline = false
       @inverse = false
       @width = 1
+      @multicell = nil
     end
 
     def copy_from(other)

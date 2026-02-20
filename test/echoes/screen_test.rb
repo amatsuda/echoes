@@ -287,4 +287,66 @@ class Echoes::ScreenTest < Test::Unit::TestCase
     assert_equal(" ", @screen.grid[0][0].char)
     assert_equal("A", @screen.grid[1][0].char)
   end
+
+  # --- Multicell (OSC 66 text sizing) ---
+
+  test "put_multicell auto width" do
+    @screen.put_multicell("A", scale: 2, width: 0, frac_n: 0, frac_d: 0, valign: 0, halign: 0)
+    anchor = @screen.grid[0][0]
+    assert_equal("A", anchor.char)
+    assert_equal(2, anchor.multicell[:cols])
+    assert_equal(2, anchor.multicell[:rows])
+    assert_equal(:cont, @screen.grid[0][1].multicell)
+    assert_equal(:cont, @screen.grid[1][0].multicell)
+    assert_equal(:cont, @screen.grid[1][1].multicell)
+    assert_equal(2, @screen.cursor.col)
+  end
+
+  test "put_multicell explicit width" do
+    @screen.put_multicell("Hi", scale: 2, width: 3, frac_n: 0, frac_d: 0, valign: 0, halign: 0)
+    anchor = @screen.grid[0][0]
+    assert_equal("Hi", anchor.char)
+    assert_equal(6, anchor.multicell[:cols])
+    assert_equal(2, anchor.multicell[:rows])
+    assert_equal(6, @screen.cursor.col)
+  end
+
+  test "put_multicell wraps when not enough columns" do
+    @screen.cursor.col = 9
+    @screen.put_multicell("A", scale: 2, width: 0, frac_n: 0, frac_d: 0, valign: 0, halign: 0)
+    # Should have wrapped to next line
+    assert_nil(@screen.grid[0][0].multicell)  # row 0 untouched
+    assert_equal("A", @screen.grid[1][0].char)
+    assert_equal(2, @screen.cursor.col)
+  end
+
+  test "put_multicell discards block larger than screen" do
+    @screen.put_multicell("A", scale: 6, width: 2, frac_n: 0, frac_d: 0, valign: 0, halign: 0)
+    # 6*2=12 cols > 10, should be discarded
+    assert_nil(@screen.grid[0][0].multicell)
+  end
+
+  test "put_char erases multicell" do
+    @screen.put_multicell("A", scale: 2, width: 0, frac_n: 0, frac_d: 0, valign: 0, halign: 0)
+    # Overwrite a cell within the multicell block
+    @screen.cursor.row = 0
+    @screen.cursor.col = 1
+    @screen.put_char("X")
+    # Entire multicell should be erased
+    assert_nil(@screen.grid[0][0].multicell)
+    assert_nil(@screen.grid[1][0].multicell)
+    assert_nil(@screen.grid[1][1].multicell)
+    # The overwritten cell has the new char
+    assert_equal("X", @screen.grid[0][1].char)
+  end
+
+  test "put_multicell multiple graphemes in auto width" do
+    @screen.put_multicell("AB", scale: 2, width: 0, frac_n: 0, frac_d: 0, valign: 0, halign: 0)
+    # A at (0,0), B at (0,2)
+    assert_equal("A", @screen.grid[0][0].char)
+    assert_equal(2, @screen.grid[0][0].multicell[:cols])
+    assert_equal("B", @screen.grid[0][2].char)
+    assert_equal(2, @screen.grid[0][2].multicell[:cols])
+    assert_equal(4, @screen.cursor.col)
+  end
 end
