@@ -104,7 +104,7 @@ module Echoes
 
     def self.to_ruby_string(nsstring_ptr)
       cstr = MSG_PTR.call(nsstring_ptr, sel('UTF8String'))
-      cstr.to_s
+      cstr.to_s.force_encoding(Encoding::UTF_8)
     end
 
     def self.nsdict(hash)
