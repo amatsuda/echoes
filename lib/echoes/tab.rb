@@ -12,6 +12,8 @@ module Echoes
       @parser = Parser.new(@screen)
       Dir.chdir(Dir.home) do
         ENV['TERM'] = 'xterm-256color'
+        ENV['LANG'] ||= 'en_US.UTF-8'
+        ENV['LC_CTYPE'] = 'UTF-8'
         @pty_read, @pty_write, @pty_pid = PTY.spawn(command)
         @pty_read.winsize = [rows, cols]
       end

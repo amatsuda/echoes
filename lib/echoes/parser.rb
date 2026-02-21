@@ -103,7 +103,7 @@ module Echoes
         @dcs_data = "".b
       when 0x5D # ]
         @state = :osc_string
-        @osc_string = +""
+        @osc_string = "".b
       when 0x37 # 7
         @screen.save_cursor
         @state = :ground

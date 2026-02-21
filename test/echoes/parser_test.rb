@@ -228,6 +228,19 @@ class Echoes::ParserTest < Test::Unit::TestCase
     assert_equal(1, mc[:halign])
   end
 
+  test "OSC 66 multicell with multibyte UTF-8 text" do
+    @parser.feed("\e]66;s=2;\u{3042}\x07")  # あ
+    cell = @screen.grid[0][0]
+    assert_equal("\u{3042}", cell.char)
+    assert_equal(2, cell.multicell[:scale])
+  end
+
+  test "OSC 66 multicell with multiple CJK characters" do
+    @parser.feed("\e]66;s=2:w=3;\u{3042}\u{3044}\x07")  # あい
+    cell = @screen.grid[0][0]
+    assert_equal("\u{3042}\u{3044}", cell.char)
+  end
+
   test "OSC 66 with fractional scaling" do
     @parser.feed("\e]66;s=2:n=1:d=4;Y\x07")
     mc = @screen.grid[0][0].multicell

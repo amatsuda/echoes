@@ -20,6 +20,7 @@ module Echoes
       @selection_color = make_color(0.2, 0.4, 0.7)
       @selection_anchor = nil
       @selection_end = nil
+      @font_cache = {}
     end
 
     def run
@@ -323,8 +324,9 @@ module Echoes
 
             next if cell.char == " " && !bg_idx && !selected
 
+            effective_font = font_for_char(cell.char)
             attrs = {
-              ObjC::NSFontAttributeName => @font,
+              ObjC::NSFontAttributeName => effective_font,
               ObjC::NSForegroundColorAttributeName => fg_color,
             }
             if cell.underline
@@ -527,6 +529,8 @@ module Echoes
       old_font = @font
       @font = ObjC.retain(create_nsfont(@font_size))
       ObjC.release(old_font) if old_font
+      @font_cache.each_value { |f| ObjC.release(f) unless f.to_i == old_font&.to_i }
+      @font_cache = {}
       update_cell_metrics
 
       win_width = @cell_width * @cols
@@ -718,6 +722,23 @@ module Echoes
         tab.screen.cell_pixel_width = @cell_width
         tab.screen.cell_pixel_height = @cell_height
       end
+    end
+
+    def font_for_char(char)
+      return @font if char.ascii_only?
+
+      cached = @font_cache[char]
+      return cached if cached
+
+      ns_str = ObjC.nsstring(char)
+      ns_len = ObjC::MSG_RET_L.call(ns_str, ObjC.sel('length'))
+      fallback = ObjC::CTFontCreateForString.call(@font, ns_str, 0, ns_len)
+      if fallback.to_i == @font.to_i
+        @font_cache[char] = @font
+      else
+        @font_cache[char] = ObjC.retain(fallback)
+      end
+      @font_cache[char]
     end
 
     def map_special_keys(chars)

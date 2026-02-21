@@ -157,5 +157,12 @@ module Echoes
 
     # kCGImageAlphaPremultipliedLast | kCGBitmapByteOrderDefault
     KCGImageAlphaPremultipliedLast = 1
+
+    # CoreText framework
+    CORETEXT = Fiddle.dlopen('/System/Library/Frameworks/CoreText.framework/CoreText')
+
+    # CTFontCreateForString(CTFontRef currentFont, CFStringRef string, CFRange range) -> CTFontRef
+    # CFRange is {CFIndex, CFIndex} = {long, long}, decomposed into 2 GPR args on arm64
+    CTFontCreateForString = Fiddle::Function.new(CORETEXT['CTFontCreateForString'], [P, P, L, L], P)
   end
 end
