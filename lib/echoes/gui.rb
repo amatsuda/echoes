@@ -279,6 +279,11 @@ module Echoes
               effective_scale *= (1.0 + mc[:frac_n].to_f / mc[:frac_d])
             end
             scaled_font = ObjC.retain(create_nsfont(@font_size * effective_scale))
+            if cell.bold
+              regular = scaled_font
+              scaled_font = ObjC.retain(create_bold_nsfont(regular))
+              ObjC.release(regular)
+            end
 
             draw_attrs = {
               ObjC::NSFontAttributeName => scaled_font,
