@@ -3,6 +3,7 @@
 module Echoes
   class Screen
     attr_reader :rows, :cols, :cursor, :grid, :scrollback
+    attr_accessor :cell_pixel_width, :cell_pixel_height
 
     def self.scrollback_limit
       Echoes.config.scrollback_limit
@@ -18,6 +19,8 @@ module Echoes
       @scroll_bottom = rows - 1
       @saved_cursor = nil
       @scrollback = []
+      @cell_pixel_width = 8.0
+      @cell_pixel_height = 16.0
     end
 
     def put_char(c)
@@ -66,6 +69,62 @@ module Echoes
           place_multicell_block(grapheme, mc_cols, mc_rows, scale, frac_n, frac_d, valign, halign)
         end
       end
+    end
+
+    def put_sixel(data, params)
+      decoder = SixelDecoder.new(params).decode(data)
+      return if decoder.width == 0 || decoder.height == 0
+
+      mc_cols = (decoder.width / @cell_pixel_width).ceil
+      mc_rows = (decoder.height / @cell_pixel_height).ceil
+
+      return if mc_cols > @cols || mc_rows > @rows
+
+      # Wrap if it doesn't fit on current line
+      if @cursor.col + mc_cols > @cols
+        @cursor.col = 0
+        line_feed
+      end
+
+      # Scroll if block doesn't fit vertically
+      while @cursor.row + mc_rows > @rows
+        scroll_up(1)
+        @cursor.row = [@cursor.row - 1, 0].max
+      end
+
+      anchor_row = @cursor.row
+      anchor_col = @cursor.col
+
+      # Erase existing cells in the block area
+      mc_rows.times do |dr|
+        mc_cols.times do |dc|
+          erase_multicell_at(anchor_row + dr, anchor_col + dc)
+        end
+      end
+
+      # Set anchor cell with sixel data
+      anchor = @grid[anchor_row][anchor_col]
+      anchor.reset!
+      anchor.char = " "
+      anchor.width = 1
+      anchor.multicell = {
+        cols: mc_cols, rows: mc_rows, scale: 1,
+        frac_n: 0, frac_d: 0, valign: 0, halign: 0,
+        sixel: { width: decoder.width, height: decoder.height, rgba: decoder.to_rgba }
+      }
+
+      # Mark continuation cells
+      mc_rows.times do |dr|
+        mc_cols.times do |dc|
+          next if dr == 0 && dc == 0
+          cont = @grid[anchor_row + dr][anchor_col + dc]
+          cont.reset!
+          cont.multicell = :cont
+        end
+      end
+
+      @cursor.col = 0
+      @cursor.row = [anchor_row + mc_rows, @rows - 1].min
     end
 
     def move_cursor(row, col)
@@ -171,7 +230,7 @@ module Echoes
       n.times do
         if @scroll_top == 0
           row = @grid[@scroll_top]
-          @scrollback << row.map { |cell| c = Cell.new; c.copy_from(cell); c.width = cell.width; c }
+          @scrollback << row.map { |cell| c = Cell.new; c.copy_from(cell); c.width = cell.width; c.multicell = cell.multicell; c }
           @scrollback.shift if @scrollback.size > self.class.scrollback_limit
         end
         @grid.delete_at(@scroll_top)

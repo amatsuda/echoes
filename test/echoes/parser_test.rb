@@ -234,4 +234,52 @@ class Echoes::ParserTest < Test::Unit::TestCase
     assert_equal(1, mc[:frac_n])
     assert_equal(4, mc[:frac_d])
   end
+
+  test "DCS sixel sequence creates multicell with sixel data" do
+    # ESC P q [sixel] ESC \
+    # '~' = all 6 bits set, 1 pixel wide, 6 pixels tall
+    @screen.cell_pixel_width = 8.0
+    @screen.cell_pixel_height = 8.0
+    @parser.feed("\ePq~\e\\")
+    cell = @screen.grid[0][0]
+    assert_not_nil(cell.multicell)
+    assert_true(cell.multicell.is_a?(Hash))
+    assert_not_nil(cell.multicell[:sixel])
+    assert_equal(1, cell.multicell[:sixel][:width])
+    assert_equal(6, cell.multicell[:sixel][:height])
+  end
+
+  test "DCS sixel with params" do
+    @screen.cell_pixel_width = 8.0
+    @screen.cell_pixel_height = 8.0
+    @parser.feed("\eP0;1q~\e\\")
+    cell = @screen.grid[0][0]
+    assert_not_nil(cell.multicell)
+    assert_not_nil(cell.multicell[:sixel])
+  end
+
+  test "DCS sixel positions cursor after image" do
+    @screen.cell_pixel_width = 8.0
+    @screen.cell_pixel_height = 8.0
+    @parser.feed("\ePq!16~\e\\")
+    # 16px wide / 8px cell = 2 cols; 6px tall / 8px cell = 1 row
+    # Cursor should be at beginning of next row after image
+    assert_equal(0, @screen.cursor.col)
+  end
+
+  test "text after DCS sixel works normally" do
+    @screen.cell_pixel_width = 8.0
+    @screen.cell_pixel_height = 8.0
+    @parser.feed("\ePq~\e\\Hello")
+    # After sixel, cursor moves down; "Hello" should appear on subsequent row
+    found = false
+    @screen.grid.each do |r|
+      text = r.map(&:char).join.rstrip
+      if text.include?("Hello")
+        found = true
+        break
+      end
+    end
+    assert_true(found, "Expected 'Hello' to appear in grid after sixel")
+  end
 end

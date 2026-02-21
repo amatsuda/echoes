@@ -32,7 +32,12 @@ module Echoes
     end
 
     def create_tab
-      @tabs << Tab.new(command: @command, rows: @rows, cols: @cols)
+      tab = Tab.new(command: @command, rows: @rows, cols: @cols)
+      if @cell_width && @cell_height
+        tab.screen.cell_pixel_width = @cell_width
+        tab.screen.cell_pixel_height = @cell_height
+      end
+      @tabs << tab
       @active_tab = @tabs.size - 1
     end
 
@@ -258,6 +263,11 @@ module Echoes
             elsif bg_idx
               ObjC::MSG_VOID.call(bg_color, ObjC.sel('setFill'))
               ObjC::NSRectFill.call(x, y, block_w, block_h)
+            end
+
+            if mc[:sixel]
+              draw_sixel_image(mc[:sixel], x, y, block_w, block_h)
+              next
             end
 
             next if cell.char == " " && !bg_idx
@@ -550,6 +560,39 @@ module Echoes
     rescue Errno::EIO, IOError
     end
 
+    def draw_sixel_image(sixel, x, y, draw_w, draw_h)
+      # Cache CGImage on first render
+      unless sixel[:cg_image]
+        rgba = sixel[:rgba]
+        w = sixel[:width]
+        h = sixel[:height]
+
+        rgba_ptr = Fiddle::Pointer.to_ptr(rgba)
+        color_space = ObjC::CGColorSpaceCreateDeviceRGB.call
+        ctx = ObjC::CGBitmapContextCreate.call(
+          rgba_ptr, w, h, 8, w * 4, color_space,
+          ObjC::KCGImageAlphaPremultipliedLast
+        )
+        sixel[:cg_image] = ObjC::CGBitmapContextCreateImage.call(ctx)
+        ObjC::CGContextRelease.call(ctx)
+        ObjC::CGColorSpaceRelease.call(color_space)
+      end
+
+      cg_image = sixel[:cg_image]
+      return if cg_image.null?
+
+      # Get current CGContext
+      ns_ctx = ObjC::MSG_PTR.call(ObjC.cls('NSGraphicsContext'), ObjC.sel('currentContext'))
+      cg_ctx = ObjC::MSG_PTR.call(ns_ctx, ObjC.sel('CGContext'))
+
+      # Draw with flipping (view is flipped, but CGContext draws bottom-up)
+      ObjC::CGContextSaveGState.call(cg_ctx)
+      ObjC::CGContextTranslateCTM.call(cg_ctx, x, y + draw_h)
+      ObjC::CGContextScaleCTM.call(cg_ctx, 1.0, -1.0)
+      ObjC::CGContextDrawImage.call(cg_ctx, 0.0, 0.0, draw_w, draw_h, cg_image)
+      ObjC::CGContextRestoreGState.call(cg_ctx)
+    end
+
     def draw_tab_bar(tbh)
       total_w = @cell_width * @cols
       tab_w = total_w / @tabs.size
@@ -669,6 +712,12 @@ module Echoes
       descender = ObjC::MSG_RET_D.call(@font, ObjC.sel('descender'))
       leading = ObjC::MSG_RET_D.call(@font, ObjC.sel('leading'))
       @cell_height = ascender - descender + leading
+
+      # Propagate cell metrics to all screens for sixel sizing
+      @tabs.each do |tab|
+        tab.screen.cell_pixel_width = @cell_width
+        tab.screen.cell_pixel_height = @cell_height
+      end
     end
 
     def map_special_keys(chars)

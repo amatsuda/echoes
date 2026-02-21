@@ -9,6 +9,9 @@ module Echoes
       @current_param = +""
       @private_flag = false
       @osc_string = +""
+      @dcs_params = []
+      @dcs_current_param = +""
+      @dcs_data = "".b
       @utf8_buf = "".b
       @utf8_remaining = 0
     end
@@ -47,6 +50,12 @@ module Echoes
         csi_param(byte)
       when :osc_string
         osc_string(byte)
+      when :dcs_entry
+        dcs_entry(byte)
+      when :dcs_param
+        dcs_param(byte)
+      when :dcs_passthrough
+        dcs_passthrough(byte)
       end
     end
 
@@ -87,6 +96,11 @@ module Echoes
         @params = []
         @current_param = +""
         @private_flag = false
+      when 0x50 # P (DCS)
+        @state = :dcs_entry
+        @dcs_params = []
+        @dcs_current_param = +""
+        @dcs_data = "".b
       when 0x5D # ]
         @state = :osc_string
         @osc_string = +""
@@ -170,6 +184,56 @@ module Echoes
       else
         @osc_string << byte
       end
+    end
+
+    def dcs_entry(byte)
+      case byte
+      when 0x30..0x39
+        @dcs_current_param << byte.chr
+        @state = :dcs_param
+      when 0x3B
+        @dcs_params << @dcs_current_param
+        @dcs_current_param = +""
+        @state = :dcs_param
+      when 0x71 # 'q' => sixel
+        @dcs_params << @dcs_current_param unless @dcs_current_param.empty?
+        @state = :dcs_passthrough
+      when 0x40..0x7E
+        @state = :ground
+      when 0x1B
+        @state = :escape
+      end
+    end
+
+    def dcs_param(byte)
+      case byte
+      when 0x30..0x39
+        @dcs_current_param << byte.chr
+      when 0x3B
+        @dcs_params << @dcs_current_param
+        @dcs_current_param = +""
+      when 0x71 # 'q'
+        @dcs_params << @dcs_current_param unless @dcs_current_param.empty?
+        @state = :dcs_passthrough
+      when 0x40..0x7E
+        @state = :ground
+      when 0x1B
+        @state = :escape
+      end
+    end
+
+    def dcs_passthrough(byte)
+      if byte == 0x1B
+        dispatch_dcs
+        @state = :escape
+      else
+        @dcs_data << byte
+      end
+    end
+
+    def dispatch_dcs
+      params = @dcs_params.map { |s| s.empty? ? 0 : s.to_i }
+      @screen.put_sixel(@dcs_data, params)
     end
 
     def dispatch_osc

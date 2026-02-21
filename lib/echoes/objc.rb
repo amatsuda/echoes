@@ -139,5 +139,23 @@ module Echoes
     NSForegroundColorAttributeName = appkit_const('NSForegroundColorAttributeName')
     NSUnderlineStyleAttributeName  = appkit_const('NSUnderlineStyleAttributeName')
     NSPasteboardTypeString         = appkit_const('NSPasteboardTypeString')
+
+    # CoreGraphics framework
+    COREGRAPHICS = Fiddle.dlopen('/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics')
+
+    CGColorSpaceCreateDeviceRGB = Fiddle::Function.new(COREGRAPHICS['CGColorSpaceCreateDeviceRGB'], [], P)
+    CGColorSpaceRelease         = Fiddle::Function.new(COREGRAPHICS['CGColorSpaceRelease'], [P], V)
+    CGBitmapContextCreate       = Fiddle::Function.new(COREGRAPHICS['CGBitmapContextCreate'], [P, L, L, L, L, P, I], P)
+    CGBitmapContextCreateImage  = Fiddle::Function.new(COREGRAPHICS['CGBitmapContextCreateImage'], [P], P)
+    CGContextDrawImage          = Fiddle::Function.new(COREGRAPHICS['CGContextDrawImage'], [P, D, D, D, D, P], V)
+    CGContextSaveGState         = Fiddle::Function.new(COREGRAPHICS['CGContextSaveGState'], [P], V)
+    CGContextRestoreGState      = Fiddle::Function.new(COREGRAPHICS['CGContextRestoreGState'], [P], V)
+    CGContextTranslateCTM       = Fiddle::Function.new(COREGRAPHICS['CGContextTranslateCTM'], [P, D, D], V)
+    CGContextScaleCTM           = Fiddle::Function.new(COREGRAPHICS['CGContextScaleCTM'], [P, D, D], V)
+    CGImageRelease              = Fiddle::Function.new(COREGRAPHICS['CGImageRelease'], [P], V)
+    CGContextRelease            = Fiddle::Function.new(COREGRAPHICS['CGContextRelease'], [P], V)
+
+    # kCGImageAlphaPremultipliedLast | kCGBitmapByteOrderDefault
+    KCGImageAlphaPremultipliedLast = 1
   end
 end
