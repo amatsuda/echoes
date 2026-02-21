@@ -34,6 +34,7 @@ module Echoes
 
     def create_tab
       tab = Tab.new(command: @command, rows: @rows, cols: @cols)
+      tab.title = "Tab #{@tabs.size + 1}"
       if @cell_width && @cell_height
         tab.screen.cell_pixel_width = @cell_width
         tab.screen.cell_pixel_height = @cell_height
@@ -62,6 +63,14 @@ module Echoes
 
     def tab_bar_height
       @tabs.size > 1 ? @cell_height : 0.0
+    end
+
+    def grid_y_offset
+      Echoes.config.tab_position == :bottom ? 0.0 : tab_bar_height
+    end
+
+    def tab_bar_y
+      Echoes.config.tab_position == :bottom ? @cell_height * @rows : 0.0
     end
 
     def setup_app
@@ -208,6 +217,7 @@ module Echoes
 
       tab = current_tab
       tbh = tab_bar_height
+      gy_off = grid_y_offset
 
       # Fill entire background
       ObjC::MSG_VOID.call(@default_bg, ObjC.sel('setFill'))
@@ -215,7 +225,7 @@ module Echoes
 
       # Draw tab bar
       if tbh > 0
-        draw_tab_bar(tbh)
+        draw_tab_bar(tbh, tab_bar_y)
       end
 
       # Draw terminal grid
@@ -231,7 +241,7 @@ module Echoes
                 screen.grid[src - scrollback.size]
               end
 
-        y = tbh + r * @cell_height
+        y = gy_off + r * @cell_height
 
         row.each_with_index do |cell, c|
           # Skip continuation cells (second half of wide chars or multicell)
@@ -348,7 +358,7 @@ module Echoes
       # Draw cursor (only when at live view)
       if tab.scroll_offset == 0 && screen.cursor.visible
         cx = screen.cursor.col * @cell_width
-        cy = tbh + screen.cursor.row * @cell_height
+        cy = gy_off + screen.cursor.row * @cell_height
         cursor_color = make_color(*Echoes.config.cursor_color)
         ObjC::MSG_VOID.call(cursor_color, ObjC.sel('setFill'))
         ObjC::NSRectFill.call(cx, cy, @cell_width, @cell_height)
@@ -606,13 +616,13 @@ module Echoes
       ObjC::CGContextRestoreGState.call(cg_ctx)
     end
 
-    def draw_tab_bar(tbh)
+    def draw_tab_bar(tbh, ty)
       total_w = @cell_width * @cols
       tab_w = total_w / @tabs.size
 
       # Tab bar background
       ObjC::MSG_VOID.call(@tab_bg, ObjC.sel('setFill'))
-      ObjC::NSRectFill.call(0.0, 0.0, total_w + @cell_width, tbh)
+      ObjC::NSRectFill.call(0.0, ty, total_w + @cell_width, tbh)
 
       @tabs.each_with_index do |tab, i|
         x = i * tab_w
@@ -620,7 +630,7 @@ module Echoes
         # Active tab highlight
         if i == @active_tab
           ObjC::MSG_VOID.call(@tab_active_bg, ObjC.sel('setFill'))
-          ObjC::NSRectFill.call(x, 0.0, tab_w, tbh)
+          ObjC::NSRectFill.call(x, ty, tab_w, tbh)
         end
 
         # Tab title
@@ -632,13 +642,13 @@ module Echoes
           ObjC::NSForegroundColorAttributeName => @tab_fg,
         })
         text_x = x + @cell_width * 0.5
-        ObjC::MSG_VOID_PT_1.call(ns_label, ObjC.sel('drawAtPoint:withAttributes:'), text_x, 0.0, ns_attrs)
+        ObjC::MSG_VOID_PT_1.call(ns_label, ObjC.sel('drawAtPoint:withAttributes:'), text_x, ty, ns_attrs)
 
         # Separator line between tabs
         if i < @tabs.size - 1
           sep_color = make_color(0.4, 0.4, 0.4)
           ObjC::MSG_VOID.call(sep_color, ObjC.sel('setFill'))
-          ObjC::NSRectFill.call(x + tab_w - 0.5, 2.0, 1.0, tbh - 4.0)
+          ObjC::NSRectFill.call(x + tab_w - 0.5, ty + 2.0, 1.0, tbh - 4.0)
         end
       end
     end
@@ -647,9 +657,9 @@ module Echoes
       x, y_in_window = event_location(event_ptr)
       view_height = @view_height || (tab_bar_height + @rows * @cell_height)
       y = view_height - y_in_window
-      tbh = tab_bar_height
-      grid_y = y - tbh
-      return nil if grid_y < 0
+      gy_off = grid_y_offset
+      grid_y = y - gy_off
+      return nil if grid_y < 0 || grid_y >= @rows * @cell_height
 
       row = (grid_y / @cell_height).to_i.clamp(0, @rows - 1)
       col = (x / @cell_width).to_i.clamp(0, @cols - 1)

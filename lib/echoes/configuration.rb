@@ -13,6 +13,7 @@ module Echoes
       @cursor_color = [0.7, 0.7, 0.7, 0.5]
       @font_family = nil
       @window_title = 'Echoes'
+      @tab_position = :top
     end
 
     def font_family(val = nil)
@@ -53,6 +54,10 @@ module Echoes
 
     def window_title(val = nil)
       val ? @window_title = val : @window_title
+    end
+
+    def tab_position(val = nil)
+      val ? @tab_position = val.to_sym : @tab_position
     end
 
     private
