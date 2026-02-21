@@ -71,6 +71,7 @@ module Echoes
 
     def create_window
       @font = ObjC.retain(create_nsfont(@font_size))
+      @bold_font = ObjC.retain(create_bold_nsfont(@font))
 
       update_cell_metrics
 
@@ -324,9 +325,9 @@ module Echoes
 
             next if cell.char == " " && !bg_idx && !selected
 
-            effective_font = font_for_char(cell.char)
+            base_font = cell.bold ? @bold_font : font_for_char(cell.char)
             attrs = {
-              ObjC::NSFontAttributeName => effective_font,
+              ObjC::NSFontAttributeName => base_font,
               ObjC::NSForegroundColorAttributeName => fg_color,
             }
             if cell.underline
@@ -527,8 +528,11 @@ module Echoes
     def update_font(new_size)
       @font_size = new_size
       old_font = @font
+      old_bold = @bold_font
       @font = ObjC.retain(create_nsfont(@font_size))
+      @bold_font = ObjC.retain(create_bold_nsfont(@font))
       ObjC.release(old_font) if old_font
+      ObjC.release(old_bold) if old_bold
       @font_cache.each_value { |f| ObjC.release(f) unless f.to_i == old_font&.to_i }
       @font_cache = {}
       update_cell_metrics
@@ -688,6 +692,11 @@ module Echoes
       buf = Fiddle::Pointer.malloc(16, Fiddle::RUBY_FREE)
       ObjC::MSG_VOID_1.call(inv, ObjC.sel('getReturnValue:'), buf)
       buf[0, 16].unpack('dd')
+    end
+
+    def create_bold_nsfont(font)
+      fm = ObjC::MSG_PTR.call(ObjC.cls('NSFontManager'), ObjC.sel('sharedFontManager'))
+      ObjC::MSG_PTR_1L.call(fm, ObjC.sel('convertFont:toHaveTrait:'), font, 0x2)  # NSBoldFontMask
     end
 
     def create_nsfont(size)
