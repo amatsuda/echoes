@@ -825,4 +825,13 @@ class Echoes::ParserTest < Test::Unit::TestCase
     # Screen content should be unaffected
     assert_equal(0, @screen.cursor.col)
   end
+
+  test "CSI Z backward tab" do
+    @parser.feed("\e[10G")  # cursor to col 9 (1-indexed 10)
+    assert_equal(9, @screen.cursor.col)
+    @parser.feed("\e[Z")    # backward tab once → col 8
+    assert_equal(8, @screen.cursor.col)
+    @parser.feed("\e[Z")    # backward tab again → col 0
+    assert_equal(0, @screen.cursor.col)
+  end
 end
