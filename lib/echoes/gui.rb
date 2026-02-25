@@ -436,7 +436,7 @@ module Echoes
         chars_ns = ObjC::MSG_PTR.call(event_ptr, ObjC.sel('characters'))
         chars = ObjC.to_ruby_string(chars_ns)
         unless chars.empty?
-          tab.pty_write.write(map_special_keys(chars))
+          tab.pty_write.write(map_special_keys(chars, tab.screen.application_cursor_keys?))
         end
       end
     rescue Errno::EIO, IOError
@@ -765,12 +765,12 @@ module Echoes
       @font_cache[char]
     end
 
-    def map_special_keys(chars)
+    def map_special_keys(chars, app_cursor = false)
       case chars
-      when "\u{F700}" then "\e[A"    # Up
-      when "\u{F701}" then "\e[B"    # Down
-      when "\u{F702}" then "\e[D"    # Left
-      when "\u{F703}" then "\e[C"    # Right
+      when "\u{F700}" then app_cursor ? "\eOA" : "\e[A"    # Up
+      when "\u{F701}" then app_cursor ? "\eOB" : "\e[B"    # Down
+      when "\u{F702}" then app_cursor ? "\eOD" : "\e[D"    # Left
+      when "\u{F703}" then app_cursor ? "\eOC" : "\e[C"    # Right
       when "\u{F728}" then "\e[3~"   # Delete
       when "\u{F729}" then "\e[H"    # Home
       when "\u{F72B}" then "\e[F"    # End

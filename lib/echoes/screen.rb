@@ -21,6 +21,7 @@ module Echoes
       @scrollback = []
       @cell_pixel_width = 8.0
       @cell_pixel_height = 16.0
+      @application_cursor_keys = false
       @using_alt_screen = false
       @main_grid = nil
       @main_cursor = nil
@@ -313,6 +314,14 @@ module Echoes
       if @saved_cursor
         @cursor.row, @cursor.col = @saved_cursor
       end
+    end
+
+    def application_cursor_keys?
+      @application_cursor_keys
+    end
+
+    def application_cursor_keys=(val)
+      @application_cursor_keys = val
     end
 
     def using_alt_screen?

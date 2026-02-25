@@ -294,6 +294,7 @@ module Echoes
 
       params.each do |p|
         case p
+        when 1 then @screen.application_cursor_keys = true
         when 25 then @screen.show_cursor
         when 1049
           @screen.save_cursor
@@ -309,6 +310,7 @@ module Echoes
 
       params.each do |p|
         case p
+        when 1 then @screen.application_cursor_keys = false
         when 25 then @screen.hide_cursor
         when 1049
           @screen.switch_to_main_screen

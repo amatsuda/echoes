@@ -280,6 +280,17 @@ class Echoes::ParserTest < Test::Unit::TestCase
     assert_equal(0, @screen.cursor.col)
   end
 
+  test "DECCKM ?1h enables application cursor keys" do
+    @parser.feed("\e[?1h")
+    assert_true(@screen.application_cursor_keys?)
+  end
+
+  test "DECCKM ?1l disables application cursor keys" do
+    @parser.feed("\e[?1h")
+    @parser.feed("\e[?1l")
+    assert_false(@screen.application_cursor_keys?)
+  end
+
   test "alt screen ?1049h switches to alt screen and saves cursor" do
     @parser.feed("Hello")
     @parser.feed("\e[2;4H")  # cursor at row 1, col 3
