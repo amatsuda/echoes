@@ -29,6 +29,7 @@ module Echoes
       @origin_mode = false
       @insert_mode = false
       @application_keypad = false
+      @cursor_style = 0  # 0=default, 1=blinking block, 2=steady block, 3=blinking underline, 4=steady underline, 5=blinking bar, 6=steady bar
       @using_alt_screen = false
       @charset_g0 = :ascii  # :ascii or :dec_special
       @charset_g1 = :ascii
@@ -446,7 +447,7 @@ module Echoes
       @auto_wrap = val
     end
 
-    attr_accessor :mouse_tracking, :mouse_encoding, :insert_mode, :active_charset, :application_keypad
+    attr_accessor :mouse_tracking, :mouse_encoding, :insert_mode, :active_charset, :application_keypad, :cursor_style
 
     def designate_charset(g, charset)
       case g
@@ -561,6 +562,7 @@ module Echoes
       @charset_g0 = :ascii
       @charset_g1 = :ascii
       @active_charset = 0
+      @cursor_style = 0
       @tab_stops = default_tab_stops
       @scroll_top = 0
       @scroll_bottom = @rows - 1

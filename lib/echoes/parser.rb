@@ -342,6 +342,7 @@ module Echoes
       when 'c' then dispatch_da(params)
       when 'n' then dispatch_dsr(params)
       when 'p' then @screen.soft_reset if @csi_intermediate == '!'
+      when 'q' then @screen.cursor_style = (params[0] || 0) if @csi_intermediate == ' '
       when 'h' then dispatch_mode_set(params)
       when 'l' then dispatch_mode_reset(params)
       end

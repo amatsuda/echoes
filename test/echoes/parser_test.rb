@@ -593,6 +593,22 @@ class Echoes::ParserTest < Test::Unit::TestCase
     assert_equal(4, @screen.cursor.col)
   end
 
+  test "DECSCUSR CSI 2 SP q sets steady block cursor" do
+    @parser.feed("\e[2 q")
+    assert_equal(2, @screen.cursor_style)
+  end
+
+  test "DECSCUSR CSI 5 SP q sets blinking bar cursor" do
+    @parser.feed("\e[5 q")
+    assert_equal(5, @screen.cursor_style)
+  end
+
+  test "DECSCUSR CSI 0 SP q resets to default" do
+    @parser.feed("\e[5 q")
+    @parser.feed("\e[0 q")
+    assert_equal(0, @screen.cursor_style)
+  end
+
   test "NEL ESC E moves to beginning of next line" do
     @parser.feed("\e[1;5H")  # cursor at row 0, col 4
     @parser.feed("\eE")

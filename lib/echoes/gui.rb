@@ -21,6 +21,8 @@ module Echoes
       @selection_anchor = nil
       @selection_end = nil
       @font_cache = {}
+      @cursor_blink_on = true
+      @cursor_blink_counter = 0
     end
 
     def run
@@ -374,11 +376,22 @@ module Echoes
 
       # Draw cursor (only when at live view)
       if tab.scroll_offset == 0 && screen.cursor.visible
-        cx = screen.cursor.col * @cell_width
-        cy = gy_off + screen.cursor.row * @cell_height
-        cursor_color = make_color(*Echoes.config.cursor_color)
-        ObjC::MSG_VOID.call(cursor_color, ObjC.sel('setFill'))
-        ObjC::NSRectFill.call(cx, cy, @cell_width, @cell_height)
+        style = screen.cursor_style
+        blink = style.odd? || style == 0
+        if !blink || @cursor_blink_on
+          cx = screen.cursor.col * @cell_width
+          cy = gy_off + screen.cursor.row * @cell_height
+          cursor_color = make_color(*Echoes.config.cursor_color)
+          ObjC::MSG_VOID.call(cursor_color, ObjC.sel('setFill'))
+          case style
+          when 3, 4 # underline
+            ObjC::NSRectFill.call(cx, cy + @cell_height - 2.0, @cell_width, 2.0)
+          when 5, 6 # bar
+            ObjC::NSRectFill.call(cx, cy, 2.0, @cell_height)
+          else # block (0, 1, 2)
+            ObjC::NSRectFill.call(cx, cy, @cell_width, @cell_height)
+          end
+        end
       end
 
       ObjC::MSG_VOID.call(pool, ObjC.sel('drain'))
@@ -492,6 +505,13 @@ module Echoes
           return
         end
         @active_tab = @active_tab.clamp(0, @tabs.size - 1)
+        need_redraw = true
+      end
+
+      @cursor_blink_counter += 1
+      if @cursor_blink_counter >= 30
+        @cursor_blink_counter = 0
+        @cursor_blink_on = !@cursor_blink_on
         need_redraw = true
       end
 
