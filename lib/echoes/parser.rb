@@ -238,9 +238,21 @@ module Echoes
     end
 
     def dispatch_osc
-      return unless @osc_string.start_with?('66;')
+      code, rest = @osc_string.split(';'.b, 2)
+      return unless rest
 
-      rest = @osc_string[3..]
+      code.force_encoding('UTF-8')
+      rest.force_encoding('UTF-8')
+
+      case code
+      when '0', '2'
+        @screen.title = rest
+        return
+      when '66'
+        # fall through to multicell handling below
+      else
+        return
+      end
       meta_str, text = rest.split(';', 2)
       return unless text
 

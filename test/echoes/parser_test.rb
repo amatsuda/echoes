@@ -280,6 +280,21 @@ class Echoes::ParserTest < Test::Unit::TestCase
     assert_equal(0, @screen.cursor.col)
   end
 
+  test "OSC 0 sets screen title" do
+    @parser.feed("\e]0;my title\x07")
+    assert_equal("my title", @screen.title)
+  end
+
+  test "OSC 2 sets screen title" do
+    @parser.feed("\e]2;window title\x07")
+    assert_equal("window title", @screen.title)
+  end
+
+  test "OSC 0 with ESC ST terminator" do
+    @parser.feed("\e]0;test title\e\\")
+    assert_equal("test title", @screen.title)
+  end
+
   test "SGR 24-bit true color foreground" do
     @parser.feed("\e[38;2;255;128;0mX")
     cell = @screen.grid[0][0]

@@ -452,6 +452,10 @@ module Echoes
         begin
           data = tab.pty_read.read_nonblock(4096)
           tab.parser.feed(data)
+          if tab.screen.title
+            tab.title = tab.screen.title
+            tab.screen.title = nil
+          end
           need_redraw = true
         rescue IO::WaitReadable
           # No data for this tab
@@ -473,7 +477,13 @@ module Echoes
         need_redraw = true
       end
 
-      ObjC::MSG_VOID_I.call(@view, ObjC.sel('setNeedsDisplay:'), 1) if need_redraw
+      if need_redraw
+        tab = current_tab
+        if tab
+          ObjC::MSG_VOID_1.call(@window, ObjC.sel('setTitle:'), ObjC.nsstring(tab.title))
+        end
+        ObjC::MSG_VOID_I.call(@view, ObjC.sel('setNeedsDisplay:'), 1)
+      end
     end
 
     def scroll_wheel(event_ptr)

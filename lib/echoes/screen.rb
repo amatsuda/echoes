@@ -3,7 +3,7 @@
 module Echoes
   class Screen
     attr_reader :rows, :cols, :cursor, :grid, :scrollback
-    attr_accessor :cell_pixel_width, :cell_pixel_height
+    attr_accessor :cell_pixel_width, :cell_pixel_height, :title
 
     def self.scrollback_limit
       Echoes.config.scrollback_limit
