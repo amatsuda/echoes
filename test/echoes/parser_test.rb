@@ -593,6 +593,28 @@ class Echoes::ParserTest < Test::Unit::TestCase
     assert_equal(4, @screen.cursor.col)
   end
 
+  test "HTS ESC H sets tab stop at current column" do
+    @parser.feed("\e[1;5H")  # cursor at col 4
+    @parser.feed("\eH")       # set tab stop
+    @parser.feed("\e[1;1H")  # cursor at col 0
+    @parser.feed("\t")        # should tab to col 4
+    assert_equal(4, @screen.cursor.col)
+  end
+
+  test "TBC CSI 0g clears tab stop at current column" do
+    @parser.feed("\e[1;9H")  # cursor at col 8 (default tab stop)
+    @parser.feed("\e[0g")     # clear tab stop at col 8
+    @parser.feed("\e[1;1H")  # back to col 0
+    @parser.feed("\t")        # should skip to col 16 (next default stop) or 9 (col limit)
+    assert_not_equal(8, @screen.cursor.col)
+  end
+
+  test "TBC CSI 3g clears all tab stops" do
+    @parser.feed("\e[3g")     # clear all tab stops
+    @parser.feed("\t")        # no stops, go to end of line
+    assert_equal(9, @screen.cursor.col)  # last col (10-col screen)
+  end
+
   test "ESC ( 0 activates DEC Special Graphics for G0" do
     @parser.feed("\e(0")
     @parser.feed("lqqk")  # ┌──┐ in DEC Special

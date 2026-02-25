@@ -32,6 +32,7 @@ module Echoes
       @charset_g0 = :ascii  # :ascii or :dec_special
       @charset_g1 = :ascii
       @active_charset = 0   # 0 = G0, 1 = G1
+      @tab_stops = default_tab_stops
       @main_grid = nil
       @main_cursor = nil
       @main_scroll_top = nil
@@ -233,7 +234,22 @@ module Echoes
     end
 
     def tab
-      @cursor.col = [(@cursor.col / 8 + 1) * 8, @cols - 1].min
+      next_stop = @tab_stops.find { |s| s > @cursor.col }
+      @cursor.col = next_stop ? [next_stop, @cols - 1].min : @cols - 1
+    end
+
+    def set_tab_stop
+      @tab_stops << @cursor.col unless @tab_stops.include?(@cursor.col)
+      @tab_stops.sort!
+    end
+
+    def clear_tab_stop(mode = 0)
+      case mode
+      when 0
+        @tab_stops.delete(@cursor.col)
+      when 3
+        @tab_stops.clear
+      end
     end
 
     def backspace
@@ -544,6 +560,7 @@ module Echoes
       @charset_g0 = :ascii
       @charset_g1 = :ascii
       @active_charset = 0
+      @tab_stops = default_tab_stops
       @scroll_top = 0
       @scroll_bottom = @rows - 1
     end
@@ -556,6 +573,7 @@ module Echoes
       @scroll_bottom = @rows - 1
       @saved_cursor = nil
       @scrollback = []
+      @tab_stops = default_tab_stops
     end
 
     def resize(new_rows, new_cols)
@@ -587,6 +605,10 @@ module Echoes
     end
 
     private
+
+    def default_tab_stops
+      (8...@cols).step(8).to_a
+    end
 
     def clamp_row(row)
       [[row, 0].max, @rows - 1].min

@@ -124,6 +124,9 @@ module Echoes
       when 0x44 # D
         @screen.line_feed
         @state = :ground
+      when 0x48 # H (HTS - Horizontal Tab Set)
+        @screen.set_tab_stop
+        @state = :ground
       when 0x4D # M
         @screen.reverse_index
         @state = :ground
@@ -325,6 +328,7 @@ module Echoes
       when 'r' then @screen.set_scroll_region((params[0] || 1) - 1, (params[1] || @screen.rows) - 1)
       when 's' then @screen.save_cursor
       when 'u' then @screen.restore_cursor
+      when 'g' then @screen.clear_tab_stop(params[0] || 0)
       when 'c' then dispatch_da(params)
       when 'n' then dispatch_dsr(params)
       when 'p' then @screen.soft_reset if @csi_intermediate == '!'
