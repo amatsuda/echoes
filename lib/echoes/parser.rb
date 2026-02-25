@@ -312,6 +312,7 @@ module Echoes
       params.each do |p|
         case p
         when 1 then @screen.application_cursor_keys = true
+        when 6 then @screen.origin_mode = true
         when 7 then @screen.auto_wrap = true
         when 25 then @screen.show_cursor
         when 9 then @screen.mouse_tracking = :x10
@@ -335,6 +336,7 @@ module Echoes
       params.each do |p|
         case p
         when 1 then @screen.application_cursor_keys = false
+        when 6 then @screen.origin_mode = false
         when 7 then @screen.auto_wrap = false
         when 25 then @screen.hide_cursor
         when 9, 1000, 1002, 1003 then @screen.mouse_tracking = :off

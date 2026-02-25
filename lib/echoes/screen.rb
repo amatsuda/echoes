@@ -26,6 +26,7 @@ module Echoes
       @auto_wrap = true
       @mouse_tracking = :off   # :off, :x10, :normal, :button_event, :any_event
       @mouse_encoding = :default  # :default, :sgr
+      @origin_mode = false
       @using_alt_screen = false
       @main_grid = nil
       @main_cursor = nil
@@ -150,7 +151,11 @@ module Echoes
     end
 
     def move_cursor(row, col)
-      @cursor.row = clamp_row(row)
+      if @origin_mode
+        @cursor.row = (row + @scroll_top).clamp(@scroll_top, @scroll_bottom)
+      else
+        @cursor.row = clamp_row(row)
+      end
       @cursor.col = clamp_col(col)
     end
 
@@ -377,6 +382,18 @@ module Echoes
     end
 
     attr_accessor :mouse_tracking, :mouse_encoding
+
+    def origin_mode?
+      @origin_mode
+    end
+
+    def origin_mode=(val)
+      @origin_mode = val
+      if val
+        @cursor.row = @scroll_top
+        @cursor.col = 0
+      end
+    end
 
     def using_alt_screen?
       @using_alt_screen

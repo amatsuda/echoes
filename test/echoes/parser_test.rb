@@ -280,6 +280,30 @@ class Echoes::ParserTest < Test::Unit::TestCase
     assert_equal(0, @screen.cursor.col)
   end
 
+  test "origin mode ?6h makes CUP relative to scroll region" do
+    @parser.feed("\e[2;4r")   # scroll region rows 2-4 (1-indexed)
+    @parser.feed("\e[?6h")    # enable origin mode, cursor goes to scroll top
+    assert_equal(1, @screen.cursor.row)  # scroll_top = row 1
+    @parser.feed("\e[2;1H")   # CUP row 2 in origin = absolute row 2
+    assert_equal(2, @screen.cursor.row)
+  end
+
+  test "origin mode ?6h clamps cursor to scroll region" do
+    @parser.feed("\e[2;4r")
+    @parser.feed("\e[?6h")
+    @parser.feed("\e[10;1H")  # row 10 exceeds scroll region
+    assert_equal(3, @screen.cursor.row)  # clamped to scroll_bottom
+  end
+
+  test "origin mode ?6l disables" do
+    @parser.feed("\e[2;4r")
+    @parser.feed("\e[?6h")
+    @parser.feed("\e[?6l")
+    assert_false(@screen.origin_mode?)
+    @parser.feed("\e[1;1H")
+    assert_equal(0, @screen.cursor.row)  # absolute again
+  end
+
   test "mouse tracking ?1000h enables normal mode" do
     @parser.feed("\e[?1000h")
     assert_equal(:normal, @screen.mouse_tracking)
