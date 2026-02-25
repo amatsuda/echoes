@@ -453,6 +453,16 @@ module Echoes
       @attrs.hyperlink = uri
     end
 
+    attr_accessor :clipboard_handler
+
+    def set_clipboard(text)
+      @clipboard_handler&.call(:set, text)
+    end
+
+    def clipboard_content
+      @clipboard_handler&.call(:get, nil)
+    end
+
     def designate_charset(g, charset)
       case g
       when 0 then @charset_g0 = charset

@@ -48,6 +48,7 @@ module Echoes
         tab.screen.cell_pixel_width = @cell_width
         tab.screen.cell_pixel_height = @cell_height
       end
+      tab.screen.clipboard_handler = method(:handle_clipboard)
       @tabs << tab
       @active_tab = @tabs.size - 1
     end
@@ -737,6 +738,20 @@ module Echoes
       pb = ObjC::MSG_PTR.call(ObjC.cls('NSPasteboard'), ObjC.sel('generalPasteboard'))
       ObjC::MSG_PTR.call(pb, ObjC.sel('clearContents'))
       ObjC::MSG_PTR_2.call(pb, ObjC.sel('setString:forType:'), ObjC.nsstring(text), ObjC::NSPasteboardTypeString)
+    end
+
+    def handle_clipboard(action, text)
+      pb = ObjC::MSG_PTR.call(ObjC.cls('NSPasteboard'), ObjC.sel('generalPasteboard'))
+      case action
+      when :set
+        ObjC::MSG_PTR.call(pb, ObjC.sel('clearContents'))
+        ObjC::MSG_PTR_2.call(pb, ObjC.sel('setString:forType:'), ObjC.nsstring(text), ObjC::NSPasteboardTypeString)
+        nil
+      when :get
+        ns_str = ObjC::MSG_PTR_1.call(pb, ObjC.sel('stringForType:'), ObjC::NSPasteboardTypeString)
+        return nil if ns_str.null?
+        ObjC.to_ruby_string(ns_str)
+      end
     end
 
     def paste_from_clipboard

@@ -289,6 +289,9 @@ module Echoes
         _params, uri = rest.split(';', 2)
         @screen.set_hyperlink(uri && !uri.empty? ? uri : nil)
         return
+      when '52'
+        dispatch_osc52(rest)
+        return
       when '66'
         # fall through to multicell handling below
       else
@@ -314,6 +317,27 @@ module Echoes
       end
 
       @screen.put_multicell(text, **params)
+    end
+
+    def dispatch_osc52(rest)
+      _selection, data = rest.split(';', 2)
+      return unless data
+
+      if data == '?'
+        # Query clipboard — respond with current clipboard content
+        if @writer && @screen.respond_to?(:clipboard_content)
+          content = @screen.clipboard_content
+          if content
+            encoded = [content].pack('m0')
+            @writer.call("\e]52;c;#{encoded}\e\\")
+          end
+        end
+      else
+        # Set clipboard
+        decoded = data.unpack1('m')
+        decoded.force_encoding('UTF-8')
+        @screen.set_clipboard(decoded) if @screen.respond_to?(:set_clipboard)
+      end
     end
 
     def dispatch_csi(final)

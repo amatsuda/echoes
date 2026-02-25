@@ -593,6 +593,17 @@ class Echoes::ParserTest < Test::Unit::TestCase
     assert_equal(4, @screen.cursor.col)
   end
 
+  test "OSC 52 set clipboard calls handler" do
+    clipboard = nil
+    @screen.clipboard_handler = ->(action, text) {
+      clipboard = text if action == :set
+    }
+    parser = Echoes::Parser.new(@screen)
+    # "Hello" in Base64 = "SGVsbG8="
+    parser.feed("\e]52;c;SGVsbG8=\x07")
+    assert_equal("Hello", clipboard)
+  end
+
   test "BEL sets bell flag on screen" do
     @parser.feed("\x07")
     assert_true(@screen.bell)
