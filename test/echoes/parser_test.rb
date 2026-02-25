@@ -496,6 +496,41 @@ class Echoes::ParserTest < Test::Unit::TestCase
     # Should not raise
   end
 
+  test "DA2 CSI > c does not trigger DA1 response" do
+    responses = []
+    parser = Echoes::Parser.new(@screen, writer: ->(s) { responses << s })
+    parser.feed("\e[>c")
+    assert_equal([], responses)
+  end
+
+  test "DA3 CSI = c does not trigger DA1 response" do
+    responses = []
+    parser = Echoes::Parser.new(@screen, writer: ->(s) { responses << s })
+    parser.feed("\e[=c")
+    assert_equal([], responses)
+  end
+
+  test "OSC with ESC ST does not print backslash" do
+    @parser.feed("\e]0;title\e\\")
+    assert_equal("title", @screen.title)
+    assert_equal("", row_text(0))  # no backslash printed
+  end
+
+  test "CAN aborts CSI sequence" do
+    @parser.feed("\e[1")      # start CSI
+    @parser.feed("\x18")      # CAN - abort
+    @parser.feed("Hello")     # should be printed normally
+    assert_equal("Hello", row_text(0))
+  end
+
+  test "C0 controls execute during CSI sequence" do
+    @parser.feed("ABC")
+    @parser.feed("\e[")       # start CSI
+    @parser.feed("\r")        # CR should execute
+    @parser.feed("H")        # final byte for CSI H (cursor home)
+    assert_equal(0, @screen.cursor.col)  # CR executed during CSI
+  end
+
   test "bracketed paste mode ?2004h enables" do
     @parser.feed("\e[?2004h")
     assert_true(@screen.bracketed_paste_mode?)

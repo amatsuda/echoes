@@ -9,6 +9,7 @@ module Echoes
       @params = []
       @current_param = +""
       @private_flag = false
+      @csi_prefix = nil  # tracks <, =, > prefix bytes in CSI
       @csi_intermediate = nil
       @osc_string = +""
       @esc_intermediate = nil
@@ -103,6 +104,7 @@ module Echoes
         @params = []
         @current_param = +""
         @private_flag = false
+        @csi_prefix = nil
         @csi_intermediate = nil
       when 0x50 # P (DCS)
         @state = :dcs_entry
@@ -176,6 +178,9 @@ module Echoes
       when 0x3F # ?
         @private_flag = true
         @state = :csi_param
+      when 0x3C..0x3E # <, =, > (private parameter prefixes)
+        @csi_prefix = byte
+        @state = :csi_param
       when 0x30..0x39 # 0-9
         @current_param << byte.chr
         @state = :csi_param
@@ -188,6 +193,8 @@ module Echoes
         @state = :csi_param
       when 0x40..0x7E # final byte
         dispatch_csi(byte.chr)
+        @state = :ground
+      when 0x18, 0x1A # CAN, SUB — abort sequence
         @state = :ground
       else
         @state = :csi_param
@@ -208,6 +215,18 @@ module Echoes
         @state = :ground
       when 0x1B # ESC interrupts
         @state = :escape
+      when 0x18, 0x1A # CAN, SUB — abort sequence
+        @state = :ground
+      when 0x0D # CR
+        @screen.carriage_return
+      when 0x0A, 0x0B, 0x0C # LF, VT, FF
+        @screen.line_feed
+      when 0x08 # BS
+        @screen.backspace
+      when 0x09 # HT
+        @screen.tab
+      when 0x07 # BEL
+        @screen.bell = true
       end
     end
 
@@ -216,9 +235,9 @@ module Echoes
       when 0x07 # BEL terminates OSC
         dispatch_osc
         @state = :ground
-      when 0x1B # ESC (potential ST = ESC \)
+      when 0x1B # ESC — dispatch OSC, enter escape state for ST (\)
         dispatch_osc
-        @state = :ground
+        @state = :escape
       else
         @osc_string << byte
       end
@@ -341,6 +360,10 @@ module Echoes
     end
 
     def dispatch_csi(final)
+      # Ignore sequences with unrecognized private prefixes (>, <, =)
+      # e.g. CSI > c (DA2), CSI = c (DA3) — we don't implement these
+      return if @csi_prefix
+
       params = collect_params
 
       case final
