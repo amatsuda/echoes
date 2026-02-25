@@ -812,4 +812,17 @@ class Echoes::ParserTest < Test::Unit::TestCase
     assert_equal(0, @screen.cursor.row)  # still on row 0
     assert_equal("ABCDEFGHZJ", row_text(0))
   end
+
+  test "CSI 3J clears scrollback buffer" do
+    # Fill screen and scroll to generate scrollback
+    6.times do |i|
+      @parser.feed("Line#{i}\r\n")
+    end
+    assert_false(@screen.scrollback.empty?, "scrollback should have content")
+
+    @parser.feed("\e[3J")
+    assert_true(@screen.scrollback.empty?, "scrollback should be cleared")
+    # Screen content should be unaffected
+    assert_equal(0, @screen.cursor.col)
+  end
 end

@@ -257,6 +257,14 @@ module Echoes
       @cursor.col = next_stop ? [next_stop, @cols - 1].min : @cols - 1
     end
 
+    def backward_tab(n = 1)
+      @pending_wrap = false
+      n.times do
+        prev_stop = @tab_stops.reverse.find { |s| s < @cursor.col }
+        @cursor.col = prev_stop || 0
+      end
+    end
+
     def set_tab_stop
       @tab_stops << @cursor.col unless @tab_stops.include?(@cursor.col)
       @tab_stops.sort!
@@ -287,6 +295,8 @@ module Echoes
         (0...@cursor.row).each { |r| clear_row(r) }
       when 2
         (0...@rows).each { |r| clear_row(r) }
+      when 3
+        @scrollback.clear
       end
     end
 
