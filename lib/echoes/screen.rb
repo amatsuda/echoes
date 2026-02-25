@@ -283,7 +283,10 @@ module Echoes
         when 30..37
           @attrs.fg = params[i] - 30
         when 38
-          if params[i + 1] == 5 && params[i + 2]
+          if params[i + 1] == 2 && params[i + 2] && params[i + 3] && params[i + 4]
+            @attrs.fg = [params[i + 2], params[i + 3], params[i + 4]]
+            i += 4
+          elsif params[i + 1] == 5 && params[i + 2]
             @attrs.fg = params[i + 2]
             i += 2
           end
@@ -292,7 +295,10 @@ module Echoes
         when 40..47
           @attrs.bg = params[i] - 40
         when 48
-          if params[i + 1] == 5 && params[i + 2]
+          if params[i + 1] == 2 && params[i + 2] && params[i + 3] && params[i + 4]
+            @attrs.bg = [params[i + 2], params[i + 3], params[i + 4]]
+            i += 4
+          elsif params[i + 1] == 5 && params[i + 2]
             @attrs.bg = params[i + 2]
             i += 2
           end

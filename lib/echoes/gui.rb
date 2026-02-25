@@ -248,18 +248,20 @@ module Echoes
           next if cell.width == 0
           next if cell.multicell == :cont
 
-          fg_idx = cell.fg
-          bg_idx = cell.bg
+          fg_val = cell.fg
+          bg_val = cell.bg
           if cell.inverse
-            fg_idx, bg_idx = bg_idx, fg_idx
+            fg_val, bg_val = bg_val, fg_val
           end
 
-          fg_color = fg_idx ? @colors[fg_idx] : @default_fg
-          bg_color = bg_idx ? @colors[bg_idx] : @default_bg
+          fg_color = resolve_color(fg_val, @default_fg)
+          bg_color = resolve_color(bg_val, @default_bg)
 
-          if cell.bold && fg_idx && fg_idx < 8
-            fg_color = @colors[fg_idx + 8]
+          if cell.bold && fg_val.is_a?(Integer) && fg_val < 8
+            fg_color = @colors[fg_val + 8]
           end
+
+          has_bg = !bg_val.nil?
 
           selected = cell_selected?(r, c)
 
@@ -272,7 +274,7 @@ module Echoes
             if selected
               ObjC::MSG_VOID.call(@selection_color, ObjC.sel('setFill'))
               ObjC::NSRectFill.call(x, y, block_w, block_h)
-            elsif bg_idx
+            elsif has_bg
               ObjC::MSG_VOID.call(bg_color, ObjC.sel('setFill'))
               ObjC::NSRectFill.call(x, y, block_w, block_h)
             end
@@ -282,7 +284,7 @@ module Echoes
               next
             end
 
-            next if cell.char == " " && !bg_idx
+            next if cell.char == " " && !has_bg
 
             effective_scale = mc[:scale].to_f
             if mc[:frac_d] > 0 && mc[:frac_d] > mc[:frac_n]
@@ -333,12 +335,12 @@ module Echoes
             if selected
               ObjC::MSG_VOID.call(@selection_color, ObjC.sel('setFill'))
               ObjC::NSRectFill.call(x, y, cell_w, @cell_height)
-            elsif bg_idx
+            elsif has_bg
               ObjC::MSG_VOID.call(bg_color, ObjC.sel('setFill'))
               ObjC::NSRectFill.call(x, y, cell_w, @cell_height)
             end
 
-            next if cell.char == " " && !bg_idx && !selected
+            next if cell.char == " " && !has_bg && !selected
 
             base_font = cell.bold ? @bold_font : font_for_char(cell.char)
             attrs = {
@@ -843,6 +845,15 @@ module Echoes
       end
 
       colors
+    end
+
+    def resolve_color(val, default)
+      case val
+      when nil then default
+      when Integer then @colors[val]
+      when Array then make_color(val[0] / 255.0, val[1] / 255.0, val[2] / 255.0)
+      else default
+      end
     end
 
     def make_color(r, g, b, a = 1.0)

@@ -280,6 +280,33 @@ class Echoes::ParserTest < Test::Unit::TestCase
     assert_equal(0, @screen.cursor.col)
   end
 
+  test "SGR 24-bit true color foreground" do
+    @parser.feed("\e[38;2;255;128;0mX")
+    cell = @screen.grid[0][0]
+    assert_equal([255, 128, 0], cell.fg)
+  end
+
+  test "SGR 24-bit true color background" do
+    @parser.feed("\e[48;2;0;128;255mX")
+    cell = @screen.grid[0][0]
+    assert_equal([0, 128, 255], cell.bg)
+  end
+
+  test "SGR 24-bit true color fg and bg combined" do
+    @parser.feed("\e[38;2;255;0;0;48;2;0;0;255mX")
+    cell = @screen.grid[0][0]
+    assert_equal([255, 0, 0], cell.fg)
+    assert_equal([0, 0, 255], cell.bg)
+  end
+
+  test "SGR 24-bit true color reset by SGR 0" do
+    @parser.feed("\e[38;2;255;0;0mA\e[0mB")
+    a = @screen.grid[0][0]
+    b = @screen.grid[0][1]
+    assert_equal([255, 0, 0], a.fg)
+    assert_nil(b.fg)
+  end
+
   test "DA1 CSI c responds with device attributes" do
     responses = []
     parser = Echoes::Parser.new(@screen, writer: ->(s) { responses << s })

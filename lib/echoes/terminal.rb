@@ -77,10 +77,14 @@ module Echoes
             codes << 1 if cell.bold
             codes << 4 if cell.underline
             codes << 7 if cell.inverse
-            if cell.fg
+            if cell.fg.is_a?(Array)
+              codes.push(38, 2, *cell.fg)
+            elsif cell.fg
               codes << (cell.fg < 8 ? cell.fg + 30 : cell.fg - 8 + 90)
             end
-            if cell.bg
+            if cell.bg.is_a?(Array)
+              codes.push(48, 2, *cell.bg)
+            elsif cell.bg
               codes << (cell.bg < 8 ? cell.bg + 40 : cell.bg - 8 + 100)
             end
             buf << "\e[#{codes.join(';')}m"
