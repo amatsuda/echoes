@@ -434,6 +434,12 @@ module Echoes
           ctrl_char = (chars[0].ord & 0x1F).chr
           tab.pty_write.write(ctrl_char)
         end
+      elsif (flags & ObjC::NSEventModifierFlagOption) != 0
+        chars_ns = ObjC::MSG_PTR.call(event_ptr, ObjC.sel('charactersIgnoringModifiers'))
+        chars = ObjC.to_ruby_string(chars_ns)
+        unless chars.empty?
+          tab.pty_write.write("\e#{chars}")
+        end
       else
         chars_ns = ObjC::MSG_PTR.call(event_ptr, ObjC.sel('characters'))
         chars = ObjC.to_ruby_string(chars_ns)

@@ -78,6 +78,7 @@ module Echoes
     NSBackingStoreBuffered = 2
 
     NSEventModifierFlagControl = 1 << 18
+    NSEventModifierFlagOption  = 1 << 19
     NSEventModifierFlagCommand = 1 << 20
 
     # Selector cache
