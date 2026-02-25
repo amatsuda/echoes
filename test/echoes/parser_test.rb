@@ -280,6 +280,22 @@ class Echoes::ParserTest < Test::Unit::TestCase
     assert_equal(0, @screen.cursor.col)
   end
 
+  test "auto-wrap disabled prevents line wrap" do
+    @parser.feed("\e[?7l")
+    @parser.feed("ABCDEFGHIJKLM")  # 13 chars on 10-col screen
+    assert_equal(0, @screen.cursor.row)  # stayed on row 0
+    assert_equal(9, @screen.cursor.col)  # clamped to last col
+    assert_equal("ABCDEFGHIM", row_text(0))  # last char overwrites at col 9
+  end
+
+  test "auto-wrap re-enabled resumes wrapping" do
+    @parser.feed("\e[?7l")
+    @parser.feed("\e[?7h")
+    @parser.feed("ABCDEFGHIJK")  # 11 chars wraps on 10-col screen
+    assert_equal(1, @screen.cursor.row)
+    assert_equal("K", row_text(1))
+  end
+
   test "insert characters CSI @" do
     @parser.feed("ABCDE")
     @parser.feed("\e[1;3H")  # cursor at col 2

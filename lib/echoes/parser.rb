@@ -312,6 +312,7 @@ module Echoes
       params.each do |p|
         case p
         when 1 then @screen.application_cursor_keys = true
+        when 7 then @screen.auto_wrap = true
         when 25 then @screen.show_cursor
         when 2004 then @screen.bracketed_paste_mode = true
         when 1049
@@ -329,6 +330,7 @@ module Echoes
       params.each do |p|
         case p
         when 1 then @screen.application_cursor_keys = false
+        when 7 then @screen.auto_wrap = false
         when 25 then @screen.hide_cursor
         when 2004 then @screen.bracketed_paste_mode = false
         when 1049

@@ -23,6 +23,7 @@ module Echoes
       @cell_pixel_height = 16.0
       @application_cursor_keys = false
       @bracketed_paste_mode = false
+      @auto_wrap = true
       @using_alt_screen = false
       @main_grid = nil
       @main_cursor = nil
@@ -35,16 +36,25 @@ module Echoes
     def put_char(c)
       w = char_width(c)
 
-      # If wide char doesn't fit at end of line, wrap first
-      if w == 2 && @cursor.col >= @cols - 1
-        if @cursor.col == @cols - 1
-          @grid[@cursor.row][@cursor.col].reset!
+      if @auto_wrap
+        # If wide char doesn't fit at end of line, wrap first
+        if w == 2 && @cursor.col >= @cols - 1
+          if @cursor.col == @cols - 1
+            @grid[@cursor.row][@cursor.col].reset!
+          end
+          @cursor.col = 0
+          line_feed
+        elsif @cursor.col >= @cols
+          @cursor.col = 0
+          line_feed
         end
-        @cursor.col = 0
-        line_feed
-      elsif @cursor.col >= @cols
-        @cursor.col = 0
-        line_feed
+      else
+        # No wrap: clamp cursor to last column
+        if w == 2 && @cursor.col >= @cols - 1
+          @cursor.col = @cols - 2
+        elsif @cursor.col >= @cols
+          @cursor.col = @cols - 1
+        end
       end
 
       erase_multicell_at(@cursor.row, @cursor.col)
@@ -62,6 +72,7 @@ module Echoes
       end
 
       @cursor.col += w
+      @cursor.col = [@cursor.col, @cols - 1].min unless @auto_wrap
     end
 
     def put_multicell(text, scale:, width:, frac_n:, frac_d:, valign:, halign:)
@@ -353,6 +364,14 @@ module Echoes
 
     def bracketed_paste_mode=(val)
       @bracketed_paste_mode = val
+    end
+
+    def auto_wrap?
+      @auto_wrap
+    end
+
+    def auto_wrap=(val)
+      @auto_wrap = val
     end
 
     def using_alt_screen?
