@@ -280,6 +280,59 @@ class Echoes::ParserTest < Test::Unit::TestCase
     assert_equal(0, @screen.cursor.col)
   end
 
+  test "alt screen ?1049h switches to alt screen and saves cursor" do
+    @parser.feed("Hello")
+    @parser.feed("\e[2;4H")  # cursor at row 1, col 3
+    @parser.feed("\e[?1049h")
+    assert_true(@screen.using_alt_screen?)
+    assert_equal(0, @screen.cursor.row)
+    assert_equal(0, @screen.cursor.col)
+    assert_equal("", row_text(0))  # alt screen is blank
+  end
+
+  test "alt screen ?1049l restores main screen and cursor" do
+    @parser.feed("Hello")
+    @parser.feed("\e[2;4H")  # cursor at row 1, col 3
+    @parser.feed("\e[?1049h")
+    @parser.feed("Alt")
+    @parser.feed("\e[?1049l")
+    assert_false(@screen.using_alt_screen?)
+    assert_equal(1, @screen.cursor.row)
+    assert_equal(3, @screen.cursor.col)
+    assert_equal("Hello", row_text(0))  # main screen restored
+  end
+
+  test "alt screen ?47h/?47l without cursor save/restore" do
+    @parser.feed("Main")
+    @parser.feed("\e[2;5H")  # cursor at row 1, col 4
+    @parser.feed("\e[?47h")
+    assert_true(@screen.using_alt_screen?)
+    assert_equal("", row_text(0))
+    @parser.feed("Alt")
+    @parser.feed("\e[?47l")
+    assert_false(@screen.using_alt_screen?)
+    assert_equal("Main", row_text(0))
+  end
+
+  test "alt screen ignores double switch" do
+    @parser.feed("Hello")
+    @parser.feed("\e[?1049h")
+    @parser.feed("Alt1")
+    @parser.feed("\e[?1049h")  # second switch should be no-op
+    assert_equal("Alt1", row_text(0))  # alt screen preserved
+    @parser.feed("\e[?1049l")
+    assert_equal("Hello", row_text(0))  # main restored
+  end
+
+  test "alt screen has no scrollback" do
+    5.times { |i| @parser.feed("Line#{i}\r\n") }
+    assert_true(@screen.scrollback.size > 0)
+    @parser.feed("\e[?1049h")
+    assert_equal(0, @screen.scrollback.size)
+    @parser.feed("\e[?1049l")
+    assert_true(@screen.scrollback.size > 0)  # main scrollback restored
+  end
+
   test "text after DCS sixel works normally" do
     @screen.cell_pixel_width = 8.0
     @screen.cell_pixel_height = 8.0

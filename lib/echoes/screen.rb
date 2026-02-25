@@ -21,6 +21,13 @@ module Echoes
       @scrollback = []
       @cell_pixel_width = 8.0
       @cell_pixel_height = 16.0
+      @using_alt_screen = false
+      @main_grid = nil
+      @main_cursor = nil
+      @main_scroll_top = nil
+      @main_scroll_bottom = nil
+      @main_saved_cursor = nil
+      @main_scrollback = nil
     end
 
     def put_char(c)
@@ -306,6 +313,51 @@ module Echoes
       if @saved_cursor
         @cursor.row, @cursor.col = @saved_cursor
       end
+    end
+
+    def using_alt_screen?
+      @using_alt_screen
+    end
+
+    def switch_to_alt_screen
+      return if @using_alt_screen
+
+      @main_grid = @grid
+      @main_cursor = [@cursor.row, @cursor.col, @cursor.visible]
+      @main_scroll_top = @scroll_top
+      @main_scroll_bottom = @scroll_bottom
+      @main_saved_cursor = @saved_cursor
+      @main_scrollback = @scrollback
+
+      @grid = Array.new(@rows) { Array.new(@cols) { Cell.new } }
+      @cursor = Cursor.new
+      @attrs = Cell.new
+      @scroll_top = 0
+      @scroll_bottom = @rows - 1
+      @saved_cursor = nil
+      @scrollback = []
+      @using_alt_screen = true
+    end
+
+    def switch_to_main_screen
+      return unless @using_alt_screen
+
+      @grid = @main_grid
+      @cursor = Cursor.new
+      @cursor.row, @cursor.col, @cursor.visible = @main_cursor
+      @scroll_top = @main_scroll_top
+      @scroll_bottom = @main_scroll_bottom
+      @saved_cursor = @main_saved_cursor
+      @scrollback = @main_scrollback
+      @attrs = Cell.new
+
+      @main_grid = nil
+      @main_cursor = nil
+      @main_scroll_top = nil
+      @main_scroll_bottom = nil
+      @main_saved_cursor = nil
+      @main_scrollback = nil
+      @using_alt_screen = false
     end
 
     def show_cursor

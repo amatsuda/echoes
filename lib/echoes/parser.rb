@@ -295,6 +295,11 @@ module Echoes
       params.each do |p|
         case p
         when 25 then @screen.show_cursor
+        when 1049
+          @screen.save_cursor
+          @screen.switch_to_alt_screen
+        when 47, 1047
+          @screen.switch_to_alt_screen
         end
       end
     end
@@ -305,6 +310,11 @@ module Echoes
       params.each do |p|
         case p
         when 25 then @screen.hide_cursor
+        when 1049
+          @screen.switch_to_main_screen
+          @screen.restore_cursor
+        when 47, 1047
+          @screen.switch_to_main_screen
         end
       end
     end
