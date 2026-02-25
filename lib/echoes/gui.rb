@@ -271,7 +271,7 @@ module Echoes
 
           has_bg = !bg_val.nil?
 
-          selected = cell_selected?(r, c)
+          selected = cell_selected?(src, c)
 
           if cell.multicell.is_a?(Hash)
             mc = cell.multicell
@@ -566,11 +566,14 @@ module Echoes
         send_mouse_event(tab, 0, col, row)  # button 0 = left press
       elsif click_count == 2
         # Double-click: select word
-        row, col = pos
-        bounds = tab.screen.word_boundaries_at(row, col)
-        if bounds
-          @selection_anchor = [row, bounds[0]]
-          @selection_end = [row, bounds[1]]
+        abs_row, col = pos
+        row_data = row_at(tab, abs_row)
+        if row_data
+          bounds = word_boundaries_in_row(row_data, col)
+          if bounds
+            @selection_anchor = [abs_row, bounds[0]]
+            @selection_end = [abs_row, bounds[1]]
+          end
         end
       else
         # Single click: start drag selection
@@ -647,7 +650,7 @@ module Echoes
       sr, sc, er, ec = selection_range
       return unless sr
 
-      text = current_tab.screen.selected_text(sr, sc, er, ec)
+      text = selected_text_from_buffer(sr, sc, er, ec)
       return if text.empty?
 
       pb = ObjC::MSG_PTR.call(ObjC.cls('NSPasteboard'), ObjC.sel('generalPasteboard'))
@@ -752,9 +755,13 @@ module Echoes
       grid_y = y - gy_off
       return nil if grid_y < 0 || grid_y >= @rows * @cell_height
 
-      row = (grid_y / @cell_height).to_i.clamp(0, @rows - 1)
+      visible_row = (grid_y / @cell_height).to_i.clamp(0, @rows - 1)
       col = (x / @cell_width).to_i.clamp(0, @cols - 1)
-      [row, col]
+      # Return absolute row (scrollback + grid index)
+      tab = current_tab
+      scrollback_size = tab.screen.scrollback.size
+      abs_row = scrollback_size - tab.scroll_offset + visible_row
+      [abs_row, col]
     end
 
     def selection_range
@@ -767,6 +774,52 @@ module Echoes
       else
         [b_r, b_c, a_r, a_c]
       end
+    end
+
+    def row_at(tab, abs_row)
+      scrollback = tab.screen.scrollback
+      if abs_row < scrollback.size
+        scrollback[abs_row]
+      elsif abs_row - scrollback.size < tab.screen.rows
+        tab.screen.grid[abs_row - scrollback.size]
+      end
+    end
+
+    def word_boundaries_in_row(row, col)
+      return nil if col < 0 || col >= row.size
+
+      cls = char_class_of(row[col].char)
+      start_col = col
+      start_col -= 1 while start_col > 0 && char_class_of(row[start_col - 1].char) == cls
+      end_col = col
+      end_col += 1 while end_col < row.size - 1 && char_class_of(row[end_col + 1].char) == cls
+      [start_col, end_col]
+    end
+
+    def char_class_of(c)
+      if c =~ /\s/ then :space
+      elsif c =~ /\w/ then :word
+      else :other
+      end
+    end
+
+    def selected_text_from_buffer(sr, sc, er, ec)
+      screen = current_tab.screen
+      scrollback = screen.scrollback
+      lines = []
+      (sr..er).each do |abs_row|
+        row = if abs_row < scrollback.size
+                scrollback[abs_row]
+              else
+                screen.grid[abs_row - scrollback.size]
+              end
+        next unless row
+
+        from = (abs_row == sr) ? sc : 0
+        to = (abs_row == er) ? ec : @cols - 1
+        lines << row[from..to].map(&:char).join.rstrip
+      end
+      lines.join("\n")
     end
 
     def cell_selected?(row, col)
