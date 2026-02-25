@@ -2,7 +2,7 @@
 
 module Echoes
   class Cell
-    attr_accessor :char, :fg, :bg, :bold, :italic, :underline, :inverse, :faint, :strikethrough, :width, :multicell, :hyperlink
+    attr_accessor :char, :fg, :bg, :bold, :italic, :underline, :inverse, :faint, :strikethrough, :blink, :concealed, :width, :multicell, :hyperlink
 
     def initialize(char = " ", fg: nil, bg: nil, bold: false, underline: false, inverse: false, width: 1)
       @char = char
@@ -27,6 +27,8 @@ module Echoes
       @inverse = false
       @faint = false
       @strikethrough = false
+      @blink = false
+      @concealed = false
       @width = 1
       @multicell = nil
       @hyperlink = nil
@@ -42,6 +44,8 @@ module Echoes
       @inverse = other.inverse
       @faint = other.faint
       @strikethrough = other.strikethrough
+      @blink = other.blink
+      @concealed = other.concealed
       @hyperlink = other.hyperlink
     end
   end

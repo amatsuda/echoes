@@ -367,6 +367,10 @@ module Echoes
           @attrs.underline = true
         when 7
           @attrs.inverse = true
+        when 5, 6
+          @attrs.blink = true
+        when 8
+          @attrs.concealed = true
         when 9
           @attrs.strikethrough = true
         when 22
@@ -378,6 +382,10 @@ module Echoes
           @attrs.underline = false
         when 27
           @attrs.inverse = false
+        when 25
+          @attrs.blink = false
+        when 28
+          @attrs.concealed = false
         when 29
           @attrs.strikethrough = false
         when 30..37

@@ -370,7 +370,9 @@ module Echoes
             if cell.italic
               base_font = create_italic_nsfont(base_font)
             end
-            if cell.faint
+            if cell.concealed || (cell.blink && !@cursor_blink_on)
+              fg_color = bg_color
+            elsif cell.faint
               fg_color = make_color_with_alpha(fg_color, 0.5)
             end
             attrs = {

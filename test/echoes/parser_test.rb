@@ -593,6 +593,18 @@ class Echoes::ParserTest < Test::Unit::TestCase
     assert_equal(4, @screen.cursor.col)
   end
 
+  test "SGR 5 blink" do
+    @parser.feed("\e[5mX\e[25mY")
+    assert_true(@screen.grid[0][0].blink)
+    assert_false(@screen.grid[0][1].blink)
+  end
+
+  test "SGR 8 concealed" do
+    @parser.feed("\e[8mX\e[28mY")
+    assert_true(@screen.grid[0][0].concealed)
+    assert_false(@screen.grid[0][1].concealed)
+  end
+
   test "OSC 52 set clipboard calls handler" do
     clipboard = nil
     @screen.clipboard_handler = ->(action, text) {

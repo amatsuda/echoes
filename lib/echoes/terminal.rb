@@ -78,7 +78,9 @@ module Echoes
             codes << 2 if cell.faint
             codes << 3 if cell.italic
             codes << 4 if cell.underline
+            codes << 5 if cell.blink
             codes << 7 if cell.inverse
+            codes << 8 if cell.concealed
             codes << 9 if cell.strikethrough
             if cell.fg.is_a?(Array)
               codes.push(38, 2, *cell.fg)
