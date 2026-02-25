@@ -18,11 +18,17 @@ module Echoes
       @tab_active_bg = make_color(0.3, 0.3, 0.3)
       @tab_fg = make_color(0.8, 0.8, 0.8)
       @selection_color = make_color(0.2, 0.4, 0.7)
+      @search_match_color = make_color(0.6, 0.5, 0.0)
+      @search_current_color = make_color(0.8, 0.6, 0.0)
       @selection_anchor = nil
       @selection_end = nil
       @font_cache = {}
       @cursor_blink_on = true
       @cursor_blink_counter = 0
+      @search_mode = false
+      @search_query = +""
+      @search_matches = []
+      @search_index = -1
     end
 
     def run
@@ -272,6 +278,8 @@ module Echoes
           has_bg = !bg_val.nil?
 
           selected = cell_selected?(src, c)
+          is_match = @search_mode && search_match_at?(src, c)
+          is_current_match = @search_mode && current_search_match_at?(src, c)
 
           if cell.multicell.is_a?(Hash)
             mc = cell.multicell
@@ -340,7 +348,13 @@ module Echoes
             x = c * @cell_width
             cell_w = cell.width == 2 ? @cell_width * 2 : @cell_width
 
-            if selected
+            if is_current_match
+              ObjC::MSG_VOID.call(@search_current_color, ObjC.sel('setFill'))
+              ObjC::NSRectFill.call(x, y, cell_w, @cell_height)
+            elsif is_match
+              ObjC::MSG_VOID.call(@search_match_color, ObjC.sel('setFill'))
+              ObjC::NSRectFill.call(x, y, cell_w, @cell_height)
+            elsif selected
               ObjC::MSG_VOID.call(@selection_color, ObjC.sel('setFill'))
               ObjC::NSRectFill.call(x, y, cell_w, @cell_height)
             elsif has_bg
@@ -348,7 +362,7 @@ module Echoes
               ObjC::NSRectFill.call(x, y, cell_w, @cell_height)
             end
 
-            next if cell.char == " " && !has_bg && !selected
+            next if cell.char == " " && !has_bg && !selected && !is_match
 
             base_font = cell.bold ? @bold_font : font_for_char(cell.char)
             if cell.italic
@@ -394,6 +408,24 @@ module Echoes
         end
       end
 
+      # Draw search bar
+      if @search_mode
+        bar_h = @cell_height + 4.0
+        bar_y = gy_off + @rows * @cell_height
+        bar_bg = make_color(0.2, 0.2, 0.2)
+        ObjC::MSG_VOID.call(bar_bg, ObjC.sel('setFill'))
+        ObjC::NSRectFill.call(0.0, bar_y, @cols * @cell_width, bar_h)
+
+        match_info = @search_matches.empty? ? "" : " [#{@search_index + 1}/#{@search_matches.size}]"
+        label = "Find: #{@search_query}_#{match_info}"
+        ns_str = ObjC.nsstring(label)
+        ns_attrs = ObjC.nsdict({
+          ObjC::NSFontAttributeName => @font,
+          ObjC::NSForegroundColorAttributeName => make_color(1.0, 1.0, 1.0),
+        })
+        ObjC::MSG_VOID_PT_1.call(ns_str, ObjC.sel('drawAtPoint:withAttributes:'), 4.0, bar_y + 2.0, ns_attrs)
+      end
+
       ObjC::MSG_VOID.call(pool, ObjC.sel('drain'))
     end
 
@@ -429,6 +461,20 @@ module Echoes
       when "v"
         paste_from_clipboard
         return 1
+      when "f"
+        toggle_search
+        ObjC::MSG_VOID_I.call(@view, ObjC.sel('setNeedsDisplay:'), 1)
+        return 1
+      when "g"
+        if @search_mode && !@search_matches.empty?
+          if (flags & ObjC::NSEventModifierFlagShift) != 0
+            search_prev
+          else
+            search_next
+          end
+          ObjC::MSG_VOID_I.call(@view, ObjC.sel('setNeedsDisplay:'), 1)
+        end
+        return 1
       end
 
       # Cmd+Shift+[ / Cmd+Shift+] — use keyCode for keyboard layout independence
@@ -446,6 +492,11 @@ module Echoes
     end
 
     def key_down(event_ptr)
+      if @search_mode
+        search_key_down(event_ptr)
+        return
+      end
+
       @selection_anchor = nil
       @selection_end = nil
 
@@ -779,6 +830,111 @@ module Echoes
       else
         [b_r, b_c, a_r, a_c]
       end
+    end
+
+    def toggle_search
+      @search_mode = !@search_mode
+      if @search_mode
+        @search_query = +""
+        @search_matches = []
+        @search_index = -1
+      end
+    end
+
+    def search_key_down(event_ptr)
+      chars_ns = ObjC::MSG_PTR.call(event_ptr, ObjC.sel('characters'))
+      chars = ObjC.to_ruby_string(chars_ns)
+      key_code = ObjC::MSG_RET_L.call(event_ptr, ObjC.sel('keyCode'))
+      flags = ObjC::MSG_RET_L.call(event_ptr, ObjC.sel('modifierFlags'))
+
+      case key_code
+      when 53 # Escape
+        @search_mode = false
+        @search_matches = []
+      when 36 # Return
+        if (flags & ObjC::NSEventModifierFlagShift) != 0
+          search_prev
+        else
+          search_next
+        end
+      when 51 # Backspace
+        @search_query.chop!
+        perform_search
+      else
+        unless chars.empty? || chars[0].ord < 0x20
+          @search_query << chars
+          perform_search
+        end
+      end
+      ObjC::MSG_VOID_I.call(@view, ObjC.sel('setNeedsDisplay:'), 1)
+    end
+
+    def perform_search
+      @search_matches = []
+      @search_index = -1
+      return if @search_query.empty?
+
+      tab = current_tab
+      screen = tab.screen
+      scrollback = screen.scrollback
+
+      # Search scrollback
+      scrollback.each_with_index do |row, abs_row|
+        text = row.map(&:char).join
+        pos = 0
+        while (idx = text.index(@search_query, pos))
+          @search_matches << [abs_row, idx, @search_query.length]
+          pos = idx + 1
+        end
+      end
+
+      # Search grid
+      screen.grid.each_with_index do |row, grid_row|
+        abs_row = scrollback.size + grid_row
+        text = row.map(&:char).join
+        pos = 0
+        while (idx = text.index(@search_query, pos))
+          @search_matches << [abs_row, idx, @search_query.length]
+          pos = idx + 1
+        end
+      end
+
+      @search_index = @search_matches.size - 1 if @search_matches.any?
+      scroll_to_match if @search_index >= 0
+    end
+
+    def search_next
+      return if @search_matches.empty?
+      @search_index = (@search_index + 1) % @search_matches.size
+      scroll_to_match
+    end
+
+    def search_prev
+      return if @search_matches.empty?
+      @search_index = (@search_index - 1) % @search_matches.size
+      scroll_to_match
+    end
+
+    def scroll_to_match
+      abs_row, = @search_matches[@search_index]
+      tab = current_tab
+      scrollback_size = tab.screen.scrollback.size
+      if abs_row < scrollback_size
+        tab.scroll_offset = scrollback_size - abs_row - (@rows / 2)
+        tab.scroll_offset = tab.scroll_offset.clamp(0, scrollback_size)
+      else
+        tab.scroll_offset = 0
+      end
+    end
+
+    def search_match_at?(abs_row, col)
+      @search_matches.any? { |r, c, len| r == abs_row && col >= c && col < c + len }
+    end
+
+    def current_search_match_at?(abs_row, col)
+      return false if @search_index < 0 || @search_index >= @search_matches.size
+      r, c, len = @search_matches[@search_index]
+      r == abs_row && col >= c && col < c + len
     end
 
     def row_at(tab, abs_row)
