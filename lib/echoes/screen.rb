@@ -504,6 +504,19 @@ module Echoes
       [start_col, end_col]
     end
 
+    def soft_reset
+      @attrs = Cell.new
+      @cursor.visible = true
+      @saved_cursor = nil
+      @origin_mode = false
+      @auto_wrap = true
+      @insert_mode = false
+      @application_cursor_keys = false
+      @bracketed_paste_mode = false
+      @scroll_top = 0
+      @scroll_bottom = @rows - 1
+    end
+
     def reset
       @cursor = Cursor.new
       @attrs = Cell.new

@@ -571,6 +571,28 @@ class Echoes::ParserTest < Test::Unit::TestCase
     assert_true(@screen.scrollback.size > 0)  # main scrollback restored
   end
 
+  test "soft reset CSI ! p resets modes but preserves screen" do
+    @parser.feed("Hello")
+    @parser.feed("\e[?1h")   # DECCKM on
+    @parser.feed("\e[?7l")   # auto-wrap off
+    @parser.feed("\e[4h")    # insert mode on
+    @parser.feed("\e[?25l")  # hide cursor
+    @parser.feed("\e[2;4r")  # scroll region
+    @parser.feed("\e[!p")    # soft reset
+    assert_false(@screen.application_cursor_keys?)
+    assert_true(@screen.auto_wrap?)
+    assert_false(@screen.insert_mode)
+    assert_true(@screen.cursor.visible)
+    assert_equal("Hello", row_text(0))  # screen content preserved
+  end
+
+  test "soft reset preserves cursor position" do
+    @parser.feed("\e[3;5H")
+    @parser.feed("\e[!p")
+    assert_equal(2, @screen.cursor.row)
+    assert_equal(4, @screen.cursor.col)
+  end
+
   test "text after DCS sixel works normally" do
     @screen.cell_pixel_width = 8.0
     @screen.cell_pixel_height = 8.0
