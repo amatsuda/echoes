@@ -285,6 +285,10 @@ module Echoes
       when '0', '2'
         @screen.title = rest
         return
+      when '8'
+        _params, uri = rest.split(';', 2)
+        @screen.set_hyperlink(uri && !uri.empty? ? uri : nil)
+        return
       when '66'
         # fall through to multicell handling below
       else

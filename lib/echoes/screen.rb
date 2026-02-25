@@ -449,6 +449,10 @@ module Echoes
 
     attr_accessor :mouse_tracking, :mouse_encoding, :insert_mode, :active_charset, :application_keypad, :cursor_style
 
+    def set_hyperlink(uri)
+      @attrs.hyperlink = uri
+    end
+
     def designate_charset(g, charset)
       case g
       when 0 then @charset_g0 = charset

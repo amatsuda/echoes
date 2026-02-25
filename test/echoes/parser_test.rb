@@ -593,6 +593,21 @@ class Echoes::ParserTest < Test::Unit::TestCase
     assert_equal(4, @screen.cursor.col)
   end
 
+  test "OSC 8 hyperlink sets cell hyperlink" do
+    @parser.feed("\e]8;;https://example.com\x07")
+    @parser.feed("click")
+    @parser.feed("\e]8;;\x07")
+    assert_equal("https://example.com", @screen.grid[0][0].hyperlink)
+    assert_equal("https://example.com", @screen.grid[0][4].hyperlink)
+    assert_nil(@screen.grid[0][5].hyperlink)  # after closing OSC 8
+  end
+
+  test "OSC 8 hyperlink close clears" do
+    @parser.feed("\e]8;;https://a.com\x07A\e]8;;\x07B")
+    assert_equal("https://a.com", @screen.grid[0][0].hyperlink)
+    assert_nil(@screen.grid[0][1].hyperlink)
+  end
+
   test "DECSCUSR CSI 2 SP q sets steady block cursor" do
     @parser.feed("\e[2 q")
     assert_equal(2, @screen.cursor_style)

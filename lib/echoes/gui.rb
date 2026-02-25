@@ -606,12 +606,19 @@ module Echoes
       pos = grid_position(event_ptr)
       click_count = ObjC::MSG_RET_L.call(event_ptr, ObjC.sel('clickCount'))
 
+      flags = ObjC::MSG_RET_L.call(event_ptr, ObjC.sel('modifierFlags'))
+
       if pos.nil?
         # Click in tab bar
         click_x, = event_location(event_ptr)
         tab_w = (@cell_width * @cols) / @tabs.size
         clicked_tab = (click_x / tab_w).to_i.clamp(0, @tabs.size - 1)
         @active_tab = clicked_tab
+      elsif (flags & ObjC::NSEventModifierFlagCommand) != 0 && pos
+        # Cmd+click: open hyperlink or detected URL
+        abs_row, col = pos
+        url = hyperlink_at(tab, abs_row, col)
+        open_url(url) if url
       elsif tab.screen.mouse_tracking != :off
         row, col = pos
         send_mouse_event(tab, 0, col, row)  # button 0 = left press
@@ -935,6 +942,34 @@ module Echoes
       return false if @search_index < 0 || @search_index >= @search_matches.size
       r, c, len = @search_matches[@search_index]
       r == abs_row && col >= c && col < c + len
+    end
+
+    URL_REGEX = /https?:\/\/\S+/
+
+    def hyperlink_at(tab, abs_row, col)
+      row = row_at(tab, abs_row)
+      return nil unless row
+
+      # Check OSC 8 hyperlink first
+      cell = row[col]
+      return cell.hyperlink if cell&.hyperlink
+
+      # Detect URL in row text
+      text = row.map(&:char).join
+      text.scan(URL_REGEX) do |url|
+        start = Regexp.last_match.begin(0)
+        if col >= start && col < start + url.length
+          return url
+        end
+      end
+      nil
+    end
+
+    def open_url(url)
+      ns_url = ObjC::MSG_PTR_1.call(ObjC.cls('NSURL'), ObjC.sel('URLWithString:'), ObjC.nsstring(url))
+      return if ns_url.null?
+      workspace = ObjC::MSG_PTR.call(ObjC.cls('NSWorkspace'), ObjC.sel('sharedWorkspace'))
+      ObjC::MSG_PTR_1.call(workspace, ObjC.sel('openURL:'), ns_url)
     end
 
     def row_at(tab, abs_row)
