@@ -146,6 +146,11 @@ module Echoes
         [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP]
       ) { |_self, _cmd, event| gui.mouse_dragged(event) }
 
+      @mouse_up_closure = Fiddle::Closure::BlockCaller.new(
+        Fiddle::TYPE_VOID,
+        [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP]
+      ) { |_self, _cmd, event| gui.mouse_up(event) }
+
       @perform_key_equiv_closure = Fiddle::Closure::BlockCaller.new(
         Fiddle::TYPE_INT,
         [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP]
@@ -173,6 +178,7 @@ module Echoes
         'scrollWheel:'          => ['v@:@', @scroll_wheel_closure],
         'mouseDown:'            => ['v@:@', @mouse_down_closure],
         'mouseDragged:'         => ['v@:@', @mouse_dragged_closure],
+        'mouseUp:'              => ['v@:@', @mouse_up_closure],
         'performKeyEquivalent:' => ['c@:@', @perform_key_equiv_closure],
         'setFrameSize:'         => ['v@:{CGSize=dd}', @set_frame_size_closure],
       })
@@ -494,6 +500,18 @@ module Echoes
 
     def scroll_wheel(event_ptr)
       tab = current_tab
+      screen = tab.screen
+
+      if screen.mouse_tracking != :off
+        delta = ObjC::MSG_RET_D.call(event_ptr, ObjC.sel('deltaY'))
+        pos = grid_position(event_ptr)
+        return unless pos
+        row, col = pos
+        button = delta > 0 ? 64 : 65  # 64=scroll up, 65=scroll down
+        send_mouse_event(tab, button, col, row)
+        return
+      end
+
       delta = ObjC::MSG_RET_D.call(event_ptr, ObjC.sel('deltaY'))
       tab.scroll_accum += delta
 
@@ -507,6 +525,7 @@ module Echoes
     end
 
     def mouse_down(event_ptr)
+      tab = current_tab
       pos = grid_position(event_ptr)
       click_count = ObjC::MSG_RET_L.call(event_ptr, ObjC.sel('clickCount'))
 
@@ -516,10 +535,13 @@ module Echoes
         tab_w = (@cell_width * @cols) / @tabs.size
         clicked_tab = (click_x / tab_w).to_i.clamp(0, @tabs.size - 1)
         @active_tab = clicked_tab
+      elsif tab.screen.mouse_tracking != :off
+        row, col = pos
+        send_mouse_event(tab, 0, col, row)  # button 0 = left press
       elsif click_count == 2
         # Double-click: select word
         row, col = pos
-        bounds = current_tab.screen.word_boundaries_at(row, col)
+        bounds = tab.screen.word_boundaries_at(row, col)
         if bounds
           @selection_anchor = [row, bounds[0]]
           @selection_end = [row, bounds[1]]
@@ -534,11 +556,27 @@ module Echoes
     end
 
     def mouse_dragged(event_ptr)
+      tab = current_tab
       pos = grid_position(event_ptr)
       return unless pos
 
-      @selection_end = pos
+      if tab.screen.mouse_tracking == :button_event || tab.screen.mouse_tracking == :any_event
+        row, col = pos
+        send_mouse_event(tab, 32, col, row)  # 32 = left drag (button 0 + 32)
+      else
+        @selection_end = pos
+      end
       ObjC::MSG_VOID_I.call(@view, ObjC.sel('setNeedsDisplay:'), 1)
+    end
+
+    def mouse_up(event_ptr)
+      tab = current_tab
+      return if tab.screen.mouse_tracking == :off || tab.screen.mouse_tracking == :x10
+
+      pos = grid_position(event_ptr)
+      return unless pos
+      row, col = pos
+      send_mouse_event(tab, 3, col, row, release: true)  # 3 = release
     end
 
     def handle_resize(w, h)
@@ -861,6 +899,18 @@ module Echoes
       end
 
       colors
+    end
+
+    def send_mouse_event(tab, button, col, row, release: false)
+      cx = col + 1
+      cy = row + 1
+      if tab.screen.mouse_encoding == :sgr
+        final = release ? 'm' : 'M'
+        tab.pty_write.write("\e[<#{button};#{cx};#{cy}#{final}")
+      else
+        tab.pty_write.write("\e[M#{(button + 32).chr}#{(cx + 32).chr}#{(cy + 32).chr}")
+      end
+    rescue Errno::EIO, IOError
     end
 
     def resolve_color(val, default)

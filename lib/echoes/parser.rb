@@ -314,6 +314,11 @@ module Echoes
         when 1 then @screen.application_cursor_keys = true
         when 7 then @screen.auto_wrap = true
         when 25 then @screen.show_cursor
+        when 9 then @screen.mouse_tracking = :x10
+        when 1000 then @screen.mouse_tracking = :normal
+        when 1002 then @screen.mouse_tracking = :button_event
+        when 1003 then @screen.mouse_tracking = :any_event
+        when 1006 then @screen.mouse_encoding = :sgr
         when 2004 then @screen.bracketed_paste_mode = true
         when 1049
           @screen.save_cursor
@@ -332,6 +337,8 @@ module Echoes
         when 1 then @screen.application_cursor_keys = false
         when 7 then @screen.auto_wrap = false
         when 25 then @screen.hide_cursor
+        when 9, 1000, 1002, 1003 then @screen.mouse_tracking = :off
+        when 1006 then @screen.mouse_encoding = :default
         when 2004 then @screen.bracketed_paste_mode = false
         when 1049
           @screen.switch_to_main_screen

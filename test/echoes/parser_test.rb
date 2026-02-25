@@ -280,6 +280,31 @@ class Echoes::ParserTest < Test::Unit::TestCase
     assert_equal(0, @screen.cursor.col)
   end
 
+  test "mouse tracking ?1000h enables normal mode" do
+    @parser.feed("\e[?1000h")
+    assert_equal(:normal, @screen.mouse_tracking)
+  end
+
+  test "mouse tracking ?1000l disables" do
+    @parser.feed("\e[?1000h")
+    @parser.feed("\e[?1000l")
+    assert_equal(:off, @screen.mouse_tracking)
+  end
+
+  test "mouse SGR encoding ?1006h enables" do
+    @parser.feed("\e[?1006h")
+    assert_equal(:sgr, @screen.mouse_encoding)
+  end
+
+  test "mouse tracking modes" do
+    @parser.feed("\e[?9h")
+    assert_equal(:x10, @screen.mouse_tracking)
+    @parser.feed("\e[?1002h")
+    assert_equal(:button_event, @screen.mouse_tracking)
+    @parser.feed("\e[?1003h")
+    assert_equal(:any_event, @screen.mouse_tracking)
+  end
+
   test "auto-wrap disabled prevents line wrap" do
     @parser.feed("\e[?7l")
     @parser.feed("ABCDEFGHIJKLM")  # 13 chars on 10-col screen

@@ -24,6 +24,8 @@ module Echoes
       @application_cursor_keys = false
       @bracketed_paste_mode = false
       @auto_wrap = true
+      @mouse_tracking = :off   # :off, :x10, :normal, :button_event, :any_event
+      @mouse_encoding = :default  # :default, :sgr
       @using_alt_screen = false
       @main_grid = nil
       @main_cursor = nil
@@ -373,6 +375,8 @@ module Echoes
     def auto_wrap=(val)
       @auto_wrap = val
     end
+
+    attr_accessor :mouse_tracking, :mouse_encoding
 
     def using_alt_screen?
       @using_alt_screen
