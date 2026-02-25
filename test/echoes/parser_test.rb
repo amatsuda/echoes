@@ -280,6 +280,20 @@ class Echoes::ParserTest < Test::Unit::TestCase
     assert_equal(0, @screen.cursor.col)
   end
 
+  test "cursor next line CSI E" do
+    @parser.feed("\e[3;5H")  # row 2, col 4
+    @parser.feed("\e[2E")
+    assert_equal(4, @screen.cursor.row)
+    assert_equal(0, @screen.cursor.col)
+  end
+
+  test "cursor prev line CSI F" do
+    @parser.feed("\e[4;5H")  # row 3, col 4
+    @parser.feed("\e[2F")
+    assert_equal(1, @screen.cursor.row)
+    assert_equal(0, @screen.cursor.col)
+  end
+
   test "SGR italic" do
     @parser.feed("\e[3mX\e[23mY")
     assert_true(@screen.grid[0][0].italic)

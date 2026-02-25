@@ -173,6 +173,16 @@ module Echoes
       @cursor.row = [@rows - 1, @cursor.row + n].min
     end
 
+    def move_cursor_next_line(n = 1)
+      @cursor.row = [@rows - 1, @cursor.row + n].min
+      @cursor.col = 0
+    end
+
+    def move_cursor_prev_line(n = 1)
+      @cursor.row = [0, @cursor.row - n].max
+      @cursor.col = 0
+    end
+
     def move_cursor_forward(n = 1)
       @cursor.col = [@cols - 1, @cursor.col + n].min
     end

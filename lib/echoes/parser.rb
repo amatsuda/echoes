@@ -283,6 +283,8 @@ module Echoes
       when 'B' then @screen.move_cursor_down(params[0] || 1)
       when 'C' then @screen.move_cursor_forward(params[0] || 1)
       when 'D' then @screen.move_cursor_backward(params[0] || 1)
+      when 'E' then @screen.move_cursor_next_line(params[0] || 1)
+      when 'F' then @screen.move_cursor_prev_line(params[0] || 1)
       when 'H', 'f' then @screen.move_cursor((params[0] || 1) - 1, (params[1] || 1) - 1)
       when 'G', '`' then @screen.move_cursor(@screen.cursor.row, (params[0] || 1) - 1)
       when 'd' then @screen.move_cursor((params[0] || 1) - 1, @screen.cursor.col)
