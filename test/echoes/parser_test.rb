@@ -593,6 +593,11 @@ class Echoes::ParserTest < Test::Unit::TestCase
     assert_equal(4, @screen.cursor.col)
   end
 
+  test "BEL sets bell flag on screen" do
+    @parser.feed("\x07")
+    assert_true(@screen.bell)
+  end
+
   test "OSC 8 hyperlink sets cell hyperlink" do
     @parser.feed("\e]8;;https://example.com\x07")
     @parser.feed("click")

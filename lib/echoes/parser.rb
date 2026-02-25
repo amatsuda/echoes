@@ -79,7 +79,7 @@ module Echoes
       when 0x0F # SI (shift in -> G0)
         @screen.active_charset = 0
       when 0x07 # BEL
-        # ignore
+        @screen.bell = true
       when 0x00..0x1F
         # ignore other C0 controls
       when 0x20..0x7E # printable ASCII

@@ -29,6 +29,7 @@ module Echoes
       @search_query = +""
       @search_matches = []
       @search_index = -1
+      @bell_flash = 0
     end
 
     def run
@@ -408,6 +409,13 @@ module Echoes
         end
       end
 
+      # Visual bell flash
+      if @bell_flash > 0
+        flash_color = make_color_with_alpha(make_color(1.0, 1.0, 1.0), 0.15)
+        ObjC::MSG_VOID.call(flash_color, ObjC.sel('setFill'))
+        ObjC::NSRectFill.call(0.0, gy_off, @cols * @cell_width, @rows * @cell_height)
+      end
+
       # Draw search bar
       if @search_mode
         bar_h = @cell_height + 4.0
@@ -556,6 +564,16 @@ module Echoes
           return
         end
         @active_tab = @active_tab.clamp(0, @tabs.size - 1)
+        need_redraw = true
+      end
+
+      tab = current_tab
+      if tab&.screen&.bell
+        tab.screen.bell = false
+        @bell_flash = 3
+        need_redraw = true
+      elsif @bell_flash > 0
+        @bell_flash -= 1
         need_redraw = true
       end
 

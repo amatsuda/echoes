@@ -447,7 +447,7 @@ module Echoes
       @auto_wrap = val
     end
 
-    attr_accessor :mouse_tracking, :mouse_encoding, :insert_mode, :active_charset, :application_keypad, :cursor_style
+    attr_accessor :mouse_tracking, :mouse_encoding, :insert_mode, :active_charset, :application_keypad, :cursor_style, :bell
 
     def set_hyperlink(uri)
       @attrs.hyperlink = uri
