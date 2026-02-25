@@ -280,6 +280,22 @@ class Echoes::ParserTest < Test::Unit::TestCase
     assert_equal(0, @screen.cursor.col)
   end
 
+  test "insert characters CSI @" do
+    @parser.feed("ABCDE")
+    @parser.feed("\e[1;3H")  # cursor at col 2
+    @parser.feed("\e[2@")     # insert 2 blanks
+    assert_equal("AB  CDE", row_text(0))
+    assert_equal(2, @screen.cursor.col)  # cursor doesn't move
+  end
+
+  test "erase characters CSI X" do
+    @parser.feed("ABCDE")
+    @parser.feed("\e[1;2H")  # cursor at col 1
+    @parser.feed("\e[3X")     # erase 3 chars
+    assert_equal("A   E", row_text(0))
+    assert_equal(1, @screen.cursor.col)  # cursor doesn't move
+  end
+
   test "OSC 0 sets screen title" do
     @parser.feed("\e]0;my title\x07")
     assert_equal("my title", @screen.title)

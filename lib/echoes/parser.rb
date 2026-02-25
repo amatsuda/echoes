@@ -291,6 +291,8 @@ module Echoes
       when 'L' then @screen.insert_lines(params[0] || 1)
       when 'M' then @screen.delete_lines(params[0] || 1)
       when 'P' then @screen.delete_chars(params[0] || 1)
+      when '@' then @screen.insert_chars(params[0] || 1)
+      when 'X' then @screen.erase_chars(params[0] || 1)
       when 'S' then @screen.scroll_up(params[0] || 1)
       when 'T' then @screen.scroll_down(params[0] || 1)
       when 'm' then @screen.set_graphics(params)

@@ -235,6 +235,22 @@ module Echoes
       end
     end
 
+    def insert_chars(n = 1)
+      row = @grid[@cursor.row]
+      n.times do
+        row.pop
+        row.insert(@cursor.col, Cell.new)
+      end
+    end
+
+    def erase_chars(n = 1)
+      n.times do |i|
+        col = @cursor.col + i
+        break if col >= @cols
+        @grid[@cursor.row][col].reset!
+      end
+    end
+
     def scroll_up(n = 1)
       n.times do
         if @scroll_top == 0
