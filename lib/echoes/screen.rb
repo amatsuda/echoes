@@ -29,6 +29,9 @@ module Echoes
       @origin_mode = false
       @insert_mode = false
       @using_alt_screen = false
+      @charset_g0 = :ascii  # :ascii or :dec_special
+      @charset_g1 = :ascii
+      @active_charset = 0   # 0 = G0, 1 = G1
       @main_grid = nil
       @main_cursor = nil
       @main_scroll_top = nil
@@ -37,7 +40,25 @@ module Echoes
       @main_scrollback = nil
     end
 
+    DEC_SPECIAL = {
+      '`' => "\u{25C6}", 'a' => "\u{2592}", 'b' => "\u{2409}", 'c' => "\u{240C}",
+      'd' => "\u{240D}", 'e' => "\u{240A}", 'f' => "\u{00B0}", 'g' => "\u{00B1}",
+      'h' => "\u{2424}", 'i' => "\u{240B}", 'j' => "\u{2518}", 'k' => "\u{2510}",
+      'l' => "\u{250C}", 'm' => "\u{2514}", 'n' => "\u{253C}", 'o' => "\u{23BA}",
+      'p' => "\u{23BB}", 'q' => "\u{2500}", 'r' => "\u{23BC}", 's' => "\u{23BD}",
+      't' => "\u{251C}", 'u' => "\u{2524}", 'v' => "\u{2534}", 'w' => "\u{252C}",
+      'x' => "\u{2502}", 'y' => "\u{2264}", 'z' => "\u{2265}", '{' => "\u{03C0}",
+      '|' => "\u{2260}", '}' => "\u{00A3}", '~' => "\u{00B7}",
+    }.freeze
+
     def put_char(c)
+      if c.bytesize == 1
+        cs = @active_charset == 0 ? @charset_g0 : @charset_g1
+        if cs == :dec_special
+          c = DEC_SPECIAL.fetch(c, c)
+        end
+      end
+
       w = char_width(c)
 
       if @auto_wrap
@@ -408,7 +429,14 @@ module Echoes
       @auto_wrap = val
     end
 
-    attr_accessor :mouse_tracking, :mouse_encoding, :insert_mode
+    attr_accessor :mouse_tracking, :mouse_encoding, :insert_mode, :active_charset
+
+    def designate_charset(g, charset)
+      case g
+      when 0 then @charset_g0 = charset
+      when 1 then @charset_g1 = charset
+      end
+    end
 
     def origin_mode?
       @origin_mode
@@ -513,6 +541,9 @@ module Echoes
       @insert_mode = false
       @application_cursor_keys = false
       @bracketed_paste_mode = false
+      @charset_g0 = :ascii
+      @charset_g1 = :ascii
+      @active_charset = 0
       @scroll_top = 0
       @scroll_bottom = @rows - 1
     end

@@ -9,7 +9,9 @@ module Echoes
       @params = []
       @current_param = +""
       @private_flag = false
+      @csi_intermediate = nil
       @osc_string = +""
+      @esc_intermediate = nil
       @dcs_params = []
       @dcs_current_param = +""
       @dcs_data = "".b
@@ -72,6 +74,10 @@ module Echoes
         @screen.backspace
       when 0x09 # HT
         @screen.tab
+      when 0x0E # SO (shift out -> G1)
+        @screen.active_charset = 1
+      when 0x0F # SI (shift in -> G0)
+        @screen.active_charset = 0
       when 0x07 # BEL
         # ignore
       when 0x00..0x1F
@@ -97,6 +103,7 @@ module Echoes
         @params = []
         @current_param = +""
         @private_flag = false
+        @csi_intermediate = nil
       when 0x50 # P (DCS)
         @state = :dcs_entry
         @dcs_params = []
@@ -121,6 +128,7 @@ module Echoes
         @screen.reverse_index
         @state = :ground
       when 0x20..0x2F # intermediate bytes
+        @esc_intermediate = byte
         @state = :escape_intermediate
       else
         @state = :ground
@@ -130,12 +138,23 @@ module Echoes
     def escape_intermediate(byte)
       case byte
       when 0x20..0x2F
-        # accumulate intermediates, ignore
+        @esc_intermediate = byte
       when 0x30..0x7E
-        # final byte, ignore the whole sequence (charset designations, etc.)
+        dispatch_escape_intermediate(byte)
         @state = :ground
       else
         @state = :ground
+      end
+    end
+
+    def dispatch_escape_intermediate(final)
+      case @esc_intermediate
+      when 0x28 # ( => G0
+        charset = final == 0x30 ? :dec_special : :ascii
+        @screen.designate_charset(0, charset)
+      when 0x29 # ) => G1
+        charset = final == 0x30 ? :dec_special : :ascii
+        @screen.designate_charset(1, charset)
       end
     end
 
@@ -150,6 +169,9 @@ module Echoes
       when 0x3B # ;
         @params << @current_param
         @current_param = +""
+        @state = :csi_param
+      when 0x20..0x2F # intermediate bytes
+        @csi_intermediate = byte.chr
         @state = :csi_param
       when 0x40..0x7E # final byte
         dispatch_csi(byte.chr)
@@ -166,6 +188,8 @@ module Echoes
       when 0x3B # ;
         @params << @current_param
         @current_param = +""
+      when 0x20..0x2F # intermediate bytes
+        @csi_intermediate = byte.chr
       when 0x40..0x7E # final byte
         dispatch_csi(byte.chr)
         @state = :ground
@@ -303,6 +327,7 @@ module Echoes
       when 'u' then @screen.restore_cursor
       when 'c' then dispatch_da(params)
       when 'n' then dispatch_dsr(params)
+      when 'p' then @screen.soft_reset if @csi_intermediate == '!'
       when 'h' then dispatch_mode_set(params)
       when 'l' then dispatch_mode_reset(params)
       end

@@ -593,6 +593,29 @@ class Echoes::ParserTest < Test::Unit::TestCase
     assert_equal(4, @screen.cursor.col)
   end
 
+  test "ESC ( 0 activates DEC Special Graphics for G0" do
+    @parser.feed("\e(0")
+    @parser.feed("lqqk")  # ┌──┐ in DEC Special
+    assert_equal("\u{250C}\u{2500}\u{2500}\u{2510}", row_text(0))
+  end
+
+  test "ESC ( B restores ASCII for G0" do
+    @parser.feed("\e(0")
+    @parser.feed("q")     # horizontal line
+    @parser.feed("\e(B")
+    @parser.feed("q")     # now ASCII 'q'
+    assert_equal("\u{2500}q", row_text(0))
+  end
+
+  test "SO/SI switches between G0 and G1" do
+    @parser.feed("\e)0")   # designate DEC Special to G1
+    @parser.feed("\x0E")   # SO: activate G1
+    @parser.feed("q")      # should be ─
+    @parser.feed("\x0F")   # SI: activate G0
+    @parser.feed("q")      # should be ASCII q
+    assert_equal("\u{2500}q", row_text(0))
+  end
+
   test "text after DCS sixel works normally" do
     @screen.cell_pixel_width = 8.0
     @screen.cell_pixel_height = 8.0
