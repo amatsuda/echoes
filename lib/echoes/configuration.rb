@@ -14,6 +14,7 @@ module Echoes
       @font_family = nil
       @window_title = 'Echoes'
       @tab_position = :top
+      @color_palette = nil
     end
 
     def font_family(val = nil)
@@ -58,6 +59,14 @@ module Echoes
 
     def tab_position(val = nil)
       val ? @tab_position = val.to_sym : @tab_position
+    end
+
+    def color_palette(val = nil)
+      if val
+        @color_palette = val.map { |c| c.is_a?(String) ? parse_color([c]) : c.map(&:to_f) }
+      else
+        @color_palette
+      end
     end
 
     private

@@ -1232,6 +1232,13 @@ module Echoes
         [1.0,  1.0,  1.0],   # 15: bright white
       ]
 
+      # Override with user-configured palette
+      if (palette = Echoes.config.color_palette)
+        palette.each_with_index do |rgb, i|
+          ansi_rgb[i] = rgb if i < 16 && rgb
+        end
+      end
+
       colors = {}
       ansi_rgb.each_with_index do |(r, g, b), i|
         colors[i] = make_color(r, g, b)
