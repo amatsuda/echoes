@@ -310,16 +310,27 @@ module Echoes
           @attrs.reset!
         when 1
           @attrs.bold = true
+        when 2
+          @attrs.faint = true
+        when 3
+          @attrs.italic = true
         when 4
           @attrs.underline = true
         when 7
           @attrs.inverse = true
+        when 9
+          @attrs.strikethrough = true
         when 22
           @attrs.bold = false
+          @attrs.faint = false
+        when 23
+          @attrs.italic = false
         when 24
           @attrs.underline = false
         when 27
           @attrs.inverse = false
+        when 29
+          @attrs.strikethrough = false
         when 30..37
           @attrs.fg = params[i] - 30
         when 38

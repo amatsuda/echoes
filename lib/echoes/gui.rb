@@ -349,12 +349,21 @@ module Echoes
             next if cell.char == " " && !has_bg && !selected
 
             base_font = cell.bold ? @bold_font : font_for_char(cell.char)
+            if cell.italic
+              base_font = create_italic_nsfont(base_font)
+            end
+            if cell.faint
+              fg_color = make_color_with_alpha(fg_color, 0.5)
+            end
             attrs = {
               ObjC::NSFontAttributeName => base_font,
               ObjC::NSForegroundColorAttributeName => fg_color,
             }
             if cell.underline
               attrs[ObjC::NSUnderlineStyleAttributeName] = ObjC.nsnumber_int(1)
+            end
+            if cell.strikethrough
+              attrs[ObjC::NSStrikethroughStyleAttributeName] = ObjC.nsnumber_int(1)
             end
             ns_attrs = ObjC.nsdict(attrs)
             ns_char = ObjC.nsstring(cell.char)
@@ -779,6 +788,11 @@ module Echoes
       ObjC::MSG_PTR_1L.call(fm, ObjC.sel('convertFont:toHaveTrait:'), font, 0x2)  # NSBoldFontMask
     end
 
+    def create_italic_nsfont(font)
+      fm = ObjC::MSG_PTR.call(ObjC.cls('NSFontManager'), ObjC.sel('sharedFontManager'))
+      ObjC::MSG_PTR_1L.call(fm, ObjC.sel('convertFont:toHaveTrait:'), font, 0x1)  # NSItalicFontMask
+    end
+
     def create_nsfont(size)
       if (family = Echoes.config.font_family)
         ObjC::MSG_PTR_1D.call(
@@ -920,6 +934,10 @@ module Echoes
       when Array then make_color(val[0] / 255.0, val[1] / 255.0, val[2] / 255.0)
       else default
       end
+    end
+
+    def make_color_with_alpha(color, alpha)
+      ObjC::MSG_PTR_1D.call(color, ObjC.sel('colorWithAlphaComponent:'), alpha)
     end
 
     def make_color(r, g, b, a = 1.0)

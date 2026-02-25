@@ -139,7 +139,8 @@ module Echoes
 
     NSFontAttributeName            = appkit_const('NSFontAttributeName')
     NSForegroundColorAttributeName = appkit_const('NSForegroundColorAttributeName')
-    NSUnderlineStyleAttributeName  = appkit_const('NSUnderlineStyleAttributeName')
+    NSUnderlineStyleAttributeName      = appkit_const('NSUnderlineStyleAttributeName')
+    NSStrikethroughStyleAttributeName  = appkit_const('NSStrikethroughStyleAttributeName')
     NSPasteboardTypeString         = appkit_const('NSPasteboardTypeString')
 
     # CoreGraphics framework

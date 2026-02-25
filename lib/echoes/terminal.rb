@@ -75,8 +75,11 @@ module Echoes
              cell.underline != last_underline || cell.inverse != last_inverse
             codes = [0]
             codes << 1 if cell.bold
+            codes << 2 if cell.faint
+            codes << 3 if cell.italic
             codes << 4 if cell.underline
             codes << 7 if cell.inverse
+            codes << 9 if cell.strikethrough
             if cell.fg.is_a?(Array)
               codes.push(38, 2, *cell.fg)
             elsif cell.fg

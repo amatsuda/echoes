@@ -280,6 +280,34 @@ class Echoes::ParserTest < Test::Unit::TestCase
     assert_equal(0, @screen.cursor.col)
   end
 
+  test "SGR italic" do
+    @parser.feed("\e[3mX\e[23mY")
+    assert_true(@screen.grid[0][0].italic)
+    assert_false(@screen.grid[0][1].italic)
+  end
+
+  test "SGR faint" do
+    @parser.feed("\e[2mX\e[22mY")
+    assert_true(@screen.grid[0][0].faint)
+    assert_false(@screen.grid[0][1].faint)
+  end
+
+  test "SGR strikethrough" do
+    @parser.feed("\e[9mX\e[29mY")
+    assert_true(@screen.grid[0][0].strikethrough)
+    assert_false(@screen.grid[0][1].strikethrough)
+  end
+
+  test "SGR 22 resets both bold and faint" do
+    @parser.feed("\e[1;2mX\e[22mY")
+    x = @screen.grid[0][0]
+    y = @screen.grid[0][1]
+    assert_true(x.bold)
+    assert_true(x.faint)
+    assert_false(y.bold)
+    assert_false(y.faint)
+  end
+
   test "insert mode CSI 4h pushes chars right" do
     @parser.feed("ABCDE")
     @parser.feed("\e[1;3H")  # cursor at col 2
