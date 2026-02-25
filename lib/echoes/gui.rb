@@ -441,26 +441,23 @@ module Echoes
       tab.scroll_accum = 0.0
 
       flags = ObjC::MSG_RET_L.call(event_ptr, ObjC.sel('modifierFlags'))
+      chars_ns = ObjC::MSG_PTR.call(event_ptr, ObjC.sel('charactersIgnoringModifiers'))
+      chars = ObjC.to_ruby_string(chars_ns)
+      return if chars.empty?
 
-      if (flags & ObjC::NSEventModifierFlagControl) != 0
-        chars_ns = ObjC::MSG_PTR.call(event_ptr, ObjC.sel('charactersIgnoringModifiers'))
-        chars = ObjC.to_ruby_string(chars_ns)
-        unless chars.empty?
-          ctrl_char = (chars[0].ord & 0x1F).chr
-          tab.pty_write.write(ctrl_char)
-        end
+      mod = modifier_param(flags)
+
+      if mod > 1 && (seq = map_modified_key(chars, mod))
+        tab.pty_write.write(seq)
+      elsif (flags & ObjC::NSEventModifierFlagControl) != 0
+        ctrl_char = (chars[0].ord & 0x1F).chr
+        tab.pty_write.write(ctrl_char)
       elsif (flags & ObjC::NSEventModifierFlagOption) != 0
-        chars_ns = ObjC::MSG_PTR.call(event_ptr, ObjC.sel('charactersIgnoringModifiers'))
-        chars = ObjC.to_ruby_string(chars_ns)
-        unless chars.empty?
-          tab.pty_write.write("\e#{chars}")
-        end
+        tab.pty_write.write("\e#{chars}")
       else
-        chars_ns = ObjC::MSG_PTR.call(event_ptr, ObjC.sel('characters'))
-        chars = ObjC.to_ruby_string(chars_ns)
-        unless chars.empty?
-          tab.pty_write.write(map_special_keys(chars, tab.screen.application_cursor_keys?))
-        end
+        chars_ns2 = ObjC::MSG_PTR.call(event_ptr, ObjC.sel('characters'))
+        chars2 = ObjC.to_ruby_string(chars_ns2)
+        tab.pty_write.write(map_special_keys(chars2.empty? ? chars : chars2, tab.screen.application_cursor_keys?))
       end
     rescue Errno::EIO, IOError
       close_tab(@active_tab)
@@ -842,6 +839,46 @@ module Echoes
         @font_cache[char] = ObjC.retain(fallback)
       end
       @font_cache[char]
+    end
+
+    MODIFIED_KEYS = {
+      "\u{F700}" => ['1', 'A'],   # Up
+      "\u{F701}" => ['1', 'B'],   # Down
+      "\u{F702}" => ['1', 'D'],   # Left
+      "\u{F703}" => ['1', 'C'],   # Right
+      "\u{F728}" => ['3', '~'],   # Delete
+      "\u{F729}" => ['1', 'H'],   # Home
+      "\u{F72B}" => ['1', 'F'],   # End
+      "\u{F72C}" => ['5', '~'],   # Page Up
+      "\u{F72D}" => ['6', '~'],   # Page Down
+      "\u{F704}" => ['1', 'P'],   # F1
+      "\u{F705}" => ['1', 'Q'],   # F2
+      "\u{F706}" => ['1', 'R'],   # F3
+      "\u{F707}" => ['1', 'S'],   # F4
+      "\u{F708}" => ['15', '~'],  # F5
+      "\u{F709}" => ['17', '~'],  # F6
+      "\u{F70A}" => ['18', '~'],  # F7
+      "\u{F70B}" => ['19', '~'],  # F8
+      "\u{F70C}" => ['20', '~'],  # F9
+      "\u{F70D}" => ['21', '~'],  # F10
+      "\u{F70E}" => ['23', '~'],  # F11
+      "\u{F70F}" => ['24', '~'],  # F12
+    }.freeze
+
+    def modifier_param(flags)
+      m = 1
+      m += 1 if (flags & ObjC::NSEventModifierFlagShift) != 0
+      m += 2 if (flags & ObjC::NSEventModifierFlagOption) != 0
+      m += 4 if (flags & ObjC::NSEventModifierFlagControl) != 0
+      m
+    end
+
+    def map_modified_key(chars, mod)
+      entry = MODIFIED_KEYS[chars]
+      return nil unless entry
+
+      param, final = entry
+      "\e[#{param};#{mod}#{final}"
     end
 
     def map_special_keys(chars, app_cursor = false)
