@@ -28,6 +28,7 @@ module Echoes
       @mouse_encoding = :default  # :default, :sgr
       @origin_mode = false
       @insert_mode = false
+      @application_keypad = false
       @using_alt_screen = false
       @charset_g0 = :ascii  # :ascii or :dec_special
       @charset_g1 = :ascii
@@ -445,7 +446,7 @@ module Echoes
       @auto_wrap = val
     end
 
-    attr_accessor :mouse_tracking, :mouse_encoding, :insert_mode, :active_charset
+    attr_accessor :mouse_tracking, :mouse_encoding, :insert_mode, :active_charset, :application_keypad
 
     def designate_charset(g, charset)
       case g

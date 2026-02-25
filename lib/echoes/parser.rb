@@ -124,11 +124,21 @@ module Echoes
       when 0x44 # D
         @screen.line_feed
         @state = :ground
+      when 0x45 # E (NEL - Next Line)
+        @screen.carriage_return
+        @screen.line_feed
+        @state = :ground
       when 0x48 # H (HTS - Horizontal Tab Set)
         @screen.set_tab_stop
         @state = :ground
       when 0x4D # M
         @screen.reverse_index
+        @state = :ground
+      when 0x3D # = (application keypad mode)
+        @screen.application_keypad = true
+        @state = :ground
+      when 0x3E # > (normal keypad mode)
+        @screen.application_keypad = false
         @state = :ground
       when 0x20..0x2F # intermediate bytes
         @esc_intermediate = byte

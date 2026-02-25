@@ -593,6 +593,24 @@ class Echoes::ParserTest < Test::Unit::TestCase
     assert_equal(4, @screen.cursor.col)
   end
 
+  test "NEL ESC E moves to beginning of next line" do
+    @parser.feed("\e[1;5H")  # cursor at row 0, col 4
+    @parser.feed("\eE")
+    assert_equal(1, @screen.cursor.row)
+    assert_equal(0, @screen.cursor.col)
+  end
+
+  test "application keypad mode ESC = enables" do
+    @parser.feed("\e=")
+    assert_true(@screen.application_keypad)
+  end
+
+  test "normal keypad mode ESC > disables" do
+    @parser.feed("\e=")
+    @parser.feed("\e>")
+    assert_false(@screen.application_keypad)
+  end
+
   test "HTS ESC H sets tab stop at current column" do
     @parser.feed("\e[1;5H")  # cursor at col 4
     @parser.feed("\eH")       # set tab stop
