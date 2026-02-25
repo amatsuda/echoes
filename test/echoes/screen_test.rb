@@ -21,16 +21,18 @@ class Echoes::ScreenTest < Test::Unit::TestCase
     assert_equal(1, @screen.cursor.col)
   end
 
-  test "put_char wraps at end of line" do
+  test "put_char sets pending wrap at end of line" do
     10.times { |i| @screen.put_char(("A".ord + i).chr) }
     assert_equal(0, @screen.cursor.row)
-    assert_equal(10, @screen.cursor.col)
+    assert_equal(9, @screen.cursor.col)  # stays at last col
+    assert_true(@screen.pending_wrap)
 
-    # Next char triggers wrap
+    # Next char triggers deferred wrap
     @screen.put_char("Z")
     assert_equal(1, @screen.cursor.row)
     assert_equal(1, @screen.cursor.col)
     assert_equal("Z", @screen.grid[1][0].char)
+    assert_false(@screen.pending_wrap)
   end
 
   test "carriage_return" do
@@ -482,5 +484,48 @@ class Echoes::ScreenTest < Test::Unit::TestCase
   test "word_boundaries_at out of bounds" do
     assert_nil(@screen.word_boundaries_at(-1, 0))
     assert_nil(@screen.word_boundaries_at(0, 20))
+  end
+
+  # --- Pending wrap (deferred wrap) ---
+
+  test "pending wrap cleared by cursor movement" do
+    10.times { |i| @screen.put_char(("A".ord + i).chr) }
+    assert_true(@screen.pending_wrap)
+
+    @screen.move_cursor_backward(1)
+    assert_false(@screen.pending_wrap)
+    assert_equal(8, @screen.cursor.col)  # moved back from col 9
+  end
+
+  test "pending wrap cleared by carriage return" do
+    10.times { |i| @screen.put_char(("A".ord + i).chr) }
+    assert_true(@screen.pending_wrap)
+
+    @screen.carriage_return
+    assert_false(@screen.pending_wrap)
+    assert_equal(0, @screen.cursor.col)
+    assert_equal(0, @screen.cursor.row)  # no wrap happened
+  end
+
+  test "pending wrap cleared by backspace" do
+    10.times { |i| @screen.put_char(("A".ord + i).chr) }
+    assert_true(@screen.pending_wrap)
+
+    @screen.backspace
+    assert_false(@screen.pending_wrap)
+    assert_equal(8, @screen.cursor.col)
+  end
+
+  test "pending wrap saved and restored with cursor" do
+    10.times { |i| @screen.put_char(("A".ord + i).chr) }
+    assert_true(@screen.pending_wrap)
+
+    @screen.save_cursor
+    @screen.carriage_return  # clears pending_wrap
+    assert_false(@screen.pending_wrap)
+
+    @screen.restore_cursor
+    assert_true(@screen.pending_wrap)
+    assert_equal(9, @screen.cursor.col)
   end
 end

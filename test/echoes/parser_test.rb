@@ -786,4 +786,30 @@ class Echoes::ParserTest < Test::Unit::TestCase
     end
     assert_true(found, "Expected 'Hello' to appear in grid after sixel")
   end
+
+  # --- Deferred wrap (pending wrap flag) ---
+
+  test "deferred wrap: writing to last column sets pending wrap" do
+    @parser.feed("ABCDEFGHIJ")  # 10 chars on 10-col screen
+    assert_equal(0, @screen.cursor.row)
+    assert_equal(9, @screen.cursor.col)
+    assert_true(@screen.pending_wrap)
+    assert_equal("ABCDEFGHIJ", row_text(0))
+  end
+
+  test "deferred wrap: cursor movement clears pending wrap without wrapping" do
+    @parser.feed("ABCDEFGHIJ")  # fills row, sets pending wrap
+    @parser.feed("\e[D")        # CUB 1 — move cursor back
+    assert_false(@screen.pending_wrap)
+    assert_equal(0, @screen.cursor.row)  # no wrap
+    assert_equal(8, @screen.cursor.col)
+  end
+
+  test "deferred wrap: overwrite last column without wrapping" do
+    @parser.feed("ABCDEFGHIJ")  # fills row, pending wrap
+    @parser.feed("\b")          # backspace clears pending wrap, col = 8
+    @parser.feed("Z")           # overwrite col 8
+    assert_equal(0, @screen.cursor.row)  # still on row 0
+    assert_equal("ABCDEFGHZJ", row_text(0))
+  end
 end

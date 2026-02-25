@@ -2,7 +2,7 @@
 
 module Echoes
   class Screen
-    attr_reader :rows, :cols, :cursor, :grid, :scrollback
+    attr_reader :rows, :cols, :cursor, :grid, :scrollback, :pending_wrap
     attr_accessor :cell_pixel_width, :cell_pixel_height, :title
 
     def self.scrollback_limit
@@ -41,6 +41,7 @@ module Echoes
       @main_scroll_bottom = nil
       @main_saved_cursor = nil
       @main_scrollback = nil
+      @pending_wrap = false
     end
 
     DEC_SPECIAL = {
@@ -65,14 +66,16 @@ module Echoes
       w = char_width(c)
 
       if @auto_wrap
-        # If wide char doesn't fit at end of line, wrap first
-        if w == 2 && @cursor.col >= @cols - 1
-          if @cursor.col == @cols - 1
-            @grid[@cursor.row][@cursor.col].reset!
-          end
+        # Deferred wrap: if the previous character set the flag, wrap now
+        if @pending_wrap
+          @pending_wrap = false
           @cursor.col = 0
           line_feed
-        elsif @cursor.col >= @cols
+        end
+
+        # Wide char at last column: doesn't fit, wrap first
+        if w == 2 && @cursor.col == @cols - 1
+          @grid[@cursor.row][@cursor.col].reset!
           @cursor.col = 0
           line_feed
         end
@@ -105,7 +108,10 @@ module Echoes
       end
 
       @cursor.col += w
-      @cursor.col = [@cursor.col, @cols - 1].min unless @auto_wrap
+      if @cursor.col >= @cols
+        @cursor.col = @cols - 1
+        @pending_wrap = true if @auto_wrap
+      end
     end
 
     def put_multicell(text, scale:, width:, frac_n:, frac_d:, valign:, halign:)
@@ -181,6 +187,7 @@ module Echoes
     end
 
     def move_cursor(row, col)
+      @pending_wrap = false
       if @origin_mode
         @cursor.row = (row + @scroll_top).clamp(@scroll_top, @scroll_bottom)
       else
@@ -190,36 +197,44 @@ module Echoes
     end
 
     def move_cursor_up(n = 1)
+      @pending_wrap = false
       @cursor.row = [0, @cursor.row - n].max
     end
 
     def move_cursor_down(n = 1)
+      @pending_wrap = false
       @cursor.row = [@rows - 1, @cursor.row + n].min
     end
 
     def move_cursor_next_line(n = 1)
+      @pending_wrap = false
       @cursor.row = [@rows - 1, @cursor.row + n].min
       @cursor.col = 0
     end
 
     def move_cursor_prev_line(n = 1)
+      @pending_wrap = false
       @cursor.row = [0, @cursor.row - n].max
       @cursor.col = 0
     end
 
     def move_cursor_forward(n = 1)
+      @pending_wrap = false
       @cursor.col = [@cols - 1, @cursor.col + n].min
     end
 
     def move_cursor_backward(n = 1)
+      @pending_wrap = false
       @cursor.col = [0, @cursor.col - n].max
     end
 
     def carriage_return
+      @pending_wrap = false
       @cursor.col = 0
     end
 
     def line_feed
+      @pending_wrap = false
       if @cursor.row == @scroll_bottom
         scroll_up(1)
       else
@@ -228,6 +243,7 @@ module Echoes
     end
 
     def reverse_index
+      @pending_wrap = false
       if @cursor.row == @scroll_top
         scroll_down(1)
       else
@@ -236,6 +252,7 @@ module Echoes
     end
 
     def tab
+      @pending_wrap = false
       next_stop = @tab_stops.find { |s| s > @cursor.col }
       @cursor.col = next_stop ? [next_stop, @cols - 1].min : @cols - 1
     end
@@ -255,10 +272,12 @@ module Echoes
     end
 
     def backspace
+      @pending_wrap = false
       @cursor.col = [0, @cursor.col - 1].max
     end
 
     def erase_in_display(mode = 0)
+      @pending_wrap = false
       case mode
       when 0
         erase_in_line(0)
@@ -272,6 +291,7 @@ module Echoes
     end
 
     def erase_in_line(mode = 0)
+      @pending_wrap = false
       case mode
       when 0
         (@cursor.col...@cols).each { |c| @grid[@cursor.row][c].reset! }
@@ -283,6 +303,7 @@ module Echoes
     end
 
     def insert_lines(n = 1)
+      @pending_wrap = false
       return unless @cursor.row >= @scroll_top && @cursor.row <= @scroll_bottom
 
       n.times do
@@ -292,6 +313,7 @@ module Echoes
     end
 
     def delete_lines(n = 1)
+      @pending_wrap = false
       return unless @cursor.row >= @scroll_top && @cursor.row <= @scroll_bottom
 
       n.times do
@@ -301,6 +323,7 @@ module Echoes
     end
 
     def delete_chars(n = 1)
+      @pending_wrap = false
       row = @grid[@cursor.row]
       n.times do
         row.delete_at(@cursor.col)
@@ -309,6 +332,7 @@ module Echoes
     end
 
     def insert_chars(n = 1)
+      @pending_wrap = false
       row = @grid[@cursor.row]
       n.times do
         row.pop
@@ -325,6 +349,7 @@ module Echoes
     end
 
     def scroll_up(n = 1)
+      @pending_wrap = false
       n.times do
         if @scroll_top == 0
           row = @grid[@scroll_top]
@@ -337,6 +362,7 @@ module Echoes
     end
 
     def scroll_down(n = 1)
+      @pending_wrap = false
       n.times do
         @grid.delete_at(@scroll_bottom)
         @grid.insert(@scroll_top, Array.new(@cols) { Cell.new })
@@ -344,6 +370,7 @@ module Echoes
     end
 
     def set_scroll_region(top, bottom)
+      @pending_wrap = false
       @scroll_top = clamp_row(top)
       @scroll_bottom = clamp_row(bottom)
       @cursor.row = 0
@@ -432,6 +459,7 @@ module Echoes
         charset_g0: @charset_g0,
         charset_g1: @charset_g1,
         active_charset: @active_charset,
+        pending_wrap: @pending_wrap,
       }
     end
 
@@ -445,6 +473,7 @@ module Echoes
         @charset_g0 = @saved_cursor[:charset_g0]
         @charset_g1 = @saved_cursor[:charset_g1]
         @active_charset = @saved_cursor[:active_charset]
+        @pending_wrap = @saved_cursor[:pending_wrap] || false
       end
     end
 
@@ -470,6 +499,7 @@ module Echoes
 
     def auto_wrap=(val)
       @auto_wrap = val
+      @pending_wrap = false
     end
 
     attr_accessor :mouse_tracking, :mouse_encoding, :insert_mode, :active_charset, :application_keypad, :cursor_style, :bell
@@ -501,6 +531,7 @@ module Echoes
 
     def origin_mode=(val)
       @origin_mode = val
+      @pending_wrap = false
       if val
         @cursor.row = @scroll_top
         @cursor.col = 0
@@ -528,6 +559,7 @@ module Echoes
       @scroll_bottom = @rows - 1
       @saved_cursor = nil
       @scrollback = []
+      @pending_wrap = false
       @using_alt_screen = true
     end
 
@@ -549,6 +581,7 @@ module Echoes
       @main_scroll_bottom = nil
       @main_saved_cursor = nil
       @main_scrollback = nil
+      @pending_wrap = false
       @using_alt_screen = false
     end
 
@@ -605,6 +638,7 @@ module Echoes
       @tab_stops = default_tab_stops
       @scroll_top = 0
       @scroll_bottom = @rows - 1
+      @pending_wrap = false
     end
 
     def reset
@@ -616,6 +650,7 @@ module Echoes
       @saved_cursor = nil
       @scrollback = []
       @tab_stops = default_tab_stops
+      @pending_wrap = false
     end
 
     def resize(new_rows, new_cols)
@@ -644,6 +679,7 @@ module Echoes
       @scroll_bottom = new_rows - 1
       @cursor.row = clamp_row(@cursor.row)
       @cursor.col = clamp_col(@cursor.col)
+      @pending_wrap = false
     end
 
     private
