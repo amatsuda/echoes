@@ -579,7 +579,16 @@ module Echoes
       return if ns_str.null?
 
       str = ObjC.to_ruby_string(ns_str)
-      current_tab.pty_write.write(str) unless str.empty?
+      return if str.empty?
+
+      tab = current_tab
+      if tab.screen.bracketed_paste_mode?
+        tab.pty_write.write("\e[200~")
+        tab.pty_write.write(str)
+        tab.pty_write.write("\e[201~")
+      else
+        tab.pty_write.write(str)
+      end
     rescue Errno::EIO, IOError
     end
 

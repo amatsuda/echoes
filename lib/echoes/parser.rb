@@ -296,6 +296,7 @@ module Echoes
         case p
         when 1 then @screen.application_cursor_keys = true
         when 25 then @screen.show_cursor
+        when 2004 then @screen.bracketed_paste_mode = true
         when 1049
           @screen.save_cursor
           @screen.switch_to_alt_screen
@@ -312,6 +313,7 @@ module Echoes
         case p
         when 1 then @screen.application_cursor_keys = false
         when 25 then @screen.hide_cursor
+        when 2004 then @screen.bracketed_paste_mode = false
         when 1049
           @screen.switch_to_main_screen
           @screen.restore_cursor

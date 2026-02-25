@@ -22,6 +22,7 @@ module Echoes
       @cell_pixel_width = 8.0
       @cell_pixel_height = 16.0
       @application_cursor_keys = false
+      @bracketed_paste_mode = false
       @using_alt_screen = false
       @main_grid = nil
       @main_cursor = nil
@@ -322,6 +323,14 @@ module Echoes
 
     def application_cursor_keys=(val)
       @application_cursor_keys = val
+    end
+
+    def bracketed_paste_mode?
+      @bracketed_paste_mode
+    end
+
+    def bracketed_paste_mode=(val)
+      @bracketed_paste_mode = val
     end
 
     def using_alt_screen?

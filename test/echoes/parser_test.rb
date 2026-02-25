@@ -280,6 +280,17 @@ class Echoes::ParserTest < Test::Unit::TestCase
     assert_equal(0, @screen.cursor.col)
   end
 
+  test "bracketed paste mode ?2004h enables" do
+    @parser.feed("\e[?2004h")
+    assert_true(@screen.bracketed_paste_mode?)
+  end
+
+  test "bracketed paste mode ?2004l disables" do
+    @parser.feed("\e[?2004h")
+    @parser.feed("\e[?2004l")
+    assert_false(@screen.bracketed_paste_mode?)
+  end
+
   test "DECCKM ?1h enables application cursor keys" do
     @parser.feed("\e[?1h")
     assert_true(@screen.application_cursor_keys?)
