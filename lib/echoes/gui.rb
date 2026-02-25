@@ -564,6 +564,11 @@ module Echoes
       elsif tab.screen.mouse_tracking != :off
         row, col = pos
         send_mouse_event(tab, 0, col, row)  # button 0 = left press
+      elsif click_count >= 3
+        # Triple-click: select entire line
+        abs_row, = pos
+        @selection_anchor = [abs_row, 0]
+        @selection_end = [abs_row, @cols - 1]
       elsif click_count == 2
         # Double-click: select word
         abs_row, col = pos
