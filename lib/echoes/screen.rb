@@ -422,12 +422,29 @@ module Echoes
     end
 
     def save_cursor
-      @saved_cursor = [@cursor.row, @cursor.col]
+      saved_attrs = Cell.new
+      saved_attrs.copy_from(@attrs)
+      @saved_cursor = {
+        row: @cursor.row, col: @cursor.col,
+        attrs: saved_attrs,
+        origin_mode: @origin_mode,
+        auto_wrap: @auto_wrap,
+        charset_g0: @charset_g0,
+        charset_g1: @charset_g1,
+        active_charset: @active_charset,
+      }
     end
 
     def restore_cursor
       if @saved_cursor
-        @cursor.row, @cursor.col = @saved_cursor
+        @cursor.row = @saved_cursor[:row]
+        @cursor.col = @saved_cursor[:col]
+        @attrs.copy_from(@saved_cursor[:attrs])
+        @origin_mode = @saved_cursor[:origin_mode]
+        @auto_wrap = @saved_cursor[:auto_wrap]
+        @charset_g0 = @saved_cursor[:charset_g0]
+        @charset_g1 = @saved_cursor[:charset_g1]
+        @active_charset = @saved_cursor[:active_charset]
       end
     end
 

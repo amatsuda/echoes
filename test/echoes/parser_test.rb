@@ -593,6 +593,27 @@ class Echoes::ParserTest < Test::Unit::TestCase
     assert_equal(4, @screen.cursor.col)
   end
 
+  test "DECSC/DECRC saves and restores full terminal state" do
+    @parser.feed("\e[1;31m")     # bold + red fg
+    @parser.feed("\e(0")          # DEC Special Graphics G0
+    @parser.feed("\e[?7l")        # auto-wrap off
+    @parser.feed("\e[3;5H")       # cursor at row 2, col 4
+    @parser.feed("\e7")           # DECSC
+    @parser.feed("\e[0m")         # reset SGR
+    @parser.feed("\e(B")          # back to ASCII
+    @parser.feed("\e[?7h")        # auto-wrap on
+    @parser.feed("\e[1;1H")       # move cursor
+    @parser.feed("\e8")           # DECRC
+    assert_equal(2, @screen.cursor.row)
+    assert_equal(4, @screen.cursor.col)
+    assert_false(@screen.auto_wrap?)
+    # SGR attrs restored: next char should be bold red
+    @parser.feed("X")
+    cell = @screen.grid[2][4]
+    assert_true(cell.bold)
+    assert_equal(1, cell.fg)
+  end
+
   test "SGR 5 blink" do
     @parser.feed("\e[5mX\e[25mY")
     assert_true(@screen.grid[0][0].blink)
