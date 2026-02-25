@@ -280,6 +280,40 @@ class Echoes::ParserTest < Test::Unit::TestCase
     assert_equal(0, @screen.cursor.col)
   end
 
+  test "DA1 CSI c responds with device attributes" do
+    responses = []
+    parser = Echoes::Parser.new(@screen, writer: ->(s) { responses << s })
+    parser.feed("\e[c")
+    assert_equal(["\e[?62;22c"], responses)
+  end
+
+  test "DA1 CSI 0c responds with device attributes" do
+    responses = []
+    parser = Echoes::Parser.new(@screen, writer: ->(s) { responses << s })
+    parser.feed("\e[0c")
+    assert_equal(["\e[?62;22c"], responses)
+  end
+
+  test "DSR CSI 6n responds with cursor position report" do
+    responses = []
+    parser = Echoes::Parser.new(@screen, writer: ->(s) { responses << s })
+    parser.feed("\e[3;5H")  # cursor at row 2, col 4
+    parser.feed("\e[6n")
+    assert_equal(["\e[3;5R"], responses)
+  end
+
+  test "DSR CSI 5n responds with device OK" do
+    responses = []
+    parser = Echoes::Parser.new(@screen, writer: ->(s) { responses << s })
+    parser.feed("\e[5n")
+    assert_equal(["\e[0n"], responses)
+  end
+
+  test "DSR CSI 6n without writer does not crash" do
+    @parser.feed("\e[6n")  # default parser has no writer
+    # Should not raise
+  end
+
   test "bracketed paste mode ?2004h enables" do
     @parser.feed("\e[?2004h")
     assert_true(@screen.bracketed_paste_mode?)

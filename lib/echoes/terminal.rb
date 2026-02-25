@@ -13,7 +13,7 @@ module Echoes
       @cols = cols || size[1]
       @command = command
       @screen = Screen.new(rows: @rows, cols: @cols)
-      @parser = Parser.new(@screen)
+      @parser = Parser.new(@screen, writer: ->(s) { @write_io&.write(s) rescue nil })
     end
 
     def run

@@ -2,8 +2,9 @@
 
 module Echoes
   class Parser
-    def initialize(screen)
+    def initialize(screen, writer: nil)
       @screen = screen
+      @writer = writer
       @state = :ground
       @params = []
       @current_param = +""
@@ -284,6 +285,8 @@ module Echoes
       when 'r' then @screen.set_scroll_region((params[0] || 1) - 1, (params[1] || @screen.rows) - 1)
       when 's' then @screen.save_cursor
       when 'u' then @screen.restore_cursor
+      when 'c' then dispatch_da(params)
+      when 'n' then dispatch_dsr(params)
       when 'h' then dispatch_mode_set(params)
       when 'l' then dispatch_mode_reset(params)
       end
@@ -320,6 +323,27 @@ module Echoes
         when 47, 1047
           @screen.switch_to_main_screen
         end
+      end
+    end
+
+    def dispatch_da(params)
+      return unless @writer
+      return unless params[0].nil? || params[0] == 0
+
+      # VT220 with ANSI color support
+      @writer.call("\e[?62;22c")
+    end
+
+    def dispatch_dsr(params)
+      return unless @writer
+
+      case params[0]
+      when 5
+        @writer.call("\e[0n")
+      when 6
+        row = @screen.cursor.row + 1
+        col = @screen.cursor.col + 1
+        @writer.call("\e[#{row};#{col}R")
       end
     end
 

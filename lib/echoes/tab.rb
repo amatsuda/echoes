@@ -9,7 +9,6 @@ module Echoes
 
     def initialize(command:, rows:, cols:)
       @screen = Screen.new(rows: rows, cols: cols)
-      @parser = Parser.new(@screen)
       Dir.chdir(Dir.home) do
         ENV['TERM'] = 'xterm-256color'
         ENV['LANG'] ||= 'en_US.UTF-8'
@@ -17,6 +16,7 @@ module Echoes
         @pty_read, @pty_write, @pty_pid = PTY.spawn(command)
         @pty_read.winsize = [rows, cols]
       end
+      @parser = Parser.new(@screen, writer: ->(s) { @pty_write.write(s) rescue nil })
       @scroll_offset = 0
       @scroll_accum = 0.0
       @title = File.basename(command)
