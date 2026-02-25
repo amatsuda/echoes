@@ -307,7 +307,14 @@ module Echoes
     end
 
     def dispatch_mode_set(params)
-      return unless @private_flag
+      unless @private_flag
+        params.each do |p|
+          case p
+          when 4 then @screen.insert_mode = true
+          end
+        end
+        return
+      end
 
       params.each do |p|
         case p
@@ -331,7 +338,14 @@ module Echoes
     end
 
     def dispatch_mode_reset(params)
-      return unless @private_flag
+      unless @private_flag
+        params.each do |p|
+          case p
+          when 4 then @screen.insert_mode = false
+          end
+        end
+        return
+      end
 
       params.each do |p|
         case p

@@ -27,6 +27,7 @@ module Echoes
       @mouse_tracking = :off   # :off, :x10, :normal, :button_event, :any_event
       @mouse_encoding = :default  # :default, :sgr
       @origin_mode = false
+      @insert_mode = false
       @using_alt_screen = false
       @main_grid = nil
       @main_cursor = nil
@@ -61,6 +62,11 @@ module Echoes
       end
 
       erase_multicell_at(@cursor.row, @cursor.col)
+
+      if @insert_mode
+        row = @grid[@cursor.row]
+        w.times { row.pop; row.insert(@cursor.col, Cell.new) }
+      end
 
       cell = @grid[@cursor.row][@cursor.col]
       cell.copy_from(@attrs)
@@ -381,7 +387,7 @@ module Echoes
       @auto_wrap = val
     end
 
-    attr_accessor :mouse_tracking, :mouse_encoding
+    attr_accessor :mouse_tracking, :mouse_encoding, :insert_mode
 
     def origin_mode?
       @origin_mode

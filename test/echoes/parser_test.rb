@@ -280,6 +280,23 @@ class Echoes::ParserTest < Test::Unit::TestCase
     assert_equal(0, @screen.cursor.col)
   end
 
+  test "insert mode CSI 4h pushes chars right" do
+    @parser.feed("ABCDE")
+    @parser.feed("\e[1;3H")  # cursor at col 2
+    @parser.feed("\e[4h")     # enable insert mode
+    @parser.feed("XY")
+    assert_equal("ABXYCDE", row_text(0))
+  end
+
+  test "insert mode CSI 4l disables" do
+    @parser.feed("\e[4h")
+    @parser.feed("\e[4l")
+    @parser.feed("ABCDE")
+    @parser.feed("\e[1;3H")
+    @parser.feed("X")
+    assert_equal("ABXDE", row_text(0))  # overwrites, not inserts
+  end
+
   test "origin mode ?6h makes CUP relative to scroll region" do
     @parser.feed("\e[2;4r")   # scroll region rows 2-4 (1-indexed)
     @parser.feed("\e[?6h")    # enable origin mode, cursor goes to scroll top
