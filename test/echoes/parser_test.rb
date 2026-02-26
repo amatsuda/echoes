@@ -925,4 +925,33 @@ class Echoes::ParserTest < Test::Unit::TestCase
     assert_equal(5, set_calls[0][1])
     assert_equal([0xaaaa, 0xbbbb, 0xcccc], set_calls[0][2])
   end
+
+  test "OSC 10 query responds with foreground color" do
+    responses = []
+    @screen.palette_handler = ->(op, key, *args) {
+      [0xdddd, 0xeeee, 0xffff] if op == :get && key == :fg
+    }
+    parser = Echoes::Parser.new(@screen, writer: ->(s) { responses << s })
+    parser.feed("\e]10;?\x07")
+    assert_equal(["\e]10;rgb:dddd/eeee/ffff\e\\"], responses)
+  end
+
+  test "OSC 11 set calls palette handler with :bg" do
+    set_calls = []
+    @screen.palette_handler = ->(op, key, *args) {
+      set_calls << [op, key, args[0]] if op == :set
+    }
+    @parser.feed("\e]11;rgb:00/00/00\x07")
+    assert_equal([[:set, :bg, [0x0000, 0x0000, 0x0000]]], set_calls)
+  end
+
+  test "OSC 12 query responds with cursor color" do
+    responses = []
+    @screen.palette_handler = ->(op, key, *args) {
+      [0x1111, 0x2222, 0x3333] if op == :get && key == :cursor
+    }
+    parser = Echoes::Parser.new(@screen, writer: ->(s) { responses << s })
+    parser.feed("\e]12;?\x07")
+    assert_equal(["\e]12;rgb:1111/2222/3333\e\\"], responses)
+  end
 end

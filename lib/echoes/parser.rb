@@ -311,6 +311,15 @@ module Echoes
       when '4'
         dispatch_osc4(rest)
         return
+      when '10'
+        dispatch_osc_default_color(:fg, 10, rest)
+        return
+      when '11'
+        dispatch_osc_default_color(:bg, 11, rest)
+        return
+      when '12'
+        dispatch_osc_default_color(:cursor, 12, rest)
+        return
       when '52'
         dispatch_osc52(rest)
         return
@@ -339,6 +348,23 @@ module Echoes
       end
 
       @screen.put_multicell(text, **params)
+    end
+
+    def dispatch_osc_default_color(key, osc_code, spec)
+      if spec == '?'
+        if @writer && @screen.palette_handler
+          rgb = @screen.palette_handler.call(:get, key)
+          if rgb
+            r, g, b = rgb
+            @writer.call("\e]#{osc_code};rgb:#{format('%04x', r)}/#{format('%04x', g)}/#{format('%04x', b)}\e\\")
+          end
+        end
+      elsif spec =~ /\Argb:([0-9a-fA-F]+)\/([0-9a-fA-F]+)\/([0-9a-fA-F]+)\z/
+        r = scale_color_component($1)
+        g = scale_color_component($2)
+        b = scale_color_component($3)
+        @screen.palette_handler&.call(:set, key, [r, g, b])
+      end
     end
 
     def dispatch_osc4(rest)
