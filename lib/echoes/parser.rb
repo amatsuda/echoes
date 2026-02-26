@@ -29,6 +29,7 @@ module Echoes
     private
 
     REPLACEMENT_CHAR = "\u{FFFD}"
+    CSI_PARAM_LIMIT = 32
 
     def process_byte(byte)
       # UTF-8 continuation bytes
@@ -210,7 +211,7 @@ module Echoes
         @current_param << ':'
         @state = :csi_param
       when 0x3B # ;
-        @params << @current_param
+        @params << @current_param if @params.size < CSI_PARAM_LIMIT
         @current_param = +""
         @state = :csi_param
       when 0x20..0x2F # intermediate bytes
@@ -233,7 +234,7 @@ module Echoes
       when 0x3A # : (sub-parameter separator)
         @current_param << ':'
       when 0x3B # ;
-        @params << @current_param
+        @params << @current_param if @params.size < CSI_PARAM_LIMIT
         @current_param = +""
       when 0x20..0x2F # intermediate bytes
         @csi_intermediate = byte.chr

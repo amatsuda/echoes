@@ -1057,4 +1057,16 @@ class Echoes::ParserTest < Test::Unit::TestCase
     assert_equal(0, @screen.cursor.row)
     assert_equal(0, @screen.cursor.col)
   end
+
+  # --- CSI parameter count limit ---
+
+  test "CSI parameters beyond limit are discarded" do
+    # Build a CSI H (cursor position) with 40 parameters (limit is 32)
+    # Only first 2 matter: row=3, col=5. Rest should be silently discarded.
+    params = ["3", "5"] + ["0"] * 38
+    @parser.feed("\e[#{params.join(';')}H")
+    # Should not crash; cursor moves to row 2, col 4 (0-indexed)
+    assert_equal(2, @screen.cursor.row)
+    assert_equal(4, @screen.cursor.col)
+  end
 end
