@@ -208,23 +208,27 @@ module Echoes
 
     def move_cursor_up(n = 1)
       @pending_wrap = false
-      @cursor.row = [0, @cursor.row - n].max
+      top = @cursor.row >= @scroll_top ? @scroll_top : 0
+      @cursor.row = [top, @cursor.row - n].max
     end
 
     def move_cursor_down(n = 1)
       @pending_wrap = false
-      @cursor.row = [@rows - 1, @cursor.row + n].min
+      bottom = @cursor.row <= @scroll_bottom ? @scroll_bottom : @rows - 1
+      @cursor.row = [bottom, @cursor.row + n].min
     end
 
     def move_cursor_next_line(n = 1)
       @pending_wrap = false
-      @cursor.row = [@rows - 1, @cursor.row + n].min
+      bottom = @cursor.row <= @scroll_bottom ? @scroll_bottom : @rows - 1
+      @cursor.row = [bottom, @cursor.row + n].min
       @cursor.col = 0
     end
 
     def move_cursor_prev_line(n = 1)
       @pending_wrap = false
-      @cursor.row = [0, @cursor.row - n].max
+      top = @cursor.row >= @scroll_top ? @scroll_top : 0
+      @cursor.row = [top, @cursor.row - n].max
       @cursor.col = 0
     end
 

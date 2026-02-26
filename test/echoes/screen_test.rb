@@ -90,6 +90,38 @@ class Echoes::ScreenTest < Test::Unit::TestCase
     assert_equal(2, @screen.cursor.row)
   end
 
+  test "move_cursor_up stops at scroll_top when inside scroll region" do
+    @screen = Echoes::Screen.new(rows: 10, cols: 10)
+    @screen.set_scroll_region(2, 7)
+    @screen.cursor.row = 4
+    @screen.move_cursor_up(10)
+    assert_equal(2, @screen.cursor.row)
+  end
+
+  test "move_cursor_up ignores scroll_top when above scroll region" do
+    @screen = Echoes::Screen.new(rows: 10, cols: 10)
+    @screen.set_scroll_region(2, 7)
+    @screen.cursor.row = 1
+    @screen.move_cursor_up(10)
+    assert_equal(0, @screen.cursor.row)
+  end
+
+  test "move_cursor_down stops at scroll_bottom when inside scroll region" do
+    @screen = Echoes::Screen.new(rows: 10, cols: 10)
+    @screen.set_scroll_region(2, 7)
+    @screen.cursor.row = 4
+    @screen.move_cursor_down(10)
+    assert_equal(7, @screen.cursor.row)
+  end
+
+  test "move_cursor_down ignores scroll_bottom when below scroll region" do
+    @screen = Echoes::Screen.new(rows: 10, cols: 10)
+    @screen.set_scroll_region(2, 5)
+    @screen.cursor.row = 7
+    @screen.move_cursor_down(10)
+    assert_equal(9, @screen.cursor.row)
+  end
+
   test "move_cursor_forward" do
     @screen.move_cursor_forward(3)
     assert_equal(3, @screen.cursor.col)
