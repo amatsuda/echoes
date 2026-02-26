@@ -1096,4 +1096,29 @@ class Echoes::ParserTest < Test::Unit::TestCase
       Echoes::Parser.const_set(:DCS_BUFFER_LIMIT, old_limit)
     end
   end
+
+  # --- SS2/SS3 single shift ---
+
+  test "SS2 uses G2 charset for one character" do
+    # Designate G2 as DEC special graphics, then SS2 + 'q' => box drawing horizontal
+    @parser.feed("\e*0")       # designate G2 = DEC special
+    @parser.feed("\eNq")       # SS2 + 'q'
+    @parser.feed("A")          # normal ASCII
+    assert_equal("\u{2500}A", row_text(0))
+  end
+
+  test "SS3 uses G3 charset for one character" do
+    # Designate G3 as DEC special graphics, then SS3 + 'j' => box drawing lower-right
+    @parser.feed("\e+0")       # designate G3 = DEC special
+    @parser.feed("\eOj")       # SS3 + 'j'
+    @parser.feed("B")          # normal ASCII
+    assert_equal("\u{2518}B", row_text(0))
+  end
+
+  test "SS2 only affects one character" do
+    @parser.feed("\e*0")       # designate G2 = DEC special
+    @parser.feed("\eNq")       # SS2 + 'q' => box drawing
+    @parser.feed("q")          # normal 'q' (G0 is still ASCII)
+    assert_equal("\u{2500}q", row_text(0))
+  end
 end

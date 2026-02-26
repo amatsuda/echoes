@@ -36,7 +36,10 @@ module Echoes
       @using_alt_screen = false
       @charset_g0 = :ascii  # :ascii or :dec_special
       @charset_g1 = :ascii
+      @charset_g2 = :ascii
+      @charset_g3 = :ascii
       @active_charset = 0   # 0 = G0, 1 = G1
+      @single_shift = nil   # nil, 2, or 3 (for SS2/SS3)
       @tab_stops = default_tab_stops
       @main_grid = nil
       @main_cursor = nil
@@ -62,7 +65,12 @@ module Echoes
 
     def put_char(c)
       if c.bytesize == 1
-        cs = @active_charset == 0 ? @charset_g0 : @charset_g1
+        if @single_shift
+          cs = @single_shift == 2 ? @charset_g2 : @charset_g3
+          @single_shift = nil
+        else
+          cs = @active_charset == 0 ? @charset_g0 : @charset_g1
+        end
         if cs == :dec_special
           c = DEC_SPECIAL.fetch(c, c)
         end
@@ -609,7 +617,7 @@ module Echoes
       @pending_wrap = false
     end
 
-    attr_accessor :mouse_tracking, :mouse_encoding, :insert_mode, :active_charset, :application_keypad, :cursor_style, :bell
+    attr_accessor :mouse_tracking, :mouse_encoding, :insert_mode, :active_charset, :application_keypad, :cursor_style, :bell, :single_shift
 
     def push_title
       @title_stack.push(@title)
@@ -637,6 +645,8 @@ module Echoes
       case g
       when 0 then @charset_g0 = charset
       when 1 then @charset_g1 = charset
+      when 2 then @charset_g2 = charset
+      when 3 then @charset_g3 = charset
       end
     end
 
@@ -757,7 +767,10 @@ module Echoes
       @focus_reporting = false
       @charset_g0 = :ascii
       @charset_g1 = :ascii
+      @charset_g2 = :ascii
+      @charset_g3 = :ascii
       @active_charset = 0
+      @single_shift = nil
       @cursor_style = 0
       @tab_stops = default_tab_stops
       @scroll_top = 0

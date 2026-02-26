@@ -159,6 +159,12 @@ module Echoes
       when 0x4D # M
         @screen.reverse_index
         @state = :ground
+      when 0x4E # N (SS2 — single shift G2)
+        @screen.single_shift = 2
+        @state = :ground
+      when 0x4F # O (SS3 — single shift G3)
+        @screen.single_shift = 3
+        @state = :ground
       when 0x3D # = (application keypad mode)
         @screen.application_keypad = true
         @state = :ground
@@ -195,6 +201,12 @@ module Echoes
       when 0x29 # ) => G1
         charset = final == 0x30 ? :dec_special : :ascii
         @screen.designate_charset(1, charset)
+      when 0x2A # * => G2
+        charset = final == 0x30 ? :dec_special : :ascii
+        @screen.designate_charset(2, charset)
+      when 0x2B # + => G3
+        charset = final == 0x30 ? :dec_special : :ascii
+        @screen.designate_charset(3, charset)
       end
     end
 
