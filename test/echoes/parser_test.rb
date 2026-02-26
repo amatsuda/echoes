@@ -1069,4 +1069,31 @@ class Echoes::ParserTest < Test::Unit::TestCase
     assert_equal(2, @screen.cursor.row)
     assert_equal(4, @screen.cursor.col)
   end
+
+  # --- OSC/DCS buffer size limits ---
+
+  test "OSC buffer overflow aborts sequence" do
+    # Send an OSC that exceeds the 4096 byte limit, then a new sequence
+    @parser.feed("\e]0;#{'A' * 5000}\x07")
+    # Title should not be set — sequence was aborted before terminator
+    assert_nil(@screen.title)
+  end
+
+  test "DCS buffer overflow aborts sequence" do
+    # Temporarily lower the limit for testing
+    old_limit = Echoes::Parser::DCS_BUFFER_LIMIT
+    Echoes::Parser.send(:remove_const, :DCS_BUFFER_LIMIT)
+    Echoes::Parser.const_set(:DCS_BUFFER_LIMIT, 100)
+    begin
+      responses = []
+      parser = Echoes::Parser.new(@screen, writer: ->(s) { responses << s })
+      # Send DCS +q with data exceeding the limit
+      parser.feed("\eP+q#{'41' * 60}\e\\")
+      # Sequence should be aborted, no response sent
+      assert_equal([], responses)
+    ensure
+      Echoes::Parser.send(:remove_const, :DCS_BUFFER_LIMIT)
+      Echoes::Parser.const_set(:DCS_BUFFER_LIMIT, old_limit)
+    end
+  end
 end

@@ -30,6 +30,8 @@ module Echoes
 
     REPLACEMENT_CHAR = "\u{FFFD}"
     CSI_PARAM_LIMIT = 32
+    OSC_BUFFER_LIMIT = 4096
+    DCS_BUFFER_LIMIT = 1024 * 1024  # 1 MB (sixel images can be large)
 
     def process_byte(byte)
       # UTF-8 continuation bytes
@@ -267,7 +269,11 @@ module Echoes
         dispatch_osc
         @state = :escape
       else
-        @osc_string << byte
+        if @osc_string.bytesize < OSC_BUFFER_LIMIT
+          @osc_string << byte
+        else
+          @state = :ground
+        end
       end
     end
 
@@ -320,8 +326,10 @@ module Echoes
       if byte == 0x1B
         dispatch_dcs
         @state = :escape
-      else
+      elsif @dcs_data.bytesize < DCS_BUFFER_LIMIT
         @dcs_data << byte
+      else
+        @state = :ground
       end
     end
 
