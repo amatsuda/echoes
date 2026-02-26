@@ -28,15 +28,30 @@ module Echoes
 
     private
 
+    REPLACEMENT_CHAR = "\u{FFFD}"
+
     def process_byte(byte)
       # UTF-8 continuation bytes
       if @utf8_remaining > 0
-        @utf8_buf << byte.chr(Encoding::BINARY)
-        @utf8_remaining -= 1
-        if @utf8_remaining == 0
-          char = @utf8_buf.force_encoding('UTF-8')
-          @screen.put_char(char) if char.valid_encoding?
+        if byte >= 0x80 && byte <= 0xBF
+          @utf8_buf << byte.chr(Encoding::BINARY)
+          @utf8_remaining -= 1
+          if @utf8_remaining == 0
+            char = @utf8_buf.force_encoding('UTF-8')
+            if char.valid_encoding?
+              @screen.put_char(char)
+            else
+              @screen.put_char(REPLACEMENT_CHAR)
+            end
+            @utf8_buf = "".b
+          end
+        else
+          # Not a continuation byte — emit replacement for truncated sequence
+          @screen.put_char(REPLACEMENT_CHAR)
+          @utf8_remaining = 0
           @utf8_buf = "".b
+          # Reprocess this byte
+          process_byte(byte)
         end
         return
       end
@@ -85,15 +100,19 @@ module Echoes
         # ignore other C0 controls
       when 0x20..0x7E # printable ASCII
         @screen.put_char(byte.chr)
-      when 0xC0..0xDF # UTF-8 2-byte
+      when 0x80..0xBF # unexpected continuation byte
+        @screen.put_char(REPLACEMENT_CHAR)
+      when 0xC2..0xDF # UTF-8 2-byte
         @utf8_buf = byte.chr(Encoding::BINARY)
         @utf8_remaining = 1
       when 0xE0..0xEF # UTF-8 3-byte
         @utf8_buf = byte.chr(Encoding::BINARY)
         @utf8_remaining = 2
-      when 0xF0..0xF7 # UTF-8 4-byte
+      when 0xF0..0xF4 # UTF-8 4-byte (up to U+10FFFF)
         @utf8_buf = byte.chr(Encoding::BINARY)
         @utf8_remaining = 3
+      when 0xC0, 0xC1, 0xF5..0xFF # invalid lead bytes
+        @screen.put_char(REPLACEMENT_CHAR)
       end
     end
 

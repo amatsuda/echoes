@@ -1018,4 +1018,43 @@ class Echoes::ParserTest < Test::Unit::TestCase
     parser.feed("\eP+q5858\e\\")
     assert_equal(["\eP0+r5858\e\\"], responses)
   end
+
+  # --- UTF-8 resilience ---
+
+  test "lone continuation byte produces U+FFFD" do
+    @parser.feed("\x80")
+    assert_equal("\u{FFFD}", row_text(0))
+  end
+
+  test "invalid lead bytes C0 C1 produce U+FFFD" do
+    @parser.feed("\xC0\xC1")
+    assert_equal("\u{FFFD}\u{FFFD}", row_text(0))
+  end
+
+  test "invalid lead bytes F5-FF produce U+FFFD" do
+    @parser.feed("\xF5\xFF")
+    assert_equal("\u{FFFD}\u{FFFD}", row_text(0))
+  end
+
+  test "truncated UTF-8 followed by ASCII produces U+FFFD then ASCII" do
+    # \xE0 expects 2 continuation bytes, but 'A' follows immediately
+    @parser.feed("\xE0A")
+    assert_equal("\u{FFFD}A", row_text(0))
+  end
+
+  test "overlong 2-byte encoding produces U+FFFD" do
+    # \xC0\x80 is overlong for U+0000
+    @parser.feed("\xC0\x80")
+    # C0 is invalid lead → FFFD, 0x80 lone continuation → FFFD
+    assert_equal("\u{FFFD}\u{FFFD}", row_text(0))
+  end
+
+  test "truncated UTF-8 followed by ESC processes escape correctly" do
+    # Start 3-byte sequence, then ESC [ H (cursor home)
+    @parser.feed("X")
+    @parser.feed("\xE0\x1B[H")
+    # E0 truncated → FFFD, then cursor moves home, so row 0 col 0
+    assert_equal(0, @screen.cursor.row)
+    assert_equal(0, @screen.cursor.col)
+  end
 end
