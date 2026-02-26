@@ -623,4 +623,29 @@ class Echoes::ScreenTest < Test::Unit::TestCase
     assert_equal('C', @screen.grid[1][0].char)
     assert_equal('D', @screen.grid[1][1].char)
   end
+
+  test "combining character merges with preceding cell" do
+    @screen = Echoes::Screen.new(rows: 5, cols: 10)
+    @screen.put_char('e')
+    @screen.put_char("\u{0301}")  # combining acute accent
+    assert_equal("e\u{0301}", @screen.grid[0][0].char)
+    assert_equal(1, @screen.cursor.col)
+  end
+
+  test "multiple combining characters stack on same cell" do
+    @screen = Echoes::Screen.new(rows: 5, cols: 10)
+    @screen.put_char('o')
+    @screen.put_char("\u{0308}")  # combining diaeresis
+    @screen.put_char("\u{0301}")  # combining acute accent
+    assert_equal("o\u{0308}\u{0301}", @screen.grid[0][0].char)
+    assert_equal(1, @screen.cursor.col)
+  end
+
+  test "combining character at start of line does not crash" do
+    @screen = Echoes::Screen.new(rows: 5, cols: 10)
+    @screen.put_char("\u{0301}")  # combining accent with no base
+    # Should merge with the space in cell 0
+    assert_equal(" \u{0301}", @screen.grid[0][0].char)
+    assert_equal(0, @screen.cursor.col)
+  end
 end

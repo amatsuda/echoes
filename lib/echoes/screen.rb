@@ -68,6 +68,15 @@ module Echoes
         end
       end
 
+      # Combining characters: append to previous cell
+      if combining?(c)
+        col = @pending_wrap ? @cursor.col : [0, @cursor.col - 1].max
+        col -= 1 if col > 0 && @grid[@cursor.row][col].width == 0
+        @grid[@cursor.row][col].char += c
+        @last_char = @grid[@cursor.row][col].char
+        return
+      end
+
       w = char_width(c)
 
       if @auto_wrap
@@ -1060,6 +1069,99 @@ module Echoes
         end
       end
       nil
+    end
+
+    def combining?(c)
+      cp = c.ord
+      return false if cp < 0x0300
+      (cp >= 0x0300 && cp <= 0x036F) ||   # Combining Diacritical Marks
+      (cp >= 0x0483 && cp <= 0x0489) ||   # Cyrillic combining marks
+      (cp >= 0x0591 && cp <= 0x05BD) ||   # Hebrew combining marks
+      cp == 0x05BF ||
+      (cp >= 0x05C1 && cp <= 0x05C2) ||
+      (cp >= 0x05C4 && cp <= 0x05C5) ||
+      cp == 0x05C7 ||
+      (cp >= 0x0610 && cp <= 0x061A) ||   # Arabic combining marks
+      (cp >= 0x064B && cp <= 0x065F) ||
+      cp == 0x0670 ||
+      (cp >= 0x06D6 && cp <= 0x06DC) ||
+      (cp >= 0x06DF && cp <= 0x06E4) ||
+      (cp >= 0x06E7 && cp <= 0x06E8) ||
+      (cp >= 0x06EA && cp <= 0x06ED) ||
+      cp == 0x0711 ||
+      (cp >= 0x0730 && cp <= 0x074A) ||   # Syriac
+      (cp >= 0x07A6 && cp <= 0x07B0) ||   # Thaana
+      (cp >= 0x0816 && cp <= 0x0819) ||   # Samaritan
+      (cp >= 0x081B && cp <= 0x0823) ||
+      (cp >= 0x0825 && cp <= 0x0827) ||
+      (cp >= 0x0829 && cp <= 0x082D) ||
+      (cp >= 0x0859 && cp <= 0x085B) ||   # Mandaic
+      (cp >= 0x0900 && cp <= 0x0903) ||   # Devanagari
+      (cp >= 0x093A && cp <= 0x094F) ||
+      (cp >= 0x0951 && cp <= 0x0957) ||
+      (cp >= 0x0962 && cp <= 0x0963) ||
+      (cp >= 0x0981 && cp <= 0x0983) ||   # Bengali
+      cp == 0x09BC || cp == 0x09CD ||
+      (cp >= 0x09BE && cp <= 0x09C4) ||
+      (cp >= 0x0A01 && cp <= 0x0A03) ||   # Gurmukhi
+      (cp >= 0x0A3C && cp <= 0x0A51) ||
+      (cp >= 0x0B01 && cp <= 0x0B03) ||   # Oriya
+      (cp >= 0x0B3C && cp <= 0x0B57) ||
+      (cp >= 0x0BBE && cp <= 0x0BCD) ||   # Tamil
+      (cp >= 0x0C00 && cp <= 0x0C04) ||   # Telugu
+      (cp >= 0x0C3E && cp <= 0x0C56) ||
+      (cp >= 0x0C81 && cp <= 0x0C83) ||   # Kannada
+      (cp >= 0x0CBC && cp <= 0x0CD6) ||
+      (cp >= 0x0D00 && cp <= 0x0D03) ||   # Malayalam
+      (cp >= 0x0D3B && cp <= 0x0D4D) ||
+      (cp >= 0x0D57 && cp <= 0x0D57) ||
+      (cp >= 0x0DCA && cp <= 0x0DDF) ||   # Sinhala
+      (cp >= 0x0E31 && cp <= 0x0E3A) ||   # Thai
+      (cp >= 0x0E47 && cp <= 0x0E4E) ||
+      (cp >= 0x0EB1 && cp <= 0x0EBC) ||   # Lao
+      (cp >= 0x0EC8 && cp <= 0x0ECD) ||
+      (cp >= 0x0F18 && cp <= 0x0F19) ||   # Tibetan
+      cp == 0x0F35 || cp == 0x0F37 || cp == 0x0F39 ||
+      (cp >= 0x0F3E && cp <= 0x0F3F) ||
+      (cp >= 0x0F71 && cp <= 0x0F84) ||
+      (cp >= 0x0F86 && cp <= 0x0F87) ||
+      (cp >= 0x0F8D && cp <= 0x0FBC) ||
+      cp == 0x0FC6 ||
+      (cp >= 0x1000 && cp <= 0x1059) && c =~ /\p{M}/ ||  # Myanmar (selective)
+      (cp >= 0x135D && cp <= 0x135F) ||   # Ethiopic
+      (cp >= 0x1712 && cp <= 0x1714) ||   # Tagalog
+      (cp >= 0x1732 && cp <= 0x1734) ||   # Hanunoo
+      (cp >= 0x17B4 && cp <= 0x17D3) ||   # Khmer
+      cp == 0x17DD ||
+      (cp >= 0x180B && cp <= 0x180D) ||   # Mongolian
+      cp == 0x180F ||
+      (cp >= 0x1885 && cp <= 0x1886) ||
+      cp == 0x18A9 ||
+      (cp >= 0x1920 && cp <= 0x193B) ||   # Limbu/Tai Le
+      (cp >= 0x1A17 && cp <= 0x1A1B) ||   # Buginese
+      (cp >= 0x1A55 && cp <= 0x1A7F) ||   # Tai Tham
+      (cp >= 0x1AB0 && cp <= 0x1ACE) ||   # Combining Diacritical Marks Extended
+      (cp >= 0x1B00 && cp <= 0x1B04) ||   # Balinese
+      (cp >= 0x1B34 && cp <= 0x1B44) ||
+      (cp >= 0x1B6B && cp <= 0x1B73) ||
+      (cp >= 0x1B80 && cp <= 0x1B82) ||   # Sundanese
+      (cp >= 0x1BA1 && cp <= 0x1BAD) ||
+      (cp >= 0x1BE6 && cp <= 0x1BF3) ||   # Batak
+      (cp >= 0x1C24 && cp <= 0x1C37) ||   # Lepcha
+      (cp >= 0x1CD0 && cp <= 0x1CF9) ||   # Vedic Extensions
+      (cp >= 0x1DC0 && cp <= 0x1DFF) ||   # Combining Diacritical Marks Supplement
+      (cp >= 0x20D0 && cp <= 0x20FF) ||   # Combining Diacritical Marks for Symbols
+      (cp >= 0xFE00 && cp <= 0xFE0F) ||   # Variation Selectors
+      (cp >= 0xFE20 && cp <= 0xFE2F) ||   # Combining Half Marks
+      (cp >= 0x101FD && cp <= 0x101FD) || # Phaistos Disc
+      (cp >= 0x102E0 && cp <= 0x102E0) ||
+      (cp >= 0x10376 && cp <= 0x1037A) ||
+      (cp >= 0x10A01 && cp <= 0x10A0F) ||
+      (cp >= 0x10A38 && cp <= 0x10A3F) ||
+      (cp >= 0x11000 && cp <= 0x1104D) && c =~ /\p{M}/ ||  # Brahmi etc (selective)
+      (cp >= 0x1D165 && cp <= 0x1D1AD) || # Musical Symbols combining
+      (cp >= 0x1D242 && cp <= 0x1D244) ||
+      (cp >= 0xE0100 && cp <= 0xE01EF)    # Variation Selectors Supplement
     end
 
     def char_width(c)
