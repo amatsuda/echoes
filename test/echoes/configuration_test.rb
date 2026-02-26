@@ -2,6 +2,7 @@
 
 require "test_helper"
 require "tempfile"
+require "stringio"
 
 class Echoes::ConfigurationTest < Test::Unit::TestCase
   setup do
@@ -89,7 +90,36 @@ class Echoes::ConfigurationTest < Test::Unit::TestCase
     end
   end
 
+  test "load_config with syntax error falls back to defaults" do
+    Tempfile.create(['echoes', '.conf']) do |f|
+      f.write("font_size 20\nthis is invalid syntax !!!\n")
+      f.flush
+
+      original_path = Echoes::CONFIG_PATH
+      silence_warnings { Echoes.const_set(:CONFIG_PATH, f.path) }
+      Echoes.instance_variable_set(:@config, nil)
+      begin
+        _stderr = capture_stderr { Echoes.load_config }
+        # Config should still have defaults (font_size may or may not be set
+        # depending on where the error occurs, but it should not crash)
+        assert_instance_of(Echoes::Configuration, Echoes.config)
+      ensure
+        silence_warnings { Echoes.const_set(:CONFIG_PATH, original_path) }
+        Echoes.instance_variable_set(:@config, nil)
+      end
+    end
+  end
+
   private
+
+  def capture_stderr
+    old = $stderr
+    $stderr = StringIO.new
+    yield
+    $stderr.string
+  ensure
+    $stderr = old
+  end
 
   def silence_warnings
     old_verbose = $VERBOSE

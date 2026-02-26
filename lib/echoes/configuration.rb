@@ -104,5 +104,7 @@ module Echoes
     if File.exist?(CONFIG_PATH)
       config.instance_eval(File.read(CONFIG_PATH), CONFIG_PATH)
     end
+  rescue SyntaxError, StandardError => e
+    warn "echoes: error loading #{CONFIG_PATH}: #{e.message}"
   end
 end
