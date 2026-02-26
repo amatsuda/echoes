@@ -42,6 +42,7 @@ module Echoes
       @main_saved_cursor = nil
       @main_scrollback = nil
       @pending_wrap = false
+      @last_char = nil
     end
 
     DEC_SPECIAL = {
@@ -112,6 +113,14 @@ module Echoes
         @cursor.col = @cols - 1
         @pending_wrap = true if @auto_wrap
       end
+
+      @last_char = c
+    end
+
+    def repeat_char(n = 1)
+      return unless @last_char
+
+      n.times { put_char(@last_char) }
     end
 
     def put_multicell(text, scale:, width:, frac_n:, frac_d:, valign:, halign:)

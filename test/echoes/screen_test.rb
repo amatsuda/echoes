@@ -528,4 +528,22 @@ class Echoes::ScreenTest < Test::Unit::TestCase
     assert_true(@screen.pending_wrap)
     assert_equal(9, @screen.cursor.col)
   end
+
+  test "repeat_char repeats the last printed character" do
+    @screen = Echoes::Screen.new(rows: 5, cols: 10)
+    @screen.put_char('A')
+    @screen.repeat_char(3)
+    assert_equal('A', @screen.grid[0][0].char)
+    assert_equal('A', @screen.grid[0][1].char)
+    assert_equal('A', @screen.grid[0][2].char)
+    assert_equal('A', @screen.grid[0][3].char)
+    assert_equal(4, @screen.cursor.col)
+  end
+
+  test "repeat_char does nothing when no character has been printed" do
+    @screen = Echoes::Screen.new(rows: 5, cols: 10)
+    @screen.repeat_char(3)
+    assert_equal(0, @screen.cursor.col)
+    assert_equal(' ', @screen.grid[0][0].char)
+  end
 end

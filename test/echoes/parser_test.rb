@@ -834,4 +834,19 @@ class Echoes::ParserTest < Test::Unit::TestCase
     @parser.feed("\e[Z")    # backward tab again → col 0
     assert_equal(0, @screen.cursor.col)
   end
+
+  test "CSI b repeats preceding character" do
+    @parser.feed("A\e[3b")
+    assert_equal('A', @screen.grid[0][0].char)
+    assert_equal('A', @screen.grid[0][1].char)
+    assert_equal('A', @screen.grid[0][2].char)
+    assert_equal('A', @screen.grid[0][3].char)
+    assert_equal(4, @screen.cursor.col)
+  end
+
+  test "CSI b with no preceding character does nothing" do
+    @parser.feed("\e[3b")
+    assert_equal(0, @screen.cursor.col)
+    assert_equal(' ', @screen.grid[0][0].char)
+  end
 end

@@ -384,6 +384,7 @@ module Echoes
       when '@' then @screen.insert_chars(params[0] || 1)
       when 'X' then @screen.erase_chars(params[0] || 1)
       when 'Z' then @screen.backward_tab(params[0] || 1)
+      when 'b' then @screen.repeat_char(params[0] || 1)
       when 'S' then @screen.scroll_up(params[0] || 1)
       when 'T' then @screen.scroll_down(params[0] || 1)
       when 'm' then @screen.set_graphics(params)
