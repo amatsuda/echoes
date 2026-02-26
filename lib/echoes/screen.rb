@@ -15,10 +15,12 @@ module Echoes
       @cursor = Cursor.new
       @attrs = Cell.new
       @grid = Array.new(rows) { Array.new(cols) { Cell.new } }
+      @line_wrapped = Array.new(rows, false)
       @scroll_top = 0
       @scroll_bottom = rows - 1
       @saved_cursor = nil
       @scrollback = []
+      @scrollback_wrapped = []
       @cell_pixel_width = 8.0
       @cell_pixel_height = 16.0
       @application_cursor_keys = false
@@ -71,6 +73,7 @@ module Echoes
         # Deferred wrap: if the previous character set the flag, wrap now
         if @pending_wrap
           @pending_wrap = false
+          @line_wrapped[@cursor.row] = true
           @cursor.col = 0
           line_feed
         end
@@ -78,6 +81,7 @@ module Echoes
         # Wide char at last column: doesn't fit, wrap first
         if w == 2 && @cursor.col == @cols - 1
           @grid[@cursor.row][@cursor.col].reset!
+          @line_wrapped[@cursor.row] = true
           @cursor.col = 0
           line_feed
         end
@@ -302,15 +306,17 @@ module Echoes
       @pending_wrap = false
       case mode
       when 0
+        @line_wrapped[@cursor.row] = false
         erase_in_line(0)
-        ((@cursor.row + 1)...@rows).each { |r| clear_row(r) }
+        ((@cursor.row + 1)...@rows).each { |r| clear_row(r); @line_wrapped[r] = false }
       when 1
         erase_in_line(1)
-        (0...@cursor.row).each { |r| clear_row(r) }
+        (0...@cursor.row).each { |r| clear_row(r); @line_wrapped[r] = false }
       when 2
-        (0...@rows).each { |r| clear_row(r) }
+        (0...@rows).each { |r| clear_row(r); @line_wrapped[r] = false }
       when 3
         @scrollback.clear
+        @scrollback_wrapped.clear
       end
     end
 
@@ -332,7 +338,9 @@ module Echoes
 
       n.times do
         @grid.insert(@cursor.row, Array.new(@cols) { Cell.new })
+        @line_wrapped.insert(@cursor.row, false)
         @grid.delete_at(@scroll_bottom + 1)
+        @line_wrapped.delete_at(@scroll_bottom + 1)
       end
     end
 
@@ -342,7 +350,9 @@ module Echoes
 
       n.times do
         @grid.delete_at(@cursor.row)
+        @line_wrapped.delete_at(@cursor.row)
         @grid.insert(@scroll_bottom, Array.new(@cols) { Cell.new })
+        @line_wrapped.insert(@scroll_bottom, false)
       end
     end
 
@@ -378,10 +388,14 @@ module Echoes
         if @scroll_top == 0
           row = @grid[@scroll_top]
           @scrollback << row.map { |cell| c = Cell.new; c.copy_from(cell); c.width = cell.width; c.multicell = cell.multicell; c }
+          @scrollback_wrapped << @line_wrapped[@scroll_top]
           @scrollback.shift if @scrollback.size > self.class.scrollback_limit
+          @scrollback_wrapped.shift if @scrollback_wrapped.size > self.class.scrollback_limit
         end
         @grid.delete_at(@scroll_top)
+        @line_wrapped.delete_at(@scroll_top)
         @grid.insert(@scroll_bottom, Array.new(@cols) { Cell.new })
+        @line_wrapped.insert(@scroll_bottom, false)
       end
     end
 
@@ -389,7 +403,9 @@ module Echoes
       @pending_wrap = false
       n.times do
         @grid.delete_at(@scroll_bottom)
+        @line_wrapped.delete_at(@scroll_bottom)
         @grid.insert(@scroll_top, Array.new(@cols) { Cell.new })
+        @line_wrapped.insert(@scroll_top, false)
       end
     end
 
@@ -578,19 +594,23 @@ module Echoes
       return if @using_alt_screen
 
       @main_grid = @grid
+      @main_line_wrapped = @line_wrapped
       @main_cursor = [@cursor.row, @cursor.col, @cursor.visible]
       @main_scroll_top = @scroll_top
       @main_scroll_bottom = @scroll_bottom
       @main_saved_cursor = @saved_cursor
       @main_scrollback = @scrollback
+      @main_scrollback_wrapped = @scrollback_wrapped
 
       @grid = Array.new(@rows) { Array.new(@cols) { Cell.new } }
+      @line_wrapped = Array.new(@rows, false)
       @cursor = Cursor.new
       @attrs = Cell.new
       @scroll_top = 0
       @scroll_bottom = @rows - 1
       @saved_cursor = nil
       @scrollback = []
+      @scrollback_wrapped = []
       @pending_wrap = false
       @using_alt_screen = true
     end
@@ -599,20 +619,24 @@ module Echoes
       return unless @using_alt_screen
 
       @grid = @main_grid
+      @line_wrapped = @main_line_wrapped
       @cursor = Cursor.new
       @cursor.row, @cursor.col, @cursor.visible = @main_cursor
       @scroll_top = @main_scroll_top
       @scroll_bottom = @main_scroll_bottom
       @saved_cursor = @main_saved_cursor
       @scrollback = @main_scrollback
+      @scrollback_wrapped = @main_scrollback_wrapped
       @attrs = Cell.new
 
       @main_grid = nil
+      @main_line_wrapped = nil
       @main_cursor = nil
       @main_scroll_top = nil
       @main_scroll_bottom = nil
       @main_saved_cursor = nil
       @main_scrollback = nil
+      @main_scrollback_wrapped = nil
       @pending_wrap = false
       @using_alt_screen = false
     end
@@ -678,33 +702,33 @@ module Echoes
       @cursor = Cursor.new
       @attrs = Cell.new
       @grid = Array.new(@rows) { Array.new(@cols) { Cell.new } }
+      @line_wrapped = Array.new(@rows, false)
       @scroll_top = 0
       @scroll_bottom = @rows - 1
       @saved_cursor = nil
       @scrollback = []
+      @scrollback_wrapped = []
       @tab_stops = default_tab_stops
       @pending_wrap = false
     end
 
     def resize(new_rows, new_cols)
-      old_rows = @rows
       old_cols = @cols
       @rows = new_rows
       @cols = new_cols
 
-      # Adjust grid rows
-      if new_rows > old_rows
-        (new_rows - old_rows).times { @grid.push(Array.new(new_cols) { Cell.new }) }
-      elsif new_rows < old_rows
-        @grid.slice!(new_rows..)
-      end
-
-      # Adjust grid cols
-      @grid.each do |row|
-        if new_cols > old_cols
-          (new_cols - old_cols).times { row.push(Cell.new) }
-        elsif new_cols < old_cols
-          row.slice!(new_cols..)
+      if new_cols != old_cols
+        reflow(new_rows, new_cols, old_cols)
+      else
+        # Only row count changed — simple add/remove
+        if new_rows > @grid.size
+          (new_rows - @grid.size).times do
+            @grid.push(Array.new(new_cols) { Cell.new })
+            @line_wrapped.push(false)
+          end
+        elsif new_rows < @grid.size
+          @grid.slice!(new_rows..)
+          @line_wrapped.slice!(new_rows..)
         end
       end
 
@@ -716,6 +740,136 @@ module Echoes
     end
 
     private
+
+    def reflow(new_rows, new_cols, old_cols)
+      # Convert cursor to absolute position (scrollback + grid row index)
+      cursor_abs = @scrollback.size + @cursor.row
+
+      # Merge scrollback and grid into logical lines
+      all_rows = @scrollback + @grid
+      all_wrapped = @scrollback_wrapped + @line_wrapped
+
+      logical_lines = []
+      i = 0
+      while i < all_rows.size
+        line = all_rows[i].dup
+        while i < all_rows.size - 1 && all_wrapped[i]
+          i += 1
+          line.concat(all_rows[i])
+        end
+        logical_lines << line
+        i += 1
+      end
+
+      # Re-wrap logical lines to new width
+      new_all_rows = []
+      new_all_wrapped = []
+      cursor_new_abs = nil
+
+      # Track cursor: find which logical line row cursor_abs falls in
+      logical_row_start = 0
+      logical_lines.each do |line|
+        # Count how many original rows this logical line spanned
+        span = 1
+        temp = logical_row_start
+        while temp < all_wrapped.size - 1 && all_wrapped[temp]
+          span += 1
+          temp += 1
+        end
+
+        # Strip trailing blank cells
+        content_len = line.size
+        while content_len > 0 && line[content_len - 1].char == ' ' && line[content_len - 1].fg.nil? && line[content_len - 1].bg.nil? && !line[content_len - 1].bold && !line[content_len - 1].underline && !line[content_len - 1].inverse
+          content_len -= 1
+        end
+
+        if content_len == 0
+          new_all_rows << Array.new(new_cols) { Cell.new }
+          new_all_wrapped << false
+          if cursor_abs >= logical_row_start && cursor_abs < logical_row_start + span
+            cursor_new_abs = new_all_rows.size - 1
+          end
+        else
+          col = 0
+          row_cells = []
+          line[0...content_len].each do |cell|
+            if col + [cell.width, 1].max > new_cols
+              # Pad remaining
+              while row_cells.size < new_cols
+                row_cells << Cell.new
+              end
+              new_all_rows << row_cells
+              new_all_wrapped << true
+              row_cells = []
+              col = 0
+            end
+            row_cells << cell
+            col += [cell.width, 1].max
+          end
+          # Pad last row
+          while row_cells.size < new_cols
+            row_cells << Cell.new
+          end
+          new_all_rows << row_cells
+          new_all_wrapped << false
+
+          if cursor_abs >= logical_row_start && cursor_abs < logical_row_start + span && cursor_new_abs.nil?
+            # Place cursor on the last physical row of this logical line
+            cursor_new_abs = new_all_rows.size - 1
+          end
+        end
+
+        logical_row_start += span
+      end
+
+      cursor_new_abs ||= [new_all_rows.size - 1, 0].max
+
+      # Split into scrollback and visible grid
+      # The visible grid should have new_rows rows; excess goes to scrollback
+      if new_all_rows.size <= new_rows
+        @scrollback = []
+        @scrollback_wrapped = []
+        @grid = new_all_rows
+        @line_wrapped = new_all_wrapped
+        # Pad to fill screen
+        while @grid.size < new_rows
+          @grid.push(Array.new(new_cols) { Cell.new })
+          @line_wrapped.push(false)
+        end
+        @cursor.row = [cursor_new_abs, new_rows - 1].min
+      else
+        split = new_all_rows.size - new_rows
+        # Ensure cursor is visible
+        if cursor_new_abs < split
+          split = cursor_new_abs
+        end
+        @scrollback = new_all_rows[0...split]
+        @scrollback_wrapped = new_all_wrapped[0...split]
+        @grid = new_all_rows[split..]
+        @line_wrapped = new_all_wrapped[split..]
+        # Trim or pad grid to exactly new_rows
+        while @grid.size < new_rows
+          @grid.push(Array.new(new_cols) { Cell.new })
+          @line_wrapped.push(false)
+        end
+        if @grid.size > new_rows
+          # Push excess to scrollback
+          excess = @grid.size - new_rows
+          @scrollback.concat(@grid.slice!(0, excess))
+          @scrollback_wrapped.concat(@line_wrapped.slice!(0, excess))
+        end
+        @cursor.row = cursor_new_abs - split
+        @cursor.row = @cursor.row.clamp(0, new_rows - 1)
+      end
+
+      # Trim scrollback to limit
+      while @scrollback.size > self.class.scrollback_limit
+        @scrollback.shift
+        @scrollback_wrapped.shift
+      end
+
+      @cursor.col = [@cursor.col, new_cols - 1].min
+    end
 
     def default_tab_stops
       (8...@cols).step(8).to_a

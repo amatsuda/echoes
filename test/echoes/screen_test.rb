@@ -578,4 +578,49 @@ class Echoes::ScreenTest < Test::Unit::TestCase
     assert_equal(0, @screen.cursor.col)
     assert_equal(' ', @screen.grid[0][0].char)
   end
+
+  test "resize reflows wrapped lines when widening" do
+    @screen = Echoes::Screen.new(rows: 5, cols: 5)
+    # Write "ABCDEFGH" which wraps at col 5
+    "ABCDEFGH".each_char { |c| @screen.put_char(c) }
+    assert_equal('A', @screen.grid[0][0].char)
+    assert_equal('F', @screen.grid[1][0].char)
+
+    @screen.resize(5, 10)
+    # After reflow, "ABCDEFGH" should be on a single row
+    assert_equal('A', @screen.grid[0][0].char)
+    assert_equal('H', @screen.grid[0][7].char)
+    assert_equal(' ', @screen.grid[1][0].char)
+  end
+
+  test "resize reflows lines when narrowing" do
+    @screen = Echoes::Screen.new(rows: 5, cols: 10)
+    "ABCDEFGH".each_char { |c| @screen.put_char(c) }
+    assert_equal(0, @screen.cursor.row)
+
+    @screen.resize(5, 4)
+    # "ABCDEFGH" rewraps into 2 rows of 4; cursor stays visible
+    # First wrapped row may go to scrollback; verify content is preserved
+    assert_equal('E', @screen.grid[0][0].char)
+    assert_equal('H', @screen.grid[0][3].char)
+    # ABCD is in scrollback
+    assert_equal('A', @screen.scrollback.last[0].char)
+    assert_equal('D', @screen.scrollback.last[3].char)
+  end
+
+  test "resize does not reflow hard newlines" do
+    @screen = Echoes::Screen.new(rows: 5, cols: 5)
+    "AB".each_char { |c| @screen.put_char(c) }
+    @screen.carriage_return
+    @screen.line_feed
+    "CD".each_char { |c| @screen.put_char(c) }
+
+    @screen.resize(5, 10)
+    # AB and CD should remain on separate rows (hard newline)
+    assert_equal('A', @screen.grid[0][0].char)
+    assert_equal('B', @screen.grid[0][1].char)
+    assert_equal(' ', @screen.grid[0][2].char)
+    assert_equal('C', @screen.grid[1][0].char)
+    assert_equal('D', @screen.grid[1][1].char)
+  end
 end
