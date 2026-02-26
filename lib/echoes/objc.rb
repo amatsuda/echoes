@@ -80,7 +80,8 @@ module Echoes
     NSEventModifierFlagShift   = 1 << 17
     NSEventModifierFlagControl = 1 << 18
     NSEventModifierFlagOption  = 1 << 19
-    NSEventModifierFlagCommand = 1 << 20
+    NSEventModifierFlagCommand    = 1 << 20
+    NSEventModifierFlagNumericPad = 1 << 21
 
     # Selector cache
     SEL_CACHE = {}

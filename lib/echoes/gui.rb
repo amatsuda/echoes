@@ -532,7 +532,8 @@ module Echoes
       else
         chars_ns2 = ObjC::MSG_PTR.call(event_ptr, ObjC.sel('characters'))
         chars2 = ObjC.to_ruby_string(chars_ns2)
-        tab.pty_write.write(map_special_keys(chars2.empty? ? chars : chars2, tab.screen.application_cursor_keys?))
+        numpad = (flags & ObjC::NSEventModifierFlagNumericPad) != 0
+        tab.pty_write.write(map_special_keys(chars2.empty? ? chars : chars2, tab.screen.application_cursor_keys?, app_keypad: numpad && tab.screen.application_keypad))
       end
     rescue Errno::EIO, IOError
       close_tab(@active_tab)
@@ -1185,7 +1186,19 @@ module Echoes
       "\e[#{param};#{mod}#{final}"
     end
 
-    def map_special_keys(chars, app_cursor = false)
+    KEYPAD_APP_MAP = {
+      '0' => "\eOp", '1' => "\eOq", '2' => "\eOr", '3' => "\eOs",
+      '4' => "\eOt", '5' => "\eOu", '6' => "\eOv", '7' => "\eOw",
+      '8' => "\eOx", '9' => "\eOy", '-' => "\eOm", '+' => "\eOk",
+      '*' => "\eOj", '/' => "\eOo", '.' => "\eOn", "\r" => "\eOM",
+      '=' => "\eOX",
+    }.freeze
+
+    def map_special_keys(chars, app_cursor = false, app_keypad: false)
+      if app_keypad && (seq = KEYPAD_APP_MAP[chars])
+        return seq
+      end
+
       case chars
       when "\u{F700}" then app_cursor ? "\eOA" : "\e[A"    # Up
       when "\u{F701}" then app_cursor ? "\eOB" : "\e[B"    # Down
