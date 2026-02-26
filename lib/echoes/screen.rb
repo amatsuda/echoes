@@ -1,8 +1,10 @@
 # frozen_string_literal: true
 
+require 'set'
+
 module Echoes
   class Screen
-    attr_reader :rows, :cols, :cursor, :grid, :scrollback, :pending_wrap
+    attr_reader :rows, :cols, :cursor, :grid, :scrollback, :pending_wrap, :dirty_rows
     attr_accessor :cell_pixel_width, :cell_pixel_height, :title, :current_directory
 
     def self.scrollback_limit
@@ -50,6 +52,7 @@ module Echoes
       @pending_wrap = false
       @last_char = nil
       @title_stack = []
+      @dirty_rows = Set.new((0...rows).to_a)
     end
 
     DEC_SPECIAL = {
@@ -130,6 +133,8 @@ module Echoes
         next_cell.reset!
         next_cell.width = 0
       end
+
+      mark_dirty(@cursor.row)
 
       @cursor.col += w
       if @cursor.col >= @cols
@@ -326,12 +331,13 @@ module Echoes
       when 0
         @line_wrapped[@cursor.row] = false
         erase_in_line(0)
-        ((@cursor.row + 1)...@rows).each { |r| clear_row(r); @line_wrapped[r] = false }
+        ((@cursor.row + 1)...@rows).each { |r| clear_row(r); @line_wrapped[r] = false; mark_dirty(r) }
       when 1
         erase_in_line(1)
-        (0...@cursor.row).each { |r| clear_row(r); @line_wrapped[r] = false }
+        (0...@cursor.row).each { |r| clear_row(r); @line_wrapped[r] = false; mark_dirty(r) }
       when 2
         (0...@rows).each { |r| clear_row(r); @line_wrapped[r] = false }
+        mark_all_dirty
       when 3
         @scrollback.clear
         @scrollback_wrapped.clear
@@ -340,6 +346,7 @@ module Echoes
 
     def erase_in_line(mode = 0)
       @pending_wrap = false
+      mark_dirty(@cursor.row)
       case mode
       when 0
         (@cursor.col...@cols).each { |c| @grid[@cursor.row][c].reset! }
@@ -360,6 +367,7 @@ module Echoes
         @grid.delete_at(@scroll_bottom + 1)
         @line_wrapped.delete_at(@scroll_bottom + 1)
       end
+      (@cursor.row..@scroll_bottom).each { |r| mark_dirty(r) }
     end
 
     def delete_lines(n = 1)
@@ -372,6 +380,7 @@ module Echoes
         @grid.insert(@scroll_bottom, Array.new(@cols) { Cell.new })
         @line_wrapped.insert(@scroll_bottom, false)
       end
+      (@cursor.row..@scroll_bottom).each { |r| mark_dirty(r) }
     end
 
     def delete_chars(n = 1)
@@ -381,6 +390,7 @@ module Echoes
         row.delete_at(@cursor.col)
         row.push(Cell.new)
       end
+      mark_dirty(@cursor.row)
     end
 
     def insert_chars(n = 1)
@@ -390,6 +400,7 @@ module Echoes
         row.pop
         row.insert(@cursor.col, Cell.new)
       end
+      mark_dirty(@cursor.row)
     end
 
     def erase_chars(n = 1)
@@ -398,6 +409,7 @@ module Echoes
         break if col >= @cols
         @grid[@cursor.row][col].reset!
       end
+      mark_dirty(@cursor.row)
     end
 
     def scroll_up(n = 1)
@@ -415,6 +427,7 @@ module Echoes
         @grid.insert(@scroll_bottom, Array.new(@cols) { Cell.new })
         @line_wrapped.insert(@scroll_bottom, false)
       end
+      (@scroll_top..@scroll_bottom).each { |r| mark_dirty(r) }
     end
 
     def scroll_down(n = 1)
@@ -425,6 +438,7 @@ module Echoes
         @grid.insert(@scroll_top, Array.new(@cols) { Cell.new })
         @line_wrapped.insert(@scroll_top, false)
       end
+      (@scroll_top..@scroll_bottom).each { |r| mark_dirty(r) }
     end
 
     def set_scroll_region(top, bottom)
@@ -627,6 +641,18 @@ module Echoes
       @title = @title_stack.pop if @title_stack.any?
     end
 
+    def mark_dirty(row)
+      @dirty_rows << row
+    end
+
+    def mark_all_dirty
+      @dirty_rows = Set.new((0...@rows).to_a)
+    end
+
+    def clear_dirty
+      @dirty_rows = Set.new
+    end
+
     def set_hyperlink(uri)
       @attrs.hyperlink = uri
     end
@@ -788,6 +814,7 @@ module Echoes
       @cursor.row = 0
       @cursor.col = 0
       @pending_wrap = false
+      mark_all_dirty
     end
 
     def reset
@@ -802,6 +829,7 @@ module Echoes
       @scrollback_wrapped = []
       @tab_stops = default_tab_stops
       @pending_wrap = false
+      mark_all_dirty
     end
 
     def resize(new_rows, new_cols)

@@ -119,7 +119,7 @@ module Echoes
         Fiddle::TYPE_VOID,
         [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP,
          Fiddle::TYPE_DOUBLE, Fiddle::TYPE_DOUBLE, Fiddle::TYPE_DOUBLE, Fiddle::TYPE_DOUBLE]
-      ) { |_self, _cmd, x, y, w, h| gui.draw_rect }
+      ) { |_self, _cmd, x, y, w, h| gui.draw_rect(y, y + h) }
 
       @key_down_closure = Fiddle::Closure::BlockCaller.new(
         Fiddle::TYPE_VOID,
@@ -286,7 +286,7 @@ module Echoes
 
     # --- Callbacks ---
 
-    def draw_rect
+    def draw_rect(dirty_min_y = 0.0, dirty_max_y = Float::INFINITY)
       # Autorelease pool to prevent temporary object accumulation
       pool = ObjC::MSG_PTR.call(ObjC.cls('NSAutoreleasePool'), ObjC.sel('alloc'))
       pool = ObjC::MSG_PTR.call(pool, ObjC.sel('init'))
@@ -295,13 +295,16 @@ module Echoes
       tbh = tab_bar_height
       gy_off = grid_y_offset
 
-      # Fill entire background
+      # Fill dirty region background
       ObjC::MSG_VOID.call(@default_bg, ObjC.sel('setFill'))
-      ObjC::NSRectFill.call(0.0, 0.0, @cell_width * (@cols + 1), tbh + @cell_height * (@rows + 1))
+      ObjC::NSRectFill.call(0.0, dirty_min_y, @cell_width * (@cols + 1), dirty_max_y - dirty_min_y)
 
-      # Draw tab bar
+      # Draw tab bar if it intersects the dirty region
       if tbh > 0
-        draw_tab_bar(tbh, tab_bar_y)
+        tby = tab_bar_y
+        if dirty_min_y < tby + tbh && dirty_max_y > tby
+          draw_tab_bar(tbh, tby)
+        end
       end
 
       # Draw terminal grid
@@ -310,14 +313,14 @@ module Echoes
       visible_start = scrollback.size - tab.scroll_offset
 
       @rows.times do |r|
+        y = gy_off + r * @cell_height
+        next if y + @cell_height < dirty_min_y || y > dirty_max_y
         src = visible_start + r
         row = if src < scrollback.size
                 scrollback[src]
               else
                 screen.grid[src - scrollback.size]
               end
-
-        y = gy_off + r * @cell_height
 
         row.each_with_index do |cell, c|
           # Skip continuation cells (second half of wide chars or multicell)
@@ -661,12 +664,37 @@ module Echoes
         need_redraw = true
       end
 
+      tab = current_tab
+      return unless tab
+
+      screen = tab.screen
+      full_redraw = !need_redraw && (@bell_flash > 0 || @cursor_blink_counter == 0)
+
       if need_redraw
-        tab = current_tab
-        if tab
-          ObjC::MSG_VOID_1.call(@window, ObjC.sel('setTitle:'), ObjC.nsstring(tab.title))
+        ObjC::MSG_VOID_1.call(@window, ObjC.sel('setTitle:'), ObjC.nsstring(tab.title))
+
+        dirty = screen.dirty_rows
+        screen.clear_dirty
+
+        if full_redraw || dead&.any? || dirty.size > @rows / 2
+          ObjC::MSG_VOID_I.call(@view, ObjC.sel('setNeedsDisplay:'), 1)
+        else
+          # Also always invalidate the cursor row
+          dirty << screen.cursor.row
+          invalidate_dirty_rows(dirty)
         end
+      elsif full_redraw
         ObjC::MSG_VOID_I.call(@view, ObjC.sel('setNeedsDisplay:'), 1)
+      end
+    end
+
+    def invalidate_dirty_rows(dirty_rows)
+      gy_off = grid_y_offset
+      width = @cell_width * @cols
+      dirty_rows.each do |r|
+        next if r < 0 || r >= @rows
+        y = gy_off + r * @cell_height
+        ObjC::MSG_VOID_RECT.call(@view, ObjC.sel('setNeedsDisplayInRect:'), 0.0, y, width, @cell_height)
       end
     end
 
