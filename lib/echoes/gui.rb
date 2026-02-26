@@ -591,17 +591,19 @@ module Echoes
 
       @tabs.each do |tab|
         begin
-          data = tab.pty_read.read_nonblock(4096)
-          tab.parser.feed(data)
-          if tab.screen.title
-            tab.title = tab.screen.title
-            tab.screen.title = nil
+          loop do
+            data = tab.pty_read.read_nonblock(16384)
+            tab.parser.feed(data)
+            need_redraw = true
           end
-          need_redraw = true
         rescue IO::WaitReadable
-          # No data for this tab
+          # No more data for this tab
         rescue EOFError, Errno::EIO
           # Tab's process exited — will be cleaned up
+        end
+        if need_redraw && tab.screen.title
+          tab.title = tab.screen.title
+          tab.screen.title = nil
         end
       end
 
