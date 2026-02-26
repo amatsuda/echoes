@@ -765,6 +765,18 @@ module Echoes
       @pending_wrap = false
     end
 
+    def decaln
+      @grid.each do |row|
+        row.each do |cell|
+          cell.reset!
+          cell.char = 'E'
+        end
+      end
+      @cursor.row = 0
+      @cursor.col = 0
+      @pending_wrap = false
+    end
+
     def reset
       @cursor = Cursor.new
       @attrs = Cell.new

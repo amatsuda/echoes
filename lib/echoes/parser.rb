@@ -164,6 +164,8 @@ module Echoes
 
     def dispatch_escape_intermediate(final)
       case @esc_intermediate
+      when 0x23 # #
+        @screen.decaln if final == 0x38  # ESC # 8
       when 0x28 # ( => G0
         charset = final == 0x30 ? :dec_special : :ascii
         @screen.designate_charset(0, charset)

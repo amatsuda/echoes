@@ -990,4 +990,15 @@ class Echoes::ParserTest < Test::Unit::TestCase
     cell = @screen.grid[0][0]
     assert_false(cell.underline)
   end
+
+  test "ESC #8 DECALN fills screen with E" do
+    @parser.feed("\e#8")
+    (0...@screen.rows).each do |r|
+      (0...@screen.cols).each do |c|
+        assert_equal('E', @screen.grid[r][c].char)
+      end
+    end
+    assert_equal(0, @screen.cursor.row)
+    assert_equal(0, @screen.cursor.col)
+  end
 end
