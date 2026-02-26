@@ -161,6 +161,36 @@ module Echoes
         [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP]
       ) { |_self, _cmd, event| gui.mouse_up(event) }
 
+      @right_mouse_down_closure = Fiddle::Closure::BlockCaller.new(
+        Fiddle::TYPE_VOID,
+        [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP]
+      ) { |_self, _cmd, event| gui.right_mouse_down(event) }
+
+      @right_mouse_dragged_closure = Fiddle::Closure::BlockCaller.new(
+        Fiddle::TYPE_VOID,
+        [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP]
+      ) { |_self, _cmd, event| gui.right_mouse_dragged(event) }
+
+      @right_mouse_up_closure = Fiddle::Closure::BlockCaller.new(
+        Fiddle::TYPE_VOID,
+        [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP]
+      ) { |_self, _cmd, event| gui.right_mouse_up(event) }
+
+      @other_mouse_down_closure = Fiddle::Closure::BlockCaller.new(
+        Fiddle::TYPE_VOID,
+        [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP]
+      ) { |_self, _cmd, event| gui.other_mouse_down(event) }
+
+      @other_mouse_dragged_closure = Fiddle::Closure::BlockCaller.new(
+        Fiddle::TYPE_VOID,
+        [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP]
+      ) { |_self, _cmd, event| gui.other_mouse_dragged(event) }
+
+      @other_mouse_up_closure = Fiddle::Closure::BlockCaller.new(
+        Fiddle::TYPE_VOID,
+        [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP]
+      ) { |_self, _cmd, event| gui.other_mouse_up(event) }
+
       @perform_key_equiv_closure = Fiddle::Closure::BlockCaller.new(
         Fiddle::TYPE_INT,
         [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP]
@@ -189,6 +219,12 @@ module Echoes
         'mouseDown:'            => ['v@:@', @mouse_down_closure],
         'mouseDragged:'         => ['v@:@', @mouse_dragged_closure],
         'mouseUp:'              => ['v@:@', @mouse_up_closure],
+        'rightMouseDown:'       => ['v@:@', @right_mouse_down_closure],
+        'rightMouseDragged:'    => ['v@:@', @right_mouse_dragged_closure],
+        'rightMouseUp:'         => ['v@:@', @right_mouse_up_closure],
+        'otherMouseDown:'       => ['v@:@', @other_mouse_down_closure],
+        'otherMouseDragged:'    => ['v@:@', @other_mouse_dragged_closure],
+        'otherMouseUp:'         => ['v@:@', @other_mouse_up_closure],
         'performKeyEquivalent:' => ['c@:@', @perform_key_equiv_closure],
         'setFrameSize:'         => ['v@:{CGSize=dd}', @set_frame_size_closure],
       })
@@ -691,6 +727,78 @@ module Echoes
       return unless pos
       row, col = pos
       send_mouse_event(tab, 3, col, row, release: true)  # 3 = release
+    end
+
+    def right_mouse_down(event_ptr)
+      tab = current_tab
+      return if tab.screen.mouse_tracking == :off
+
+      pos = grid_position(event_ptr)
+      return unless pos
+      row, col = pos
+      send_mouse_event(tab, 2, col, row)  # button 2 = right press
+    rescue Errno::EIO, IOError
+      close_tab(@active_tab)
+    end
+
+    def right_mouse_dragged(event_ptr)
+      tab = current_tab
+      return unless tab.screen.mouse_tracking == :button_event || tab.screen.mouse_tracking == :any_event
+
+      pos = grid_position(event_ptr)
+      return unless pos
+      row, col = pos
+      send_mouse_event(tab, 34, col, row)  # 34 = right drag (button 2 + 32)
+    rescue Errno::EIO, IOError
+      close_tab(@active_tab)
+    end
+
+    def right_mouse_up(event_ptr)
+      tab = current_tab
+      return if tab.screen.mouse_tracking == :off || tab.screen.mouse_tracking == :x10
+
+      pos = grid_position(event_ptr)
+      return unless pos
+      row, col = pos
+      send_mouse_event(tab, 3, col, row, release: true)
+    rescue Errno::EIO, IOError
+      close_tab(@active_tab)
+    end
+
+    def other_mouse_down(event_ptr)
+      tab = current_tab
+      return if tab.screen.mouse_tracking == :off
+
+      pos = grid_position(event_ptr)
+      return unless pos
+      row, col = pos
+      send_mouse_event(tab, 1, col, row)  # button 1 = middle press
+    rescue Errno::EIO, IOError
+      close_tab(@active_tab)
+    end
+
+    def other_mouse_dragged(event_ptr)
+      tab = current_tab
+      return unless tab.screen.mouse_tracking == :button_event || tab.screen.mouse_tracking == :any_event
+
+      pos = grid_position(event_ptr)
+      return unless pos
+      row, col = pos
+      send_mouse_event(tab, 33, col, row)  # 33 = middle drag (button 1 + 32)
+    rescue Errno::EIO, IOError
+      close_tab(@active_tab)
+    end
+
+    def other_mouse_up(event_ptr)
+      tab = current_tab
+      return if tab.screen.mouse_tracking == :off || tab.screen.mouse_tracking == :x10
+
+      pos = grid_position(event_ptr)
+      return unless pos
+      row, col = pos
+      send_mouse_event(tab, 3, col, row, release: true)
+    rescue Errno::EIO, IOError
+      close_tab(@active_tab)
     end
 
     def handle_resize(w, h)
