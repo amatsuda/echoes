@@ -46,6 +46,7 @@ module Echoes
       @main_scrollback = nil
       @pending_wrap = false
       @last_char = nil
+      @title_stack = []
     end
 
     DEC_SPECIAL = {
@@ -551,6 +552,14 @@ module Echoes
     end
 
     attr_accessor :mouse_tracking, :mouse_encoding, :insert_mode, :active_charset, :application_keypad, :cursor_style, :bell
+
+    def push_title
+      @title_stack.push(@title)
+    end
+
+    def pop_title
+      @title = @title_stack.pop if @title_stack.any?
+    end
 
     def set_hyperlink(uri)
       @attrs.hyperlink = uri

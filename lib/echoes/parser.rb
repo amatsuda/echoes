@@ -399,6 +399,7 @@ module Echoes
       when 'n' then dispatch_dsr(params)
       when 'p' then @screen.soft_reset if @csi_intermediate == '!'
       when 'q' then @screen.cursor_style = (params[0] || 0) if @csi_intermediate == ' '
+      when 't' then dispatch_window_ops(params)
       when 'h' then dispatch_mode_set(params)
       when 'l' then dispatch_mode_reset(params)
       end
@@ -491,6 +492,27 @@ module Echoes
         row = @screen.cursor.row + 1
         col = @screen.cursor.col + 1
         @writer.call("\e[#{row};#{col}R")
+      end
+    end
+
+    def dispatch_window_ops(params)
+      case params[0]
+      when 14
+        # Report window size in pixels
+        if @writer
+          px_height = (@screen.rows * @screen.cell_pixel_height).to_i
+          px_width = (@screen.cols * @screen.cell_pixel_width).to_i
+          @writer.call("\e[4;#{px_height};#{px_width}t")
+        end
+      when 18
+        # Report text area size in characters
+        @writer&.call("\e[8;#{@screen.rows};#{@screen.cols}t")
+      when 22
+        # Push title
+        @screen.push_title if params[1] == 0 || params[1] == 2 || params[1].nil?
+      when 23
+        # Pop title
+        @screen.pop_title if params[1] == 0 || params[1] == 2 || params[1].nil?
       end
     end
 

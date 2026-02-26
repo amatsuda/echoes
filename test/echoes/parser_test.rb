@@ -874,4 +874,30 @@ class Echoes::ParserTest < Test::Unit::TestCase
     assert_equal(0, @screen.cursor.col)
     assert_equal(' ', @screen.grid[0][0].char)
   end
+
+  test "CSI 18t reports text area size in characters" do
+    responses = []
+    parser = Echoes::Parser.new(@screen, writer: ->(s) { responses << s })
+    parser.feed("\e[18t")
+    assert_equal(["\e[8;5;10t"], responses)
+  end
+
+  test "CSI 14t reports window size in pixels" do
+    responses = []
+    parser = Echoes::Parser.new(@screen, writer: ->(s) { responses << s })
+    parser.feed("\e[14t")
+    assert_equal(["\e[4;80;80t"], responses)  # 5*16=80, 10*8=80
+  end
+
+  test "CSI 22;0t / CSI 23;0t push and pop title" do
+    @parser.feed("\e]0;Hello\x07")
+    assert_equal("Hello", @screen.title)
+
+    @parser.feed("\e[22;0t")  # push
+    @parser.feed("\e]0;World\x07")
+    assert_equal("World", @screen.title)
+
+    @parser.feed("\e[23;0t")  # pop
+    assert_equal("Hello", @screen.title)
+  end
 end
