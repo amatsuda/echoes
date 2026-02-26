@@ -209,6 +209,16 @@ module Echoes
         gui.handle_resize(w, h)
       }
 
+      @focus_gained_closure = Fiddle::Closure::BlockCaller.new(
+        Fiddle::TYPE_VOID,
+        [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP]
+      ) { |_self, _cmd, _notification| gui.window_focus_changed(true) }
+
+      @focus_lost_closure = Fiddle::Closure::BlockCaller.new(
+        Fiddle::TYPE_VOID,
+        [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP]
+      ) { |_self, _cmd, _notification| gui.window_focus_changed(false) }
+
       @view_class = ObjC.define_class('EchoesTerminalView', 'NSView', {
         'drawRect:'             => ['v@:{CGRect=dddd}', @draw_rect_closure],
         'keyDown:'              => ['v@:@', @key_down_closure],
@@ -227,6 +237,8 @@ module Echoes
         'otherMouseUp:'         => ['v@:@', @other_mouse_up_closure],
         'performKeyEquivalent:' => ['c@:@', @perform_key_equiv_closure],
         'setFrameSize:'         => ['v@:{CGSize=dd}', @set_frame_size_closure],
+        'windowDidBecomeKey:'   => ['v@:@', @focus_gained_closure],
+        'windowDidResignKey:'   => ['v@:@', @focus_lost_closure],
       })
 
       win_width = @cell_width * @cols
@@ -242,6 +254,18 @@ module Echoes
       ObjC::MSG_VOID_1.call(@window, ObjC.sel('makeKeyAndOrderFront:'), @app)
       ObjC::MSG_VOID_1.call(@window, ObjC.sel('makeFirstResponder:'), @view)
       ObjC::MSG_VOID_I.call(@app, ObjC.sel('activateIgnoringOtherApps:'), 1)
+
+      setup_focus_notifications
+    end
+
+    def setup_focus_notifications
+      nc = ObjC::MSG_PTR.call(ObjC.cls('NSNotificationCenter'), ObjC.sel('defaultCenter'))
+      ObjC::MSG_VOID_4.call(nc, ObjC.sel('addObserver:selector:name:object:'),
+        @view, ObjC.sel('windowDidBecomeKey:'),
+        ObjC.nsstring('NSWindowDidBecomeKeyNotification'), @window)
+      ObjC::MSG_VOID_4.call(nc, ObjC.sel('addObserver:selector:name:object:'),
+        @view, ObjC.sel('windowDidResignKey:'),
+        ObjC.nsstring('NSWindowDidResignKeyNotification'), @window)
     end
 
     def setup_timer
@@ -829,6 +853,14 @@ module Echoes
       @rows = new_rows
       @cols = new_cols
       @tabs.each { |tab| tab.resize(@rows, @cols) }
+    end
+
+    def window_focus_changed(focused)
+      tab = current_tab
+      return unless tab&.screen&.focus_reporting?
+
+      seq = focused ? "\e[I" : "\e[O"
+      tab.pty_write.write(seq) rescue nil
     end
 
     def update_font(new_size)
