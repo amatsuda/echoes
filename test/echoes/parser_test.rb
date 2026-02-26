@@ -954,4 +954,9 @@ class Echoes::ParserTest < Test::Unit::TestCase
     parser.feed("\e]12;?\x07")
     assert_equal(["\e]12;rgb:1111/2222/3333\e\\"], responses)
   end
+
+  test "OSC 7 sets current directory" do
+    @parser.feed("\e]7;file://localhost/Users/test\x07")
+    assert_equal("file://localhost/Users/test", @screen.current_directory)
+  end
 end

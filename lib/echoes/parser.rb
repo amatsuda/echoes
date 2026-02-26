@@ -308,6 +308,9 @@ module Echoes
         _params, uri = rest.split(';', 2)
         @screen.set_hyperlink(uri && !uri.empty? ? uri : nil)
         return
+      when '7'
+        @screen.current_directory = rest
+        return
       when '4'
         dispatch_osc4(rest)
         return
