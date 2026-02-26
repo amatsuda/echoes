@@ -1182,9 +1182,9 @@ module Echoes
     end
 
     def char_class_of(c)
-      if c =~ /\s/ then :space
-      elsif c =~ /\w/ then :word
-      else :other
+      if c.nil? || c.empty? || c == ' ' then :space
+      elsif Echoes.config.word_separators.include?(c) then :separator
+      else :word
       end
     end
 

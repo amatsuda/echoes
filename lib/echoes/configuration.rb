@@ -16,6 +16,7 @@ module Echoes
       @tab_position = :top
       @color_palette = nil
       @term = 'xterm-256color'
+      @word_separators = ' @*.:/\\()"\'-:,.;<>~!#$%^&*|+=[]{}~?│'
     end
 
     def font_family(val = nil)
@@ -64,6 +65,10 @@ module Echoes
 
     def term(val = nil)
       val ? @term = val : @term
+    end
+
+    def word_separators(val = nil)
+      val ? @word_separators = val : @word_separators
     end
 
     def color_palette(val = nil)
