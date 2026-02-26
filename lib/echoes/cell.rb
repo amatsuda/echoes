@@ -2,7 +2,7 @@
 
 module Echoes
   class Cell
-    attr_accessor :char, :fg, :bg, :bold, :italic, :underline, :inverse, :faint, :strikethrough, :blink, :concealed, :width, :multicell, :hyperlink
+    attr_accessor :char, :fg, :bg, :bold, :italic, :underline, :underline_color, :inverse, :faint, :strikethrough, :blink, :concealed, :width, :multicell, :hyperlink
 
     def initialize(char = " ", fg: nil, bg: nil, bold: false, underline: false, inverse: false, width: 1)
       @char = char
@@ -32,6 +32,7 @@ module Echoes
       @width = 1
       @multicell = nil
       @hyperlink = nil
+      @underline_color = nil
     end
 
     def copy_from(other)
@@ -41,6 +42,7 @@ module Echoes
       @bold = other.bold
       @italic = other.italic
       @underline = other.underline
+      @underline_color = other.underline_color
       @inverse = other.inverse
       @faint = other.faint
       @strikethrough = other.strikethrough

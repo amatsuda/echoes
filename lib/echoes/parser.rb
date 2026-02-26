@@ -184,6 +184,9 @@ module Echoes
       when 0x30..0x39 # 0-9
         @current_param << byte.chr
         @state = :csi_param
+      when 0x3A # : (sub-parameter separator)
+        @current_param << ':'
+        @state = :csi_param
       when 0x3B # ;
         @params << @current_param
         @current_param = +""
@@ -205,6 +208,8 @@ module Echoes
       case byte
       when 0x30..0x39 # 0-9
         @current_param << byte.chr
+      when 0x3A # : (sub-parameter separator)
+        @current_param << ':'
       when 0x3B # ;
         @params << @current_param
         @current_param = +""
@@ -463,7 +468,7 @@ module Echoes
       when 'b' then @screen.repeat_char(params[0] || 1)
       when 'S' then @screen.scroll_up(params[0] || 1)
       when 'T' then @screen.scroll_down(params[0] || 1)
-      when 'm' then @screen.set_graphics(params)
+      when 'm' then @screen.set_graphics(collect_sgr_params)
       when 'r' then @screen.set_scroll_region((params[0] || 1) - 1, (params[1] || @screen.rows) - 1)
       when 's' then @screen.save_cursor
       when 'u' then @screen.restore_cursor
@@ -592,6 +597,19 @@ module Echoes
     def collect_params
       raw = @params + [@current_param]
       raw.map { |s| s.empty? ? nil : s.to_i }
+    end
+
+    # For SGR (m), return params that may contain colon sub-parameters.
+    # Each element is either an Integer or an Array of (Integer|nil) for sub-params.
+    def collect_sgr_params
+      raw = @params + [@current_param]
+      raw.map do |s|
+        if s.include?(':')
+          s.split(':').map { |p| p.empty? ? nil : p.to_i }
+        else
+          s.empty? ? nil : s.to_i
+        end
+      end
     end
   end
 end

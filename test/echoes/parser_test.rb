@@ -959,4 +959,35 @@ class Echoes::ParserTest < Test::Unit::TestCase
     @parser.feed("\e]7;file://localhost/Users/test\x07")
     assert_equal("file://localhost/Users/test", @screen.current_directory)
   end
+
+  test "SGR with colon sub-parameters for RGB foreground" do
+    @parser.feed("\e[38:2::255:128:0mA")
+    cell = @screen.grid[0][0]
+    assert_equal([255, 128, 0], cell.fg)
+  end
+
+  test "SGR with colon sub-parameters for RGB background" do
+    @parser.feed("\e[48:2::10:20:30mA")
+    cell = @screen.grid[0][0]
+    assert_equal([10, 20, 30], cell.bg)
+  end
+
+  test "SGR with colon sub-parameters for indexed color" do
+    @parser.feed("\e[38:5:196mA")
+    cell = @screen.grid[0][0]
+    assert_equal(196, cell.fg)
+  end
+
+  test "SGR 4:3 sets curly underline" do
+    @parser.feed("\e[4:3mA")
+    cell = @screen.grid[0][0]
+    assert_equal(3, cell.underline)
+  end
+
+  test "SGR 4:0 disables underline" do
+    @parser.feed("\e[4m")  # enable
+    @parser.feed("\e[4:0mA")  # disable via sub-param
+    cell = @screen.grid[0][0]
+    assert_false(cell.underline)
+  end
 end

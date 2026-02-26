@@ -422,7 +422,16 @@ module Echoes
       params = [0] if params.empty?
       i = 0
       while i < params.length
-        case params[i]
+        p = params[i]
+
+        # Handle colon sub-parameter arrays (e.g. [38, 2, nil, R, G, B])
+        if p.is_a?(Array)
+          apply_sgr_subparams(p)
+          i += 1
+          next
+        end
+
+        case p
         when 0
           @attrs.reset!
         when 1
@@ -457,7 +466,7 @@ module Echoes
         when 29
           @attrs.strikethrough = false
         when 30..37
-          @attrs.fg = params[i] - 30
+          @attrs.fg = p - 30
         when 38
           if params[i + 1] == 2 && params[i + 2] && params[i + 3] && params[i + 4]
             @attrs.fg = [params[i + 2], params[i + 3], params[i + 4]]
@@ -469,7 +478,7 @@ module Echoes
         when 39
           @attrs.fg = nil
         when 40..47
-          @attrs.bg = params[i] - 40
+          @attrs.bg = p - 40
         when 48
           if params[i + 1] == 2 && params[i + 2] && params[i + 3] && params[i + 4]
             @attrs.bg = [params[i + 2], params[i + 3], params[i + 4]]
@@ -481,11 +490,51 @@ module Echoes
         when 49
           @attrs.bg = nil
         when 90..97
-          @attrs.fg = params[i] - 90 + 8
+          @attrs.fg = p - 90 + 8
         when 100..107
-          @attrs.bg = params[i] - 100 + 8
+          @attrs.bg = p - 100 + 8
         end
         i += 1
+      end
+    end
+
+    def apply_sgr_subparams(sub)
+      case sub[0]
+      when 4
+        # Underline style: 4:0=off, 4:1=single, 4:2=double, 4:3=curly, 4:4=dotted, 4:5=dashed
+        style = sub[1] || 1
+        if style == 0
+          @attrs.underline = false
+        else
+          @attrs.underline = style
+        end
+      when 38
+        # Foreground color with sub-parameters
+        if sub[1] == 2
+          # 38:2:cs:R:G:B or 38:2:R:G:B (cs = color space, often empty/omitted)
+          r, g, b = extract_rgb_subparams(sub, 2)
+          @attrs.fg = [r, g, b] if r && g && b
+        elsif sub[1] == 5 && sub[2]
+          @attrs.fg = sub[2]
+        end
+      when 48
+        # Background color with sub-parameters
+        if sub[1] == 2
+          r, g, b = extract_rgb_subparams(sub, 2)
+          @attrs.bg = [r, g, b] if r && g && b
+        elsif sub[1] == 5 && sub[2]
+          @attrs.bg = sub[2]
+        end
+      when 58
+        # Underline color
+        if sub[1] == 2
+          r, g, b = extract_rgb_subparams(sub, 2)
+          @attrs.underline_color = [r, g, b] if r && g && b
+        elsif sub[1] == 5 && sub[2]
+          @attrs.underline_color = sub[2]
+        end
+      when 59
+        @attrs.underline_color = nil
       end
     end
 
@@ -749,6 +798,26 @@ module Echoes
     end
 
     private
+
+    # Extract R, G, B from sub-params like [38, 2, cs, R, G, B] or [38, 2, R, G, B]
+    # The color space ID (cs) may be nil/empty, so we try both layouts.
+    def extract_rgb_subparams(sub, type_idx)
+      # sub[type_idx] is the type (2 or 5)
+      # Try [_, 2, cs, R, G, B] first (6 elements), then [_, 2, R, G, B] (5 elements)
+      if sub.length >= type_idx + 5 && sub[type_idx + 2] && sub[type_idx + 3] && sub[type_idx + 4]
+        if sub[type_idx + 1].nil?
+          # Color space ID is empty/nil: [38, 2, nil, R, G, B]
+          [sub[type_idx + 2], sub[type_idx + 3], sub[type_idx + 4]]
+        else
+          # No color space ID: [38, 2, R, G, B]
+          [sub[type_idx + 1], sub[type_idx + 2], sub[type_idx + 3]]
+        end
+      elsif sub.length >= type_idx + 4 && sub[type_idx + 1] && sub[type_idx + 2] && sub[type_idx + 3]
+        [sub[type_idx + 1], sub[type_idx + 2], sub[type_idx + 3]]
+      else
+        [nil, nil, nil]
+      end
+    end
 
     def reflow(new_rows, new_cols, old_cols)
       # Convert cursor to absolute position (scrollback + grid row index)
