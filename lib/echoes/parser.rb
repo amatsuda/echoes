@@ -360,9 +360,12 @@ module Echoes
     end
 
     def dispatch_csi(final)
-      # Ignore sequences with unrecognized private prefixes (>, <, =)
-      # e.g. CSI > c (DA2), CSI = c (DA3) — we don't implement these
-      return if @csi_prefix
+      if @csi_prefix
+        if @csi_prefix == 0x3E && final == 'c'
+          dispatch_da2(collect_params)
+        end
+        return
+      end
 
       params = collect_params
 
@@ -466,6 +469,14 @@ module Echoes
 
       # VT220 with ANSI color support
       @writer.call("\e[?62;22c")
+    end
+
+    def dispatch_da2(params)
+      return unless @writer
+      return unless params[0].nil? || params[0] == 0
+
+      # Report as VT220 (type 1), version 0.1.0 → 100, ROM cartridge 0
+      @writer.call("\e[>1;100;0c")
     end
 
     def dispatch_dsr(params)

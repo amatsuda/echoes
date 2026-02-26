@@ -496,11 +496,25 @@ class Echoes::ParserTest < Test::Unit::TestCase
     # Should not raise
   end
 
+  test "DA2 CSI > c responds with secondary device attributes" do
+    responses = []
+    parser = Echoes::Parser.new(@screen, writer: ->(s) { responses << s })
+    parser.feed("\e[>c")
+    assert_equal(["\e[>1;100;0c"], responses)
+  end
+
+  test "DA2 CSI > 0c responds with secondary device attributes" do
+    responses = []
+    parser = Echoes::Parser.new(@screen, writer: ->(s) { responses << s })
+    parser.feed("\e[>0c")
+    assert_equal(["\e[>1;100;0c"], responses)
+  end
+
   test "DA2 CSI > c does not trigger DA1 response" do
     responses = []
     parser = Echoes::Parser.new(@screen, writer: ->(s) { responses << s })
     parser.feed("\e[>c")
-    assert_equal([], responses)
+    assert_not_include(responses, "\e[?62;22c")
   end
 
   test "DA3 CSI = c does not trigger DA1 response" do
