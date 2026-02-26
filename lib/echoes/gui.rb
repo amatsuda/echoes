@@ -17,7 +17,7 @@ module Echoes
       @tab_bg = make_color(0.15, 0.15, 0.15)
       @tab_active_bg = make_color(0.3, 0.3, 0.3)
       @tab_fg = make_color(0.8, 0.8, 0.8)
-      @selection_color = make_color(0.2, 0.4, 0.7)
+      @selection_color = make_color(*Echoes.config.selection_color)
       @search_match_color = make_color(0.6, 0.5, 0.0)
       @search_current_color = make_color(0.8, 0.6, 0.0)
       @selection_anchor = nil

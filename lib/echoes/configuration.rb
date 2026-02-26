@@ -17,6 +17,7 @@ module Echoes
       @color_palette = nil
       @term = 'xterm-256color'
       @word_separators = ' @*.:/\\()"\'-:,.;<>~!#$%^&*|+=[]{}~?│'
+      @selection_color = [0.2, 0.4, 0.7]
     end
 
     def font_family(val = nil)
@@ -69,6 +70,10 @@ module Echoes
 
     def word_separators(val = nil)
       val ? @word_separators = val : @word_separators
+    end
+
+    def selection_color(*args)
+      args.empty? ? @selection_color : @selection_color = parse_color(args)
     end
 
     def color_palette(val = nil)
