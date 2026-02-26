@@ -900,4 +900,29 @@ class Echoes::ParserTest < Test::Unit::TestCase
     @parser.feed("\e[23;0t")  # pop
     assert_equal("Hello", @screen.title)
   end
+
+  test "OSC 4 query responds with palette color" do
+    responses = []
+    palette = { 1 => [0xffff, 0x0000, 0x0000] }
+    @screen.palette_handler = ->(op, idx, *args) {
+      case op
+      when :get then palette[idx]
+      end
+    }
+    parser = Echoes::Parser.new(@screen, writer: ->(s) { responses << s })
+    parser.feed("\e]4;1;?\x07")
+    assert_equal(["\e]4;1;rgb:ffff/0000/0000\e\\"], responses)
+  end
+
+  test "OSC 4 set calls palette handler" do
+    set_calls = []
+    @screen.palette_handler = ->(op, idx, *args) {
+      set_calls << [op, idx, args[0]] if op == :set
+    }
+    @parser.feed("\e]4;5;rgb:aa/bb/cc\x07")
+    assert_equal(1, set_calls.size)
+    assert_equal(:set, set_calls[0][0])
+    assert_equal(5, set_calls[0][1])
+    assert_equal([0xaaaa, 0xbbbb, 0xcccc], set_calls[0][2])
+  end
 end

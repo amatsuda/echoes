@@ -565,7 +565,7 @@ module Echoes
       @attrs.hyperlink = uri
     end
 
-    attr_accessor :clipboard_handler
+    attr_accessor :clipboard_handler, :palette_handler
 
     def set_clipboard(text)
       @clipboard_handler&.call(:set, text)

@@ -308,6 +308,9 @@ module Echoes
         _params, uri = rest.split(';', 2)
         @screen.set_hyperlink(uri && !uri.empty? ? uri : nil)
         return
+      when '4'
+        dispatch_osc4(rest)
+        return
       when '52'
         dispatch_osc52(rest)
         return
@@ -336,6 +339,47 @@ module Echoes
       end
 
       @screen.put_multicell(text, **params)
+    end
+
+    def dispatch_osc4(rest)
+      # OSC 4 can contain multiple index;spec pairs
+      parts = rest.split(';')
+      parts.each_slice(2) do |index_str, spec|
+        break unless spec
+        idx = index_str.to_i
+        next if idx < 0 || idx > 255
+
+        if spec == '?'
+          # Query: respond with current color
+          if @writer && @screen.palette_handler
+            rgb = @screen.palette_handler.call(:get, idx)
+            if rgb
+              r, g, b = rgb
+              @writer.call("\e]4;#{idx};rgb:#{format('%04x', r)}/#{format('%04x', g)}/#{format('%04x', b)}\e\\")
+            end
+          end
+        else
+          # Set: parse color spec (rgb:RR/GG/BB or rgb:RRRR/GGGG/BBBB)
+          if spec =~ /\Argb:([0-9a-fA-F]+)\/([0-9a-fA-F]+)\/([0-9a-fA-F]+)\z/
+            r_s, g_s, b_s = $1, $2, $3
+            r = scale_color_component(r_s)
+            g = scale_color_component(g_s)
+            b = scale_color_component(b_s)
+            @screen.palette_handler&.call(:set, idx, [r, g, b])
+          end
+        end
+      end
+    end
+
+    def scale_color_component(hex)
+      val = hex.to_i(16)
+      case hex.length
+      when 1 then val * 0x1111
+      when 2 then val * 0x0101
+      when 3 then val * 0x0010 + (val >> 4)
+      when 4 then val
+      else val
+      end
     end
 
     def dispatch_osc52(rest)
