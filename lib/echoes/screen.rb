@@ -23,6 +23,7 @@ module Echoes
       @cell_pixel_height = 16.0
       @application_cursor_keys = false
       @bracketed_paste_mode = false
+      @focus_reporting = false
       @auto_wrap = true
       @mouse_tracking = :off   # :off, :x10, :normal, :button_event, :any_event
       @mouse_encoding = :default  # :default, :sgr
@@ -512,6 +513,14 @@ module Echoes
       @bracketed_paste_mode = val
     end
 
+    def focus_reporting?
+      @focus_reporting
+    end
+
+    def focus_reporting=(val)
+      @focus_reporting = val
+    end
+
     def auto_wrap?
       @auto_wrap
     end
@@ -650,6 +659,7 @@ module Echoes
       @insert_mode = false
       @application_cursor_keys = false
       @bracketed_paste_mode = false
+      @focus_reporting = false
       @charset_g0 = :ascii
       @charset_g1 = :ascii
       @active_charset = 0

@@ -545,6 +545,17 @@ class Echoes::ParserTest < Test::Unit::TestCase
     assert_equal(0, @screen.cursor.col)  # CR executed during CSI
   end
 
+  test "focus reporting ?1004h enables" do
+    @parser.feed("\e[?1004h")
+    assert_true(@screen.focus_reporting?)
+  end
+
+  test "focus reporting ?1004l disables" do
+    @parser.feed("\e[?1004h")
+    @parser.feed("\e[?1004l")
+    assert_false(@screen.focus_reporting?)
+  end
+
   test "bracketed paste mode ?2004h enables" do
     @parser.feed("\e[?2004h")
     assert_true(@screen.bracketed_paste_mode?)

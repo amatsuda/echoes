@@ -425,6 +425,7 @@ module Echoes
         when 1002 then @screen.mouse_tracking = :button_event
         when 1003 then @screen.mouse_tracking = :any_event
         when 1006 then @screen.mouse_encoding = :sgr
+        when 1004 then @screen.focus_reporting = true
         when 2004 then @screen.bracketed_paste_mode = true
         when 1049
           @screen.save_cursor
@@ -453,6 +454,7 @@ module Echoes
         when 25 then @screen.hide_cursor
         when 9, 1000, 1002, 1003 then @screen.mouse_tracking = :off
         when 1006 then @screen.mouse_encoding = :default
+        when 1004 then @screen.focus_reporting = false
         when 2004 then @screen.bracketed_paste_mode = false
         when 1049
           @screen.switch_to_main_screen
