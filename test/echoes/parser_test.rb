@@ -1001,4 +1001,21 @@ class Echoes::ParserTest < Test::Unit::TestCase
     assert_equal(0, @screen.cursor.row)
     assert_equal(0, @screen.cursor.col)
   end
+
+  test "DCS +q XTGETTCAP responds with known capability" do
+    responses = []
+    parser = Echoes::Parser.new(@screen, writer: ->(s) { responses << s })
+    # Query "TN" (terminal name) — hex encoded: 544e
+    parser.feed("\eP+q544e\e\\")
+    assert_equal(1, responses.size)
+    assert_true(responses[0].start_with?("\eP1+r544e="))
+  end
+
+  test "DCS +q XTGETTCAP responds with invalid for unknown capability" do
+    responses = []
+    parser = Echoes::Parser.new(@screen, writer: ->(s) { responses << s })
+    # Query "XX" — hex encoded: 5858
+    parser.feed("\eP+q5858\e\\")
+    assert_equal(["\eP0+r5858\e\\"], responses)
+  end
 end

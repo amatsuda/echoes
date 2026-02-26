@@ -111,6 +111,7 @@ module Echoes
         @dcs_params = []
         @dcs_current_param = +""
         @dcs_data = "".b
+        @dcs_intermediate = nil
       when 0x5D # ]
         @state = :osc_string
         @osc_string = "".b
@@ -259,11 +260,16 @@ module Echoes
         @dcs_params << @dcs_current_param
         @dcs_current_param = +""
         @state = :dcs_param
-      when 0x71 # 'q' => sixel
+      when 0x20..0x2F # intermediate bytes (+, etc.)
+        @dcs_intermediate = byte
+        @state = :dcs_param
+      when 0x40..0x7E # final byte
         @dcs_params << @dcs_current_param unless @dcs_current_param.empty?
-        @state = :dcs_passthrough
-      when 0x40..0x7E
-        @state = :ground
+        if byte == 0x71 # 'q'
+          @state = :dcs_passthrough
+        else
+          @state = :ground
+        end
       when 0x1B
         @state = :escape
       end
@@ -276,11 +282,15 @@ module Echoes
       when 0x3B
         @dcs_params << @dcs_current_param
         @dcs_current_param = +""
-      when 0x71 # 'q'
+      when 0x20..0x2F # intermediate bytes
+        @dcs_intermediate = byte
+      when 0x40..0x7E # final byte
         @dcs_params << @dcs_current_param unless @dcs_current_param.empty?
-        @state = :dcs_passthrough
-      when 0x40..0x7E
-        @state = :ground
+        if byte == 0x71 # 'q'
+          @state = :dcs_passthrough
+        else
+          @state = :ground
+        end
       when 0x1B
         @state = :escape
       end
@@ -296,8 +306,39 @@ module Echoes
     end
 
     def dispatch_dcs
-      params = @dcs_params.map { |s| s.empty? ? 0 : s.to_i }
-      @screen.put_sixel(@dcs_data, params)
+      if @dcs_intermediate == 0x2B # '+' => XTGETTCAP
+        dispatch_xtgettcap(@dcs_data)
+      else
+        params = @dcs_params.map { |s| s.empty? ? 0 : s.to_i }
+        @screen.put_sixel(@dcs_data, params)
+      end
+    end
+
+    TCAP_RESPONSES = {
+      'TN' => 'xterm-256color',    # terminal name
+      'Co' => '256',                # max colors
+      'RGB' => '1',                 # direct color support
+      'Su' => '1',                  # styled underlines
+      'Ms' => '\033]52;%p1%s;%p2%s\033\\\\',  # clipboard (OSC 52)
+    }.freeze
+
+    def dispatch_xtgettcap(data)
+      return unless @writer
+
+      # Data contains hex-encoded capability names separated by ';'
+      names = data.force_encoding('ASCII').split(';')
+      names.each do |hex_name|
+        name = [hex_name].pack('H*') rescue next
+        value = TCAP_RESPONSES[name]
+        if value
+          hex_value = value.unpack1('H*')
+          hex_key = name.unpack1('H*')
+          @writer.call("\eP1+r#{hex_key}=#{hex_value}\e\\")
+        else
+          hex_key = name.unpack1('H*')
+          @writer.call("\eP0+r#{hex_key}\e\\")
+        end
+      end
     end
 
     def dispatch_osc
