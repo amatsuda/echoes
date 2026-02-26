@@ -444,6 +444,17 @@ module Echoes
             ObjC::NSRectFill.call(cx, cy, 2.0, @cell_height)
           else # block (0, 1, 2)
             ObjC::NSRectFill.call(cx, cy, @cell_width, @cell_height)
+            # Draw character under cursor with inverted colors
+            cell = screen.grid[screen.cursor.row][screen.cursor.col]
+            if cell.char != ' '
+              inv_fg = @default_bg
+              ns_attrs = ObjC.nsdict({
+                ObjC::NSFontAttributeName => cell.bold ? @bold_font : font_for_char(cell.char),
+                ObjC::NSForegroundColorAttributeName => inv_fg,
+              })
+              ns_char = ObjC.nsstring(cell.char)
+              ObjC::MSG_VOID_PT_1.call(ns_char, ObjC.sel('drawAtPoint:withAttributes:'), cx, cy, ns_attrs)
+            end
           end
         end
       end
