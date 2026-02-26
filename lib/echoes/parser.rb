@@ -315,7 +315,6 @@ module Echoes
     end
 
     TCAP_RESPONSES = {
-      'TN' => 'xterm-256color',    # terminal name
       'Co' => '256',                # max colors
       'RGB' => '1',                 # direct color support
       'Su' => '1',                  # styled underlines
@@ -329,7 +328,7 @@ module Echoes
       names = data.force_encoding('ASCII').split(';')
       names.each do |hex_name|
         name = [hex_name].pack('H*') rescue next
-        value = TCAP_RESPONSES[name]
+        value = name == 'TN' ? Echoes.config.term : TCAP_RESPONSES[name]
         if value
           hex_value = value.unpack1('H*')
           hex_key = name.unpack1('H*')

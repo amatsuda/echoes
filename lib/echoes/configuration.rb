@@ -15,6 +15,7 @@ module Echoes
       @window_title = 'Echoes'
       @tab_position = :top
       @color_palette = nil
+      @term = 'xterm-256color'
     end
 
     def font_family(val = nil)
@@ -59,6 +60,10 @@ module Echoes
 
     def tab_position(val = nil)
       val ? @tab_position = val.to_sym : @tab_position
+    end
+
+    def term(val = nil)
+      val ? @term = val : @term
     end
 
     def color_palette(val = nil)

@@ -10,7 +10,7 @@ module Echoes
     def initialize(command:, rows:, cols:)
       @screen = Screen.new(rows: rows, cols: cols)
       Dir.chdir(Dir.home) do
-        ENV['TERM'] = 'xterm-256color'
+        ENV['TERM'] = Echoes.config.term
         ENV['LANG'] ||= 'en_US.UTF-8'
         ENV['LC_CTYPE'] = 'UTF-8'
         @pty_read, @pty_write, @pty_pid = PTY.spawn(command)
