@@ -23,6 +23,8 @@ module Echoes
       @selection_anchor = nil
       @selection_end = nil
       @font_cache = {}
+      @rgb_color_cache = {}
+      @nsstring_cache = {}
       @cursor_blink_on = true
       @cursor_blink_counter = 0
       @search_mode = false
@@ -386,7 +388,7 @@ module Echoes
               draw_attrs[ObjC::NSUnderlineStyleAttributeName] = ObjC.nsnumber_int(1)
             end
             ns_attrs = ObjC.nsdict(draw_attrs)
-            ns_char = ObjC.nsstring(cell.char)
+            ns_char = cached_nsstring(cell.char)
 
             text_w = ObjC::MSG_RET_D_1.call(ns_char, ObjC.sel('sizeWithAttributes:'), ns_attrs)
 
@@ -449,7 +451,7 @@ module Echoes
               attrs[ObjC::NSStrikethroughStyleAttributeName] = ObjC.nsnumber_int(1)
             end
             ns_attrs = ObjC.nsdict(attrs)
-            ns_char = ObjC.nsstring(cell.char)
+            ns_char = cached_nsstring(cell.char)
             ObjC::MSG_VOID_PT_1.call(ns_char, ObjC.sel('drawAtPoint:withAttributes:'), x, y, ns_attrs)
           end
         end
@@ -479,7 +481,7 @@ module Echoes
                 ObjC::NSFontAttributeName => cell.bold ? @bold_font : font_for_char(cell.char),
                 ObjC::NSForegroundColorAttributeName => inv_fg,
               })
-              ns_char = ObjC.nsstring(cell.char)
+              ns_char = cached_nsstring(cell.char)
               ObjC::MSG_VOID_PT_1.call(ns_char, ObjC.sel('drawAtPoint:withAttributes:'), cx, cy, ns_attrs)
             end
           end
@@ -1473,13 +1475,19 @@ module Echoes
       case val
       when nil then default
       when Integer then @colors[val]
-      when Array then make_color(val[0] / 255.0, val[1] / 255.0, val[2] / 255.0)
+      when Array
+        key = (val[0] << 16) | (val[1] << 8) | val[2]
+        @rgb_color_cache[key] ||= make_color(val[0] / 255.0, val[1] / 255.0, val[2] / 255.0)
       else default
       end
     end
 
     def make_color_with_alpha(color, alpha)
       ObjC::MSG_PTR_1D.call(color, ObjC.sel('colorWithAlphaComponent:'), alpha)
+    end
+
+    def cached_nsstring(str)
+      @nsstring_cache[str] ||= ObjC.retain(ObjC.nsstring(str))
     end
 
     def make_color(r, g, b, a = 1.0)
