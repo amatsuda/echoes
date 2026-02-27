@@ -114,11 +114,15 @@ module Echoes
 
       # View menu
       view_menu = create_menu('View')
+      add_menu_item(view_menu, "Bigger", 'increaseFontSize:', '=')
       add_menu_item(view_menu, "Bigger", 'increaseFontSize:', '+')
       add_menu_item(view_menu, "Smaller", 'decreaseFontSize:', '-')
       add_menu_item(view_menu, "Reset Font Size", 'resetFontSize:', '0')
       add_separator(view_menu)
       add_menu_item(view_menu, "Find", 'toggleFind:', 'f')
+      add_menu_item(view_menu, "Find Next", 'findNext:', 'g')
+      add_menu_item(view_menu, "Find Previous", 'findPrevious:', 'g',
+                    modifiers: ObjC::NSEventModifierFlagCommand | ObjC::NSEventModifierFlagShift)
       add_submenu(main_menu, view_menu, 'View')
 
       # Window menu
@@ -318,6 +322,18 @@ module Echoes
         gui.toggle_search
         ObjC::MSG_VOID_I.call(@view, ObjC.sel('setNeedsDisplay:'), 1)
       })
+      @find_next_closure = menu_action.call(-> {
+        if @search_mode && !@search_matches.empty?
+          gui.search_next
+          ObjC::MSG_VOID_I.call(@view, ObjC.sel('setNeedsDisplay:'), 1)
+        end
+      })
+      @find_prev_closure = menu_action.call(-> {
+        if @search_mode && !@search_matches.empty?
+          gui.search_prev
+          ObjC::MSG_VOID_I.call(@view, ObjC.sel('setNeedsDisplay:'), 1)
+        end
+      })
       @prev_tab_closure = menu_action.call(-> {
         @active_tab = (@active_tab - 1) % @tabs.size
         ObjC::MSG_VOID_I.call(@view, ObjC.sel('setNeedsDisplay:'), 1)
@@ -366,6 +382,8 @@ module Echoes
         'decreaseFontSize:'     => ['v@:@', @decrease_font_closure],
         'resetFontSize:'        => ['v@:@', @reset_font_closure],
         'toggleFind:'           => ['v@:@', @toggle_find_closure],
+        'findNext:'             => ['v@:@', @find_next_closure],
+        'findPrevious:'         => ['v@:@', @find_prev_closure],
         'showPreviousTab:'      => ['v@:@', @prev_tab_closure],
         'showNextTab:'          => ['v@:@', @next_tab_closure],
       })
@@ -644,64 +662,6 @@ module Echoes
     end
 
     def perform_key_equivalent(event_ptr)
-      flags = ObjC::MSG_RET_L.call(event_ptr, ObjC.sel('modifierFlags'))
-      return 0 unless (flags & ObjC::NSEventModifierFlagCommand) != 0
-
-      chars_ns = ObjC::MSG_PTR.call(event_ptr, ObjC.sel('charactersIgnoringModifiers'))
-      chars = ObjC.to_ruby_string(chars_ns)
-      key_code = ObjC::MSG_RET_L.call(event_ptr, ObjC.sel('keyCode'))
-
-      case chars
-      when "+", "="
-        update_font(@font_size + 1.0)
-        return 1
-      when "-"
-        update_font(@font_size - 1.0) if @font_size > 4.0
-        return 1
-      when "0"
-        update_font(Echoes.config.font_size)
-        return 1
-      when "t"
-        create_tab
-        ObjC::MSG_VOID_I.call(@view, ObjC.sel('setNeedsDisplay:'), 1)
-        return 1
-      when "w"
-        close_tab(@active_tab)
-        ObjC::MSG_VOID_I.call(@view, ObjC.sel('setNeedsDisplay:'), 1)
-        return 1
-      when "c"
-        copy_to_clipboard
-        return 1
-      when "v"
-        paste_from_clipboard
-        return 1
-      when "f"
-        toggle_search
-        ObjC::MSG_VOID_I.call(@view, ObjC.sel('setNeedsDisplay:'), 1)
-        return 1
-      when "g"
-        if @search_mode && !@search_matches.empty?
-          if (flags & ObjC::NSEventModifierFlagShift) != 0
-            search_prev
-          else
-            search_next
-          end
-          ObjC::MSG_VOID_I.call(@view, ObjC.sel('setNeedsDisplay:'), 1)
-        end
-        return 1
-      end
-
-      # Cmd+Shift+[ / Cmd+Shift+] — use keyCode for keyboard layout independence
-      if key_code == 33  # [ key
-        @active_tab = (@active_tab - 1) % @tabs.size
-        ObjC::MSG_VOID_I.call(@view, ObjC.sel('setNeedsDisplay:'), 1)
-        return 1
-      elsif key_code == 30  # ] key
-        @active_tab = (@active_tab + 1) % @tabs.size
-        ObjC::MSG_VOID_I.call(@view, ObjC.sel('setNeedsDisplay:'), 1)
-        return 1
-      end
-
       0
     end
 
