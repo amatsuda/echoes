@@ -32,6 +32,8 @@ module Echoes
       @search_matches = []
       @search_index = -1
       @bell_flash = 0
+      @marked_text = nil
+      @current_event = nil
     end
 
     def run
@@ -297,6 +299,70 @@ module Echoes
         gui.handle_resize(w, h)
       }
 
+      # NSTextInputClient protocol closures for IME support
+      @insert_text_closure = Fiddle::Closure::BlockCaller.new(
+        Fiddle::TYPE_VOID,
+        [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_LONG, Fiddle::TYPE_LONG]
+      ) { |_self, _cmd, text, _rep_loc, _rep_len| gui.ime_insert_text(text) }
+
+      @insert_text_simple_closure = Fiddle::Closure::BlockCaller.new(
+        Fiddle::TYPE_VOID,
+        [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP]
+      ) { |_self, _cmd, text| gui.ime_insert_text(text) }
+
+      @do_command_closure = Fiddle::Closure::BlockCaller.new(
+        Fiddle::TYPE_VOID,
+        [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP]
+      ) { |_self, _cmd, _selector| gui.ime_do_command }
+
+      @set_marked_text_closure = Fiddle::Closure::BlockCaller.new(
+        Fiddle::TYPE_VOID,
+        [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP,
+         Fiddle::TYPE_LONG, Fiddle::TYPE_LONG, Fiddle::TYPE_LONG, Fiddle::TYPE_LONG]
+      ) { |_self, _cmd, text, sel_loc, sel_len, _rep_loc, _rep_len|
+        gui.ime_set_marked_text(text, sel_loc, sel_len)
+      }
+
+      @unmark_text_closure = Fiddle::Closure::BlockCaller.new(
+        Fiddle::TYPE_VOID,
+        [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP]
+      ) { |_self, _cmd| gui.ime_unmark_text }
+
+      @has_marked_text_closure = Fiddle::Closure::BlockCaller.new(
+        Fiddle::TYPE_INT,
+        [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP]
+      ) { |_self, _cmd| gui.ime_has_marked_text }
+
+      @marked_range_closure = Fiddle::Closure::BlockCaller.new(
+        Fiddle::TYPE_LONG,
+        [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP]
+      ) { |_self, _cmd| gui.ime_marked_range_location }
+
+      @selected_range_closure = Fiddle::Closure::BlockCaller.new(
+        Fiddle::TYPE_LONG,
+        [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP]
+      ) { |_self, _cmd| 0x7FFFFFFFFFFFFFFF } # NSNotFound
+
+      @valid_attrs_closure = Fiddle::Closure::BlockCaller.new(
+        Fiddle::TYPE_VOIDP,
+        [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP]
+      ) { |_self, _cmd| ObjC::MSG_PTR.call(ObjC.cls('NSArray'), ObjC.sel('array')) }
+
+      @attr_substring_closure = Fiddle::Closure::BlockCaller.new(
+        Fiddle::TYPE_VOIDP,
+        [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_LONG, Fiddle::TYPE_LONG, Fiddle::TYPE_VOIDP]
+      ) { |_self, _cmd, _loc, _len, _actual| Fiddle::Pointer.new(0) }
+
+      @first_rect_closure = Fiddle::Closure::BlockCaller.new(
+        Fiddle::TYPE_DOUBLE,
+        [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_LONG, Fiddle::TYPE_LONG, Fiddle::TYPE_VOIDP]
+      ) { |_self, _cmd, _loc, _len, _actual| 0.0 }
+
+      @char_index_closure = Fiddle::Closure::BlockCaller.new(
+        Fiddle::TYPE_LONG,
+        [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_DOUBLE, Fiddle::TYPE_DOUBLE]
+      ) { |_self, _cmd, _x, _y| 0x7FFFFFFFFFFFFFFF } # NSNotFound
+
       menu_action = proc { |action_block|
         Fiddle::Closure::BlockCaller.new(
           Fiddle::TYPE_VOID,
@@ -386,7 +452,24 @@ module Echoes
         'findPrevious:'         => ['v@:@', @find_prev_closure],
         'showPreviousTab:'      => ['v@:@', @prev_tab_closure],
         'showNextTab:'          => ['v@:@', @next_tab_closure],
+        # NSTextInputClient protocol methods for IME
+        'insertText:replacementRange:'                      => ['v@:@{_NSRange=QQ}', @insert_text_closure],
+        'insertText:'                                       => ['v@:@', @insert_text_simple_closure],
+        'doCommandBySelector:'                              => ['v@::', @do_command_closure],
+        'setMarkedText:selectedRange:replacementRange:'     => ['v@:@{_NSRange=QQ}{_NSRange=QQ}', @set_marked_text_closure],
+        'unmarkText'                                        => ['v@:', @unmark_text_closure],
+        'hasMarkedText'                                     => ['c@:', @has_marked_text_closure],
+        'markedRange'                                       => ['{_NSRange=QQ}@:', @marked_range_closure],
+        'selectedRange'                                     => ['{_NSRange=QQ}@:', @selected_range_closure],
+        'validAttributesForMarkedText'                      => ['@@:', @valid_attrs_closure],
+        'attributedSubstringForProposedRange:actualRange:'  => ['@@:{_NSRange=QQ}^{_NSRange=QQ}', @attr_substring_closure],
+        'firstRectForCharacterRange:actualRange:'           => ['{CGRect={CGPoint=dd}{CGSize=dd}}@:{_NSRange=QQ}^{_NSRange=QQ}', @first_rect_closure],
+        'characterIndexForPoint:'                           => ['Q@:{CGPoint=dd}', @char_index_closure],
       })
+
+      # Add NSTextInputClient protocol conformance for IME
+      protocol = ObjC::GetProtocol.call('NSTextInputClient')
+      ObjC::AddProtocol.call(@view_class, protocol) unless protocol.null?
 
       win_width = @cell_width * @cols
       win_height = @cell_height * @rows
@@ -633,6 +716,25 @@ module Echoes
         end
       end
 
+      # Draw marked text (IME composition) at cursor position
+      if @marked_text && tab.scroll_offset == 0
+        mx = screen.cursor.col * @cell_width
+        my = gy_off + screen.cursor.row * @cell_height
+        marked_width = @marked_text.each_char.sum { |c| c.ord > 0x7F ? @cell_width * 2 : @cell_width }
+
+        ime_bg = make_color(0.2, 0.2, 0.35)
+        ObjC::MSG_VOID.call(ime_bg, ObjC.sel('setFill'))
+        ObjC::NSRectFill.call(mx, my, marked_width, @cell_height)
+
+        ns_str = ObjC.nsstring(@marked_text)
+        ns_attrs = ObjC.nsdict({
+          ObjC::NSFontAttributeName => @font,
+          ObjC::NSForegroundColorAttributeName => make_color(1.0, 1.0, 1.0),
+          ObjC::NSUnderlineStyleAttributeName => ObjC.nsnumber_int(1),
+        })
+        ObjC::MSG_VOID_PT_1.call(ns_str, ObjC.sel('drawAtPoint:withAttributes:'), mx, my, ns_attrs)
+      end
+
       # Visual bell flash
       if @bell_flash > 0
         flash_color = make_color_with_alpha(make_color(1.0, 1.0, 1.0), 0.15)
@@ -693,13 +795,69 @@ module Echoes
       elsif (flags & ObjC::NSEventModifierFlagOption) != 0
         tab.pty_write.write("\e#{chars}")
       else
-        chars_ns2 = ObjC::MSG_PTR.call(event_ptr, ObjC.sel('characters'))
-        chars2 = ObjC.to_ruby_string(chars_ns2)
-        numpad = (flags & ObjC::NSEventModifierFlagNumericPad) != 0
-        tab.pty_write.write(map_special_keys(chars2.empty? ? chars : chars2, tab.screen.application_cursor_keys?, app_keypad: numpad && tab.screen.application_keypad))
+        # Route through input method for IME support
+        @current_event = event_ptr
+        arr = ObjC::MSG_PTR_1.call(ObjC.cls('NSArray'), ObjC.sel('arrayWithObject:'), event_ptr)
+        ObjC::MSG_VOID_1.call(@view, ObjC.sel('interpretKeyEvents:'), arr)
       end
     rescue Errno::EIO, IOError
       close_tab(@active_tab)
+    end
+
+    # --- IME (Input Method Editor) callbacks ---
+
+    def ime_insert_text(text_ptr)
+      text = nsstring_from_input(text_ptr)
+      @marked_text = nil
+      return if text.empty?
+
+      tab = current_tab
+      tab.pty_write.write(text)
+    rescue Errno::EIO, IOError
+      close_tab(@active_tab)
+    end
+
+    def ime_do_command
+      return unless @current_event
+
+      tab = current_tab
+      event_ptr = @current_event
+      flags = ObjC::MSG_RET_L.call(event_ptr, ObjC.sel('modifierFlags'))
+      chars_ns = ObjC::MSG_PTR.call(event_ptr, ObjC.sel('characters'))
+      chars = ObjC.to_ruby_string(chars_ns)
+      chars_ns2 = ObjC::MSG_PTR.call(event_ptr, ObjC.sel('charactersIgnoringModifiers'))
+      chars2 = ObjC.to_ruby_string(chars_ns2)
+
+      numpad = (flags & ObjC::NSEventModifierFlagNumericPad) != 0
+      actual = chars.empty? ? chars2 : chars
+      tab.pty_write.write(map_special_keys(actual, tab.screen.application_cursor_keys?, app_keypad: numpad && tab.screen.application_keypad))
+    rescue Errno::EIO, IOError
+      close_tab(@active_tab)
+    end
+
+    def ime_set_marked_text(text_ptr, _sel_loc, _sel_len)
+      text = nsstring_from_input(text_ptr)
+
+      if text.empty?
+        @marked_text = nil
+      else
+        @marked_text = text
+      end
+
+      ObjC::MSG_VOID_I.call(@view, ObjC.sel('setNeedsDisplay:'), 1)
+    end
+
+    def ime_unmark_text
+      @marked_text = nil
+      ObjC::MSG_VOID_I.call(@view, ObjC.sel('setNeedsDisplay:'), 1)
+    end
+
+    def ime_has_marked_text
+      @marked_text ? 1 : 0
+    end
+
+    def ime_marked_range_location
+      @marked_text ? 0 : 0x7FFFFFFFFFFFFFFF # NSNotFound
     end
 
     def timer_fired
@@ -1585,6 +1743,16 @@ module Echoes
 
     def cached_nsstring(str)
       @nsstring_cache[str] ||= ObjC.retain(ObjC.nsstring(str))
+    end
+
+    def nsstring_from_input(obj_ptr)
+      is_attr = ObjC::MSG_PTR_1.call(obj_ptr, ObjC.sel('isKindOfClass:'), ObjC.cls('NSAttributedString'))
+      if is_attr.to_i != 0
+        ns_str = ObjC::MSG_PTR.call(obj_ptr, ObjC.sel('string'))
+        ObjC.to_ruby_string(ns_str)
+      else
+        ObjC.to_ruby_string(obj_ptr)
+      end
     end
 
     def make_color(r, g, b, a = 1.0)

@@ -22,6 +22,8 @@ module Echoes
     AddMethod = Fiddle::Function.new(LIBOBJC['class_addMethod'], [P, P, P, P], I)
     RegisterClassPair = Fiddle::Function.new(LIBOBJC['objc_registerClassPair'], [P], V)
     GetMethodImpl = Fiddle::Function.new(LIBOBJC['class_getMethodImplementation'], [P, P], P)
+    AddProtocol = Fiddle::Function.new(LIBOBJC['class_addProtocol'], [P, P], I)
+    GetProtocol = Fiddle::Function.new(LIBOBJC['objc_getProtocol'], [P], P)
 
     # objc_msgSend variants for different signatures
     def self.new_msg(args, ret)
