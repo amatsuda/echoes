@@ -463,7 +463,7 @@ module Echoes
         end
 
         case p
-        when 0
+        when 0, nil
           @attrs.reset!
         when 1
           @attrs.bold = true

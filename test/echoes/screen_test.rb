@@ -648,4 +648,14 @@ class Echoes::ScreenTest < Test::Unit::TestCase
     assert_equal(" \u{0301}", @screen.grid[0][0].char)
     assert_equal(0, @screen.cursor.col)
   end
+
+  test "SGR with no parameters resets attributes" do
+    @screen.set_graphics([1])  # bold on
+    @screen.put_char('B')
+    assert_equal(true, @screen.grid[0][0].bold)
+
+    @screen.set_graphics([nil])  # \e[m — empty param becomes nil
+    @screen.put_char('N')
+    assert_equal(false, @screen.grid[0][1].bold)
+  end
 end
