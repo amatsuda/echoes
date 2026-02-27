@@ -127,6 +127,11 @@ module Echoes
       add_menu_item(window_menu, "Zoom", 'zoom:', '')
       add_menu_item(window_menu, "Enter Full Screen", 'toggleFullScreen:', 'f',
                     modifiers: ObjC::NSEventModifierFlagCommand | ObjC::NSEventModifierFlagControl)
+      add_separator(window_menu)
+      add_menu_item(window_menu, "Show Previous Tab", 'showPreviousTab:', '{',
+                    modifiers: ObjC::NSEventModifierFlagCommand | ObjC::NSEventModifierFlagShift)
+      add_menu_item(window_menu, "Show Next Tab", 'showNextTab:', '}',
+                    modifiers: ObjC::NSEventModifierFlagCommand | ObjC::NSEventModifierFlagShift)
       add_submenu(main_menu, window_menu, 'Window')
 
       # Shell menu
@@ -313,6 +318,14 @@ module Echoes
         gui.toggle_search
         ObjC::MSG_VOID_I.call(@view, ObjC.sel('setNeedsDisplay:'), 1)
       })
+      @prev_tab_closure = menu_action.call(-> {
+        @active_tab = (@active_tab - 1) % @tabs.size
+        ObjC::MSG_VOID_I.call(@view, ObjC.sel('setNeedsDisplay:'), 1)
+      })
+      @next_tab_closure = menu_action.call(-> {
+        @active_tab = (@active_tab + 1) % @tabs.size
+        ObjC::MSG_VOID_I.call(@view, ObjC.sel('setNeedsDisplay:'), 1)
+      })
 
       @focus_gained_closure = Fiddle::Closure::BlockCaller.new(
         Fiddle::TYPE_VOID,
@@ -353,6 +366,8 @@ module Echoes
         'decreaseFontSize:'     => ['v@:@', @decrease_font_closure],
         'resetFontSize:'        => ['v@:@', @reset_font_closure],
         'toggleFind:'           => ['v@:@', @toggle_find_closure],
+        'showPreviousTab:'      => ['v@:@', @prev_tab_closure],
+        'showNextTab:'          => ['v@:@', @next_tab_closure],
       })
 
       win_width = @cell_width * @cols
