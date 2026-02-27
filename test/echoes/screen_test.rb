@@ -658,4 +658,21 @@ class Echoes::ScreenTest < Test::Unit::TestCase
     @screen.put_char('N')
     assert_equal(false, @screen.grid[0][1].bold)
   end
+
+  test "switch to alt screen marks all rows dirty" do
+    @screen.clear_dirty
+    assert(@screen.dirty_rows.empty?)
+
+    @screen.switch_to_alt_screen
+    assert_equal((0...5).to_a.to_set, @screen.dirty_rows)
+  end
+
+  test "switch to main screen marks all rows dirty" do
+    @screen.switch_to_alt_screen
+    @screen.clear_dirty
+    assert(@screen.dirty_rows.empty?)
+
+    @screen.switch_to_main_screen
+    assert_equal((0...5).to_a.to_set, @screen.dirty_rows)
+  end
 end

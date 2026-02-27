@@ -716,6 +716,7 @@ module Echoes
       @scrollback_wrapped = []
       @pending_wrap = false
       @using_alt_screen = true
+      mark_all_dirty
     end
 
     def switch_to_main_screen
@@ -742,6 +743,7 @@ module Echoes
       @main_scrollback_wrapped = nil
       @pending_wrap = false
       @using_alt_screen = false
+      mark_all_dirty
     end
 
     def show_cursor
