@@ -88,6 +88,83 @@ module Echoes
     def setup_app
       @app = ObjC::MSG_PTR.call(ObjC.cls('NSApplication'), ObjC.sel('sharedApplication'))
       ObjC::MSG_VOID_I.call(@app, ObjC.sel('setActivationPolicy:'), 0)
+      setup_menu_bar
+    end
+
+    def setup_menu_bar
+      main_menu = create_menu('')
+
+      # Application menu
+      app_menu = create_menu('Echoes')
+      add_menu_item(app_menu, "About Echoes", 'orderFrontStandardAboutPanel:', '')
+      add_separator(app_menu)
+      add_menu_item(app_menu, "Hide Echoes", 'hide:', 'h')
+      add_menu_item(app_menu, "Hide Others", 'hideOtherApplications:', '')
+      add_menu_item(app_menu, "Show All", 'unhideAllApplications:', '')
+      add_separator(app_menu)
+      add_menu_item(app_menu, "Quit Echoes", 'terminate:', 'q')
+      add_submenu(main_menu, app_menu, 'Echoes')
+
+      # Edit menu
+      edit_menu = create_menu('Edit')
+      add_menu_item(edit_menu, "Copy", 'copy:', 'c')
+      add_menu_item(edit_menu, "Paste", 'paste:', 'v')
+      add_menu_item(edit_menu, "Select All", 'selectAll:', 'a')
+      add_submenu(main_menu, edit_menu, 'Edit')
+
+      # View menu
+      view_menu = create_menu('View')
+      add_menu_item(view_menu, "Bigger", 'increaseFontSize:', '+')
+      add_menu_item(view_menu, "Smaller", 'decreaseFontSize:', '-')
+      add_menu_item(view_menu, "Reset Font Size", 'resetFontSize:', '0')
+      add_separator(view_menu)
+      add_menu_item(view_menu, "Find", 'toggleFind:', 'f')
+      add_submenu(main_menu, view_menu, 'View')
+
+      # Window menu
+      window_menu = create_menu('Window')
+      add_menu_item(window_menu, "Minimize", 'miniaturize:', 'm')
+      add_menu_item(window_menu, "Zoom", 'zoom:', '')
+      add_menu_item(window_menu, "Enter Full Screen", 'toggleFullScreen:', 'f',
+                    modifiers: ObjC::NSEventModifierFlagCommand | ObjC::NSEventModifierFlagControl)
+      add_submenu(main_menu, window_menu, 'Window')
+
+      # Shell menu
+      shell_menu = create_menu('Shell')
+      add_menu_item(shell_menu, "New Tab", 'newTab:', 't')
+      add_menu_item(shell_menu, "Close Tab", 'closeTab:', 'w')
+      add_submenu(main_menu, shell_menu, 'Shell')
+
+      ObjC::MSG_VOID_1.call(@app, ObjC.sel('setMainMenu:'), main_menu)
+    end
+
+    private def create_menu(title)
+      m = ObjC::MSG_PTR.call(ObjC.cls('NSMenu'), ObjC.sel('alloc'))
+      ObjC::MSG_PTR_1.call(m, ObjC.sel('initWithTitle:'), ObjC.nsstring(title))
+    end
+
+    private def add_menu_item(menu, title, action, key, modifiers: ObjC::NSEventModifierFlagCommand)
+      item = ObjC::MSG_PTR.call(ObjC.cls('NSMenuItem'), ObjC.sel('alloc'))
+      item = ObjC::MSG_PTR_3.call(item, ObjC.sel('initWithTitle:action:keyEquivalent:'),
+        ObjC.nsstring(title), action.empty? ? Fiddle::Pointer.new(0) : ObjC.sel(action), ObjC.nsstring(key))
+      if modifiers != ObjC::NSEventModifierFlagCommand && !key.empty?
+        ObjC::MSG_VOID_L.call(item, ObjC.sel('setKeyEquivalentModifierMask:'), modifiers)
+      end
+      ObjC::MSG_VOID_1.call(menu, ObjC.sel('addItem:'), item)
+      item
+    end
+
+    private def add_separator(menu)
+      sep = ObjC::MSG_PTR.call(ObjC.cls('NSMenuItem'), ObjC.sel('separatorItem'))
+      ObjC::MSG_VOID_1.call(menu, ObjC.sel('addItem:'), sep)
+    end
+
+    private def add_submenu(parent, submenu, title)
+      item = ObjC::MSG_PTR.call(ObjC.cls('NSMenuItem'), ObjC.sel('alloc'))
+      item = ObjC::MSG_PTR_3.call(item, ObjC.sel('initWithTitle:action:keyEquivalent:'),
+        ObjC.nsstring(title), Fiddle::Pointer.new(0), ObjC.nsstring(''))
+      ObjC::MSG_VOID_1.call(item, ObjC.sel('setSubmenu:'), submenu)
+      ObjC::MSG_VOID_1.call(parent, ObjC.sel('addItem:'), item)
     end
 
     def create_window
@@ -211,6 +288,32 @@ module Echoes
         gui.handle_resize(w, h)
       }
 
+      menu_action = proc { |action_block|
+        Fiddle::Closure::BlockCaller.new(
+          Fiddle::TYPE_VOID,
+          [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP]
+        ) { |_self, _cmd, _sender| action_block.call }
+      }
+
+      @new_tab_closure = menu_action.call(-> {
+        gui.create_tab
+        ObjC::MSG_VOID_I.call(@view, ObjC.sel('setNeedsDisplay:'), 1)
+      })
+      @close_tab_closure = menu_action.call(-> {
+        gui.close_tab(@active_tab)
+        ObjC::MSG_VOID_I.call(@view, ObjC.sel('setNeedsDisplay:'), 1)
+      })
+      @copy_closure = menu_action.call(-> { gui.copy_to_clipboard })
+      @paste_closure = menu_action.call(-> { gui.paste_from_clipboard })
+      @select_all_closure = menu_action.call(-> { gui.select_all })
+      @increase_font_closure = menu_action.call(-> { gui.update_font(@font_size + 1.0) })
+      @decrease_font_closure = menu_action.call(-> { gui.update_font(@font_size - 1.0) if @font_size > 4.0 })
+      @reset_font_closure = menu_action.call(-> { gui.update_font(Echoes.config.font_size) })
+      @toggle_find_closure = menu_action.call(-> {
+        gui.toggle_search
+        ObjC::MSG_VOID_I.call(@view, ObjC.sel('setNeedsDisplay:'), 1)
+      })
+
       @focus_gained_closure = Fiddle::Closure::BlockCaller.new(
         Fiddle::TYPE_VOID,
         [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP]
@@ -241,6 +344,15 @@ module Echoes
         'setFrameSize:'         => ['v@:{CGSize=dd}', @set_frame_size_closure],
         'windowDidBecomeKey:'   => ['v@:@', @focus_gained_closure],
         'windowDidResignKey:'   => ['v@:@', @focus_lost_closure],
+        'newTab:'               => ['v@:@', @new_tab_closure],
+        'closeTab:'             => ['v@:@', @close_tab_closure],
+        'copy:'                 => ['v@:@', @copy_closure],
+        'paste:'                => ['v@:@', @paste_closure],
+        'selectAll:'            => ['v@:@', @select_all_closure],
+        'increaseFontSize:'     => ['v@:@', @increase_font_closure],
+        'decreaseFontSize:'     => ['v@:@', @decrease_font_closure],
+        'resetFontSize:'        => ['v@:@', @reset_font_closure],
+        'toggleFind:'           => ['v@:@', @toggle_find_closure],
       })
 
       win_width = @cell_width * @cols
@@ -913,6 +1025,16 @@ module Echoes
     end
 
     private
+
+    def select_all
+      tab = current_tab
+      return unless tab
+      screen = tab.screen
+      total = screen.scrollback.size + screen.rows
+      @selection_anchor = [0, 0]
+      @selection_end = [total - 1, screen.cols - 1]
+      ObjC::MSG_VOID_I.call(@view, ObjC.sel('setNeedsDisplay:'), 1)
+    end
 
     def copy_to_clipboard
       sr, sc, er, ec = selection_range
