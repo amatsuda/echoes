@@ -93,4 +93,86 @@ class Echoes::TabTest < Test::Unit::TestCase
     output = @tab.pty_read.readpartial(1024)
     assert_equal("hello", output)
   end
+
+  # --- PaneTree integration ---
+
+  test "has a pane_tree" do
+    assert_instance_of(Echoes::PaneTree, @tab.pane_tree)
+  end
+
+  test "active_pane returns the active pane" do
+    assert_instance_of(Echoes::Pane, @tab.active_pane)
+  end
+
+  test "panes returns all panes" do
+    assert_equal(1, @tab.panes.size)
+    assert_instance_of(Echoes::Pane, @tab.panes.first)
+  end
+
+  test "split_vertical creates two panes" do
+    @tab.split_vertical
+    assert_equal(2, @tab.panes.size)
+    assert_equal(false, @tab.pane_tree.single_pane?)
+  end
+
+  test "split_horizontal creates two panes" do
+    @tab.split_horizontal
+    assert_equal(2, @tab.panes.size)
+    assert_equal(false, @tab.pane_tree.single_pane?)
+  end
+
+  test "split_vertical sets new pane as active" do
+    original = @tab.active_pane
+    @tab.split_vertical
+    assert_not_equal(original, @tab.active_pane)
+  end
+
+  test "close_active_pane returns false for single pane" do
+    assert_equal(false, @tab.close_active_pane)
+    assert_equal(1, @tab.panes.size)
+  end
+
+  test "close_active_pane removes pane and returns true" do
+    @tab.split_vertical
+    assert_equal(2, @tab.panes.size)
+    result = @tab.close_active_pane
+    assert_equal(true, result)
+    assert_equal(1, @tab.panes.size)
+  end
+
+  test "next_pane cycles to next" do
+    @tab.split_vertical
+    pane1 = @tab.panes[0]
+    pane2 = @tab.panes[1]
+    @tab.pane_tree.active_pane = pane1
+    @tab.next_pane
+    assert_equal(pane2, @tab.active_pane)
+  end
+
+  test "prev_pane cycles to previous" do
+    @tab.split_vertical
+    pane1 = @tab.panes[0]
+    pane2 = @tab.panes[1]
+    @tab.pane_tree.active_pane = pane2
+    @tab.prev_pane
+    assert_equal(pane1, @tab.active_pane)
+  end
+
+  test "screen delegates to active pane" do
+    assert_equal(@tab.active_pane.screen, @tab.screen)
+  end
+
+  test "parser delegates to active pane" do
+    assert_equal(@tab.active_pane.parser, @tab.parser)
+  end
+
+  test "resize resizes all panes" do
+    @tab.split_vertical
+    @tab.resize(30, 100)
+    # All panes should have been resized to fit within the new dimensions
+    @tab.panes.each do |pane|
+      assert(pane.screen.rows > 0)
+      assert(pane.screen.cols > 0)
+    end
+  end
 end

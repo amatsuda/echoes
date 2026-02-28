@@ -18,6 +18,9 @@ module Echoes
       @term = 'xterm-256color'
       @word_separators = ' @*.:/\\()"\'-:,.;<>~!#$%^&*|+=[]{}~?│'
       @selection_color = [0.2, 0.4, 0.7]
+      @pane_divider_color = [0.4, 0.4, 0.4]
+      @active_pane_border_color = [0.3, 0.5, 0.8]
+      @copy_mode_cursor_color = [0.8, 0.7, 0.2]
     end
 
     def font_family(val = nil)
@@ -74,6 +77,18 @@ module Echoes
 
     def selection_color(*args)
       args.empty? ? @selection_color : @selection_color = parse_color(args)
+    end
+
+    def pane_divider_color(*args)
+      args.empty? ? @pane_divider_color : @pane_divider_color = parse_color(args)
+    end
+
+    def active_pane_border_color(*args)
+      args.empty? ? @active_pane_border_color : @active_pane_border_color = parse_color(args)
+    end
+
+    def copy_mode_cursor_color(*args)
+      args.empty? ? @copy_mode_cursor_color : @copy_mode_cursor_color = parse_color(args)
     end
 
     def color_palette(val = nil)

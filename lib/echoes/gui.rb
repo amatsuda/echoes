@@ -34,6 +34,9 @@ module Echoes
       @bell_flash = 0
       @marked_text = nil
       @current_event = nil
+      @pane_divider_color = make_color(*Echoes.config.pane_divider_color)
+      @active_pane_border_color = make_color(*Echoes.config.active_pane_border_color)
+      @copy_mode_cursor_color = make_color(*Echoes.config.copy_mode_cursor_color)
     end
 
     def run
@@ -48,11 +51,13 @@ module Echoes
     def create_tab
       tab = Tab.new(command: @command, rows: @rows, cols: @cols)
       tab.title = "Tab #{@tabs.size + 1}"
-      if @cell_width && @cell_height
-        tab.screen.cell_pixel_width = @cell_width
-        tab.screen.cell_pixel_height = @cell_height
+      tab.panes.each do |pane|
+        if @cell_width && @cell_height
+          pane.screen.cell_pixel_width = @cell_width
+          pane.screen.cell_pixel_height = @cell_height
+        end
+        pane.screen.clipboard_handler = method(:handle_clipboard)
       end
-      tab.screen.clipboard_handler = method(:handle_clipboard)
       @tabs << tab
       @active_tab = @tabs.size - 1
     end
@@ -138,12 +143,24 @@ module Echoes
                     modifiers: ObjC::NSEventModifierFlagCommand | ObjC::NSEventModifierFlagShift)
       add_menu_item(window_menu, "Show Next Tab", 'showNextTab:', '}',
                     modifiers: ObjC::NSEventModifierFlagCommand | ObjC::NSEventModifierFlagShift)
+      add_separator(window_menu)
+      add_menu_item(window_menu, "Select Next Pane", 'selectNextPane:', ']')
+      add_menu_item(window_menu, "Select Previous Pane", 'selectPreviousPane:', '[')
+      add_separator(window_menu)
+      add_menu_item(window_menu, "Toggle Copy Mode", 'toggleCopyMode:', 'c',
+                    modifiers: ObjC::NSEventModifierFlagCommand | ObjC::NSEventModifierFlagShift)
       add_submenu(main_menu, window_menu, 'Window')
 
       # Shell menu
       shell_menu = create_menu('Shell')
       add_menu_item(shell_menu, "New Tab", 'newTab:', 't')
       add_menu_item(shell_menu, "Close Tab", 'closeTab:', 'w')
+      add_separator(shell_menu)
+      add_menu_item(shell_menu, "Split Right", 'splitRight:', 'd')
+      add_menu_item(shell_menu, "Split Down", 'splitDown:', 'd',
+                    modifiers: ObjC::NSEventModifierFlagCommand | ObjC::NSEventModifierFlagShift)
+      add_menu_item(shell_menu, "Close Pane", 'closePane:', 'w',
+                    modifiers: ObjC::NSEventModifierFlagCommand | ObjC::NSEventModifierFlagShift)
       add_submenu(main_menu, shell_menu, 'Shell')
 
       ObjC::MSG_VOID_1.call(@app, ObjC.sel('setMainMenu:'), main_menu)
@@ -371,32 +388,32 @@ module Echoes
       }
 
       @new_tab_closure = menu_action.call(-> {
-        gui.create_tab
+        create_tab
         ObjC::MSG_VOID_I.call(@view, ObjC.sel('setNeedsDisplay:'), 1)
       })
       @close_tab_closure = menu_action.call(-> {
-        gui.close_tab(@active_tab)
+        close_tab(@active_tab)
         ObjC::MSG_VOID_I.call(@view, ObjC.sel('setNeedsDisplay:'), 1)
       })
-      @copy_closure = menu_action.call(-> { gui.copy_to_clipboard })
-      @paste_closure = menu_action.call(-> { gui.paste_from_clipboard })
-      @select_all_closure = menu_action.call(-> { gui.select_all })
-      @increase_font_closure = menu_action.call(-> { gui.update_font(@font_size + 1.0) })
-      @decrease_font_closure = menu_action.call(-> { gui.update_font(@font_size - 1.0) if @font_size > 4.0 })
-      @reset_font_closure = menu_action.call(-> { gui.update_font(Echoes.config.font_size) })
+      @copy_closure = menu_action.call(-> { copy_to_clipboard })
+      @paste_closure = menu_action.call(-> { paste_from_clipboard })
+      @select_all_closure = menu_action.call(-> { select_all })
+      @increase_font_closure = menu_action.call(-> { update_font(@font_size + 1.0) })
+      @decrease_font_closure = menu_action.call(-> { update_font(@font_size - 1.0) if @font_size > 4.0 })
+      @reset_font_closure = menu_action.call(-> { update_font(Echoes.config.font_size) })
       @toggle_find_closure = menu_action.call(-> {
-        gui.toggle_search
+        toggle_search
         ObjC::MSG_VOID_I.call(@view, ObjC.sel('setNeedsDisplay:'), 1)
       })
       @find_next_closure = menu_action.call(-> {
         if @search_mode && !@search_matches.empty?
-          gui.search_next
+          search_next
           ObjC::MSG_VOID_I.call(@view, ObjC.sel('setNeedsDisplay:'), 1)
         end
       })
       @find_prev_closure = menu_action.call(-> {
         if @search_mode && !@search_matches.empty?
-          gui.search_prev
+          search_prev
           ObjC::MSG_VOID_I.call(@view, ObjC.sel('setNeedsDisplay:'), 1)
         end
       })
@@ -406,6 +423,50 @@ module Echoes
       })
       @next_tab_closure = menu_action.call(-> {
         @active_tab = (@active_tab + 1) % @tabs.size
+        ObjC::MSG_VOID_I.call(@view, ObjC.sel('setNeedsDisplay:'), 1)
+      })
+      @split_right_closure = menu_action.call(-> {
+        tab = current_tab
+        new_pane = tab.split_vertical
+        new_pane.screen.clipboard_handler = method(:handle_clipboard)
+        new_pane.screen.cell_pixel_width = @cell_width if @cell_width
+        new_pane.screen.cell_pixel_height = @cell_height if @cell_height
+        ObjC::MSG_VOID_I.call(@view, ObjC.sel('setNeedsDisplay:'), 1)
+      })
+      @split_down_closure = menu_action.call(-> {
+        tab = current_tab
+        new_pane = tab.split_horizontal
+        new_pane.screen.clipboard_handler = method(:handle_clipboard)
+        new_pane.screen.cell_pixel_width = @cell_width if @cell_width
+        new_pane.screen.cell_pixel_height = @cell_height if @cell_height
+        ObjC::MSG_VOID_I.call(@view, ObjC.sel('setNeedsDisplay:'), 1)
+      })
+      @close_pane_closure = menu_action.call(-> {
+        tab = current_tab
+        if tab.pane_tree.single_pane?
+          close_tab(@active_tab)
+        else
+          tab.close_active_pane
+        end
+        ObjC::MSG_VOID_I.call(@view, ObjC.sel('setNeedsDisplay:'), 1)
+      })
+      @select_next_pane_closure = menu_action.call(-> {
+        current_tab.next_pane
+        ObjC::MSG_VOID_I.call(@view, ObjC.sel('setNeedsDisplay:'), 1)
+      })
+      @select_prev_pane_closure = menu_action.call(-> {
+        current_tab.prev_pane
+        ObjC::MSG_VOID_I.call(@view, ObjC.sel('setNeedsDisplay:'), 1)
+      })
+      @toggle_copy_mode_closure = menu_action.call(-> {
+        pane = current_tab.active_pane
+        if pane.copy_mode&.active
+          pane.copy_mode.exit
+          pane.copy_mode = nil
+        else
+          pane.copy_mode = CopyMode.new(pane.screen)
+          pane.copy_mode.enter
+        end
         ObjC::MSG_VOID_I.call(@view, ObjC.sel('setNeedsDisplay:'), 1)
       })
 
@@ -452,6 +513,12 @@ module Echoes
         'findPrevious:'         => ['v@:@', @find_prev_closure],
         'showPreviousTab:'      => ['v@:@', @prev_tab_closure],
         'showNextTab:'          => ['v@:@', @next_tab_closure],
+        'splitRight:'           => ['v@:@', @split_right_closure],
+        'splitDown:'            => ['v@:@', @split_down_closure],
+        'closePane:'            => ['v@:@', @close_pane_closure],
+        'selectNextPane:'       => ['v@:@', @select_next_pane_closure],
+        'selectPreviousPane:'   => ['v@:@', @select_prev_pane_closure],
+        'toggleCopyMode:'       => ['v@:@', @toggle_copy_mode_closure],
         # NSTextInputClient protocol methods for IME
         'insertText:replacementRange:'                      => ['v@:@{_NSRange=QQ}', @insert_text_closure],
         'insertText:'                                       => ['v@:@', @insert_text_simple_closure],
@@ -537,13 +604,62 @@ module Echoes
         end
       end
 
-      # Draw terminal grid
-      screen = tab.screen
-      scrollback = screen.scrollback
-      visible_start = scrollback.size - tab.scroll_offset
+      # Draw all panes
+      pane_rects = tab.pane_tree.layout(0, 0, @cols, @rows)
+      pane_rects.each do |rect|
+        pane = rect[:pane]
+        px = rect[:x] * @cell_width
+        py = gy_off + rect[:y] * @cell_height
+        is_active = (pane == tab.active_pane)
 
-      @rows.times do |r|
-        y = gy_off + r * @cell_height
+        draw_pane_content(pane, px, py, dirty_min_y, dirty_max_y, is_active)
+      end
+
+      # Draw pane dividers and active pane border
+      if !tab.pane_tree.single_pane?
+        draw_pane_dividers(pane_rects, gy_off)
+        draw_active_pane_border(tab, pane_rects, gy_off)
+      end
+
+      # Visual bell flash
+      if @bell_flash > 0
+        flash_color = make_color_with_alpha(make_color(1.0, 1.0, 1.0), 0.15)
+        ObjC::MSG_VOID.call(flash_color, ObjC.sel('setFill'))
+        ObjC::NSRectFill.call(0.0, gy_off, @cols * @cell_width, @rows * @cell_height)
+      end
+
+      # Draw search bar
+      if @search_mode
+        bar_h = @cell_height + 4.0
+        bar_y = gy_off + @rows * @cell_height
+        bar_bg = make_color(0.2, 0.2, 0.2)
+        ObjC::MSG_VOID.call(bar_bg, ObjC.sel('setFill'))
+        ObjC::NSRectFill.call(0.0, bar_y, @cols * @cell_width, bar_h)
+
+        match_info = @search_matches.empty? ? "" : " [#{@search_index + 1}/#{@search_matches.size}]"
+        label = "Find: #{@search_query}_#{match_info}"
+        ns_str = ObjC.nsstring(label)
+        ns_attrs = ObjC.nsdict({
+          ObjC::NSFontAttributeName => @font,
+          ObjC::NSForegroundColorAttributeName => make_color(1.0, 1.0, 1.0),
+        })
+        ObjC::MSG_VOID_PT_1.call(ns_str, ObjC.sel('drawAtPoint:withAttributes:'), 4.0, bar_y + 2.0, ns_attrs)
+      end
+
+      ObjC::MSG_VOID.call(pool, ObjC.sel('drain'))
+    end
+
+    def draw_pane_content(pane, px, py, dirty_min_y, dirty_max_y, is_active)
+      screen = pane.screen
+      scrollback = screen.scrollback
+      visible_start = scrollback.size - pane.scroll_offset
+      pane_rows = screen.rows
+      pane_cols = screen.cols
+
+      copy_mode = pane.copy_mode
+
+      pane_rows.times do |r|
+        y = py + r * @cell_height
         next if y + @cell_height < dirty_min_y || y > dirty_max_y
         src = visible_start + r
         row = if src < scrollback.size
@@ -553,7 +669,6 @@ module Echoes
               end
 
         row.each_with_index do |cell, c|
-          # Skip continuation cells (second half of wide chars or multicell)
           next if cell.width == 0
           next if cell.multicell == :cont
 
@@ -572,13 +687,31 @@ module Echoes
 
           has_bg = !bg_val.nil?
 
-          selected = cell_selected?(src, c)
-          is_match = @search_mode && search_match_at?(src, c)
-          is_current_match = @search_mode && current_search_match_at?(src, c)
+          selected = is_active && cell_selected?(src, c)
+          is_match = is_active && @search_mode && search_match_at?(src, c)
+          is_current_match = is_active && @search_mode && current_search_match_at?(src, c)
+
+          # Copy mode selection highlight
+          if copy_mode&.active && copy_mode.selecting?
+            sel_start, sel_end = [copy_mode.selection_start, copy_mode.selection_end].sort_by { |p| [p[0], p[1]] }
+            cm_abs_row = scrollback.size + r - pane.scroll_offset
+            if cm_abs_row >= scrollback.size + sel_start[0] && cm_abs_row <= scrollback.size + sel_end[0]
+              cm_row = cm_abs_row - scrollback.size
+              if cm_row == sel_start[0] && cm_row == sel_end[0]
+                selected = c >= sel_start[1] && c <= sel_end[1]
+              elsif cm_row == sel_start[0]
+                selected = c >= sel_start[1]
+              elsif cm_row == sel_end[0]
+                selected = c <= sel_end[1]
+              else
+                selected = true
+              end
+            end
+          end
 
           if cell.multicell.is_a?(Hash)
             mc = cell.multicell
-            x = c * @cell_width
+            x = px + c * @cell_width
             block_w = mc[:cols] * @cell_width
             block_h = mc[:rows] * @cell_height
 
@@ -640,7 +773,7 @@ module Echoes
             ObjC::MSG_VOID_PT_1.call(ns_char, ObjC.sel('drawAtPoint:withAttributes:'), draw_x, draw_y, ns_attrs)
             ObjC.release(scaled_font)
           else
-            x = c * @cell_width
+            x = px + c * @cell_width
             cell_w = cell.width == 2 ? @cell_width * 2 : @cell_width
 
             if is_current_match
@@ -685,14 +818,24 @@ module Echoes
         end
       end
 
-      # Draw cursor (only when at live view)
-      if tab.scroll_offset == 0 && screen.cursor.visible
+      # Draw cursor or copy mode cursor
+      if copy_mode&.active
+        # Copy mode cursor (inverse block)
+        cm_row = copy_mode.cursor_row
+        if cm_row >= 0 && cm_row < pane_rows
+          cx = px + copy_mode.cursor_col * @cell_width
+          cy = py + cm_row * @cell_height
+          ObjC::MSG_VOID.call(@copy_mode_cursor_color, ObjC.sel('setFill'))
+          ObjC::NSRectFill.call(cx, cy, @cell_width, @cell_height)
+        end
+      elsif pane.scroll_offset == 0 && screen.cursor.visible
         style = screen.cursor_style
         blink = style.odd? || style == 0
-        if !blink || @cursor_blink_on
-          cx = screen.cursor.col * @cell_width
-          cy = gy_off + screen.cursor.row * @cell_height
-          cursor_color = make_color(*Echoes.config.cursor_color)
+        # Only blink for active pane
+        if !blink || (is_active ? @cursor_blink_on : true)
+          cx = px + screen.cursor.col * @cell_width
+          cy = py + screen.cursor.row * @cell_height
+          cursor_color = is_active ? make_color(*Echoes.config.cursor_color) : make_color(0.5, 0.5, 0.5, 0.3)
           ObjC::MSG_VOID.call(cursor_color, ObjC.sel('setFill'))
           case style
           when 3, 4 # underline
@@ -702,24 +845,26 @@ module Echoes
           else # block (0, 1, 2)
             ObjC::NSRectFill.call(cx, cy, @cell_width, @cell_height)
             # Draw character under cursor with inverted colors
-            cell = screen.grid[screen.cursor.row][screen.cursor.col]
-            if cell.char != ' '
-              inv_fg = @default_bg
-              ns_attrs = ObjC.nsdict({
-                ObjC::NSFontAttributeName => cell.bold ? @bold_font : font_for_char(cell.char),
-                ObjC::NSForegroundColorAttributeName => inv_fg,
-              })
-              ns_char = cached_nsstring(cell.char)
-              ObjC::MSG_VOID_PT_1.call(ns_char, ObjC.sel('drawAtPoint:withAttributes:'), cx, cy, ns_attrs)
+            if screen.cursor.row < pane_rows && screen.cursor.col < pane_cols
+              cell = screen.grid[screen.cursor.row][screen.cursor.col]
+              if cell.char != ' '
+                inv_fg = @default_bg
+                ns_attrs = ObjC.nsdict({
+                  ObjC::NSFontAttributeName => cell.bold ? @bold_font : font_for_char(cell.char),
+                  ObjC::NSForegroundColorAttributeName => inv_fg,
+                })
+                ns_char = cached_nsstring(cell.char)
+                ObjC::MSG_VOID_PT_1.call(ns_char, ObjC.sel('drawAtPoint:withAttributes:'), cx, cy, ns_attrs)
+              end
             end
           end
         end
       end
 
-      # Draw marked text (IME composition) at cursor position
-      if @marked_text && tab.scroll_offset == 0
-        mx = screen.cursor.col * @cell_width
-        my = gy_off + screen.cursor.row * @cell_height
+      # Draw marked text (IME composition) at cursor position (active pane only)
+      if is_active && @marked_text && pane.scroll_offset == 0
+        mx = px + screen.cursor.col * @cell_width
+        my = py + screen.cursor.row * @cell_height
         marked_width = @marked_text.each_char.sum { |c| c.ord > 0x7F ? @cell_width * 2 : @cell_width }
 
         ime_bg = make_color(0.2, 0.2, 0.35)
@@ -734,33 +879,50 @@ module Echoes
         })
         ObjC::MSG_VOID_PT_1.call(ns_str, ObjC.sel('drawAtPoint:withAttributes:'), mx, my, ns_attrs)
       end
+    end
 
-      # Visual bell flash
-      if @bell_flash > 0
-        flash_color = make_color_with_alpha(make_color(1.0, 1.0, 1.0), 0.15)
-        ObjC::MSG_VOID.call(flash_color, ObjC.sel('setFill'))
-        ObjC::NSRectFill.call(0.0, gy_off, @cols * @cell_width, @rows * @cell_height)
+    def draw_pane_dividers(pane_rects, gy_off)
+      return if pane_rects.size <= 1
+
+      ObjC::MSG_VOID.call(@pane_divider_color, ObjC.sel('setFill'))
+
+      pane_rects.each do |rect|
+        px = rect[:x] * @cell_width
+        py = gy_off + rect[:y] * @cell_height
+        pw = rect[:w] * @cell_width
+        ph = rect[:h] * @cell_height
+
+        # Draw right edge divider (if not at the far right)
+        if rect[:x] + rect[:w] < @cols
+          ObjC::NSRectFill.call(px + pw - 0.5, py, 1.0, ph)
+        end
+
+        # Draw bottom edge divider (if not at the very bottom)
+        if rect[:y] + rect[:h] < @rows
+          ObjC::NSRectFill.call(px, py + ph - 0.5, pw, 1.0)
+        end
       end
+    end
 
-      # Draw search bar
-      if @search_mode
-        bar_h = @cell_height + 4.0
-        bar_y = gy_off + @rows * @cell_height
-        bar_bg = make_color(0.2, 0.2, 0.2)
-        ObjC::MSG_VOID.call(bar_bg, ObjC.sel('setFill'))
-        ObjC::NSRectFill.call(0.0, bar_y, @cols * @cell_width, bar_h)
+    def draw_active_pane_border(tab, pane_rects, gy_off)
+      active_rect = pane_rects.find { |r| r[:pane] == tab.active_pane }
+      return unless active_rect
 
-        match_info = @search_matches.empty? ? "" : " [#{@search_index + 1}/#{@search_matches.size}]"
-        label = "Find: #{@search_query}_#{match_info}"
-        ns_str = ObjC.nsstring(label)
-        ns_attrs = ObjC.nsdict({
-          ObjC::NSFontAttributeName => @font,
-          ObjC::NSForegroundColorAttributeName => make_color(1.0, 1.0, 1.0),
-        })
-        ObjC::MSG_VOID_PT_1.call(ns_str, ObjC.sel('drawAtPoint:withAttributes:'), 4.0, bar_y + 2.0, ns_attrs)
-      end
+      ObjC::MSG_VOID.call(@active_pane_border_color, ObjC.sel('setFill'))
 
-      ObjC::MSG_VOID.call(pool, ObjC.sel('drain'))
+      px = active_rect[:x] * @cell_width
+      py = gy_off + active_rect[:y] * @cell_height
+      pw = active_rect[:w] * @cell_width
+      ph = active_rect[:h] * @cell_height
+
+      # Top border
+      ObjC::NSRectFill.call(px, py, pw, 2.0)
+      # Bottom border
+      ObjC::NSRectFill.call(px, py + ph - 2.0, pw, 2.0)
+      # Left border
+      ObjC::NSRectFill.call(px, py, 2.0, ph)
+      # Right border
+      ObjC::NSRectFill.call(px + pw - 2.0, py, 2.0, ph)
     end
 
     def perform_key_equivalent(event_ptr)
@@ -773,12 +935,20 @@ module Echoes
         return
       end
 
+      tab = current_tab
+      pane = tab.active_pane
+
+      # Copy mode intercepts all keys
+      if pane.copy_mode&.active
+        copy_mode_key_down(event_ptr, pane)
+        return
+      end
+
       @selection_anchor = nil
       @selection_end = nil
 
-      tab = current_tab
-      tab.scroll_offset = 0
-      tab.scroll_accum = 0.0
+      pane.scroll_offset = 0
+      pane.scroll_accum = 0.0
 
       flags = ObjC::MSG_RET_L.call(event_ptr, ObjC.sel('modifierFlags'))
       chars_ns = ObjC::MSG_PTR.call(event_ptr, ObjC.sel('charactersIgnoringModifiers'))
@@ -788,12 +958,12 @@ module Echoes
       mod = modifier_param(flags)
 
       if mod > 1 && (seq = map_modified_key(chars, mod))
-        tab.pty_write.write(seq)
+        pane.pty_write.write(seq)
       elsif (flags & ObjC::NSEventModifierFlagControl) != 0
         ctrl_char = (chars[0].ord & 0x1F).chr
-        tab.pty_write.write(ctrl_char)
+        pane.pty_write.write(ctrl_char)
       elsif (flags & ObjC::NSEventModifierFlagOption) != 0
-        tab.pty_write.write("\e#{chars}")
+        pane.pty_write.write("\e#{chars}")
       else
         # Route through input method for IME support
         @current_event = event_ptr
@@ -804,6 +974,34 @@ module Echoes
       close_tab(@active_tab)
     end
 
+    def copy_mode_key_down(event_ptr, pane)
+      chars_ns = ObjC::MSG_PTR.call(event_ptr, ObjC.sel('characters'))
+      chars = ObjC.to_ruby_string(chars_ns)
+      flags = ObjC::MSG_RET_L.call(event_ptr, ObjC.sel('modifierFlags'))
+
+      key = if (flags & ObjC::NSEventModifierFlagControl) != 0
+              (chars[0].ord & 0x1F).chr
+            else
+              chars
+            end
+
+      result = pane.copy_mode.handle_key(key)
+      case result
+      when :exit
+        pane.copy_mode = nil
+      when :yank
+        text = pane.copy_mode.selected_text
+        unless text.empty?
+          pb = ObjC::MSG_PTR.call(ObjC.cls('NSPasteboard'), ObjC.sel('generalPasteboard'))
+          ObjC::MSG_PTR.call(pb, ObjC.sel('clearContents'))
+          ObjC::MSG_PTR_2.call(pb, ObjC.sel('setString:forType:'), ObjC.nsstring(text), ObjC::NSPasteboardTypeString)
+        end
+        pane.copy_mode.exit
+        pane.copy_mode = nil
+      end
+      ObjC::MSG_VOID_I.call(@view, ObjC.sel('setNeedsDisplay:'), 1)
+    end
+
     # --- IME (Input Method Editor) callbacks ---
 
     def ime_insert_text(text_ptr)
@@ -811,8 +1009,8 @@ module Echoes
       @marked_text = nil
       return if text.empty?
 
-      tab = current_tab
-      tab.pty_write.write(text)
+      pane = current_tab.active_pane
+      pane.pty_write.write(text)
     rescue Errno::EIO, IOError
       close_tab(@active_tab)
     end
@@ -820,7 +1018,7 @@ module Echoes
     def ime_do_command
       return unless @current_event
 
-      tab = current_tab
+      pane = current_tab.active_pane
       event_ptr = @current_event
       flags = ObjC::MSG_RET_L.call(event_ptr, ObjC.sel('modifierFlags'))
       chars_ns = ObjC::MSG_PTR.call(event_ptr, ObjC.sel('characters'))
@@ -830,7 +1028,7 @@ module Echoes
 
       numpad = (flags & ObjC::NSEventModifierFlagNumericPad) != 0
       actual = chars.empty? ? chars2 : chars
-      tab.pty_write.write(map_special_keys(actual, tab.screen.application_cursor_keys?, app_keypad: numpad && tab.screen.application_keypad))
+      pane.pty_write.write(map_special_keys(actual, pane.screen.application_cursor_keys?, app_keypad: numpad && pane.screen.application_keypad))
     rescue Errno::EIO, IOError
       close_tab(@active_tab)
     end
@@ -864,24 +1062,35 @@ module Echoes
       need_redraw = false
 
       @tabs.each do |tab|
-        begin
-          loop do
-            data = tab.pty_read.read_nonblock(16384)
-            tab.parser.feed(data)
-            need_redraw = true
+        tab.panes.each do |pane|
+          begin
+            loop do
+              data = pane.pty_read.read_nonblock(16384)
+              pane.process_output(data)
+              need_redraw = true
+            end
+          rescue IO::WaitReadable
+            # No more data for this pane
+          rescue EOFError, Errno::EIO
+            # Pane's process exited — will be cleaned up
           end
-        rescue IO::WaitReadable
-          # No more data for this tab
-        rescue EOFError, Errno::EIO
-          # Tab's process exited — will be cleaned up
+          if need_redraw && pane.screen.title
+            tab.title = pane.screen.title if pane == tab.active_pane
+            pane.screen.title = nil
+          end
         end
-        if need_redraw && tab.screen.title
-          tab.title = tab.screen.title
-          tab.screen.title = nil
+
+        # Clean up dead panes within the tab
+        dead_panes = tab.panes.reject(&:alive?)
+        dead_panes.each do |dp|
+          next if tab.pane_tree.single_pane?
+          tab.pane_tree.remove(dp)
+          dp.close
+          need_redraw = true
         end
       end
 
-      # Clean up dead tabs
+      # Clean up dead tabs (all panes dead)
       dead = @tabs.reject(&:alive?)
       if dead.any?
         dead.each { |t| t.close }
@@ -895,8 +1104,10 @@ module Echoes
       end
 
       tab = current_tab
-      if tab&.screen&.bell
-        tab.screen.bell = false
+      # Check bell on active pane
+      active_pane = tab&.active_pane
+      if active_pane&.screen&.bell
+        active_pane.screen.bell = false
         @bell_flash = 3
         need_redraw = true
       elsif @bell_flash > 0
@@ -914,19 +1125,19 @@ module Echoes
       tab = current_tab
       return unless tab
 
-      screen = tab.screen
       full_redraw = !need_redraw && (@bell_flash > 0 || @cursor_blink_counter == 0)
 
       if need_redraw
         ObjC::MSG_VOID_1.call(@window, ObjC.sel('setTitle:'), ObjC.nsstring(tab.title))
 
-        dirty = screen.dirty_rows
-        screen.clear_dirty
-
-        if full_redraw || dead&.any? || dirty.size > @rows / 2
+        if full_redraw || dead&.any? || !tab.pane_tree.single_pane?
+          tab.panes.each { |p| p.screen.clear_dirty }
           ObjC::MSG_VOID_I.call(@view, ObjC.sel('setNeedsDisplay:'), 1)
         else
-          # Also always invalidate the cursor row
+          # Single pane optimization: collect dirty rows before clearing
+          screen = active_pane.screen
+          dirty = screen.dirty_rows
+          screen.clear_dirty
           dirty << screen.cursor.row
           invalidate_dirty_rows(dirty)
         end
@@ -1132,10 +1343,11 @@ module Echoes
 
     def window_focus_changed(focused)
       tab = current_tab
-      return unless tab&.screen&.focus_reporting?
+      pane = tab&.active_pane
+      return unless pane&.screen&.focus_reporting?
 
       seq = focused ? "\e[I" : "\e[O"
-      tab.pty_write.write(seq) rescue nil
+      pane.pty_write.write(seq) rescue nil
     end
 
     def update_font(new_size)
@@ -1203,13 +1415,13 @@ module Echoes
       str = ObjC.to_ruby_string(ns_str)
       return if str.empty?
 
-      tab = current_tab
-      if tab.screen.bracketed_paste_mode?
-        tab.pty_write.write("\e[200~")
-        tab.pty_write.write(str)
-        tab.pty_write.write("\e[201~")
+      pane = current_tab.active_pane
+      if pane.screen.bracketed_paste_mode?
+        pane.pty_write.write("\e[200~")
+        pane.pty_write.write(str)
+        pane.pty_write.write("\e[201~")
       else
-        tab.pty_write.write(str)
+        pane.pty_write.write(str)
       end
     rescue Errno::EIO, IOError
     end
@@ -1560,10 +1772,12 @@ module Echoes
       leading = ObjC::MSG_RET_D.call(@font, ObjC.sel('leading'))
       @cell_height = ascender - descender + leading
 
-      # Propagate cell metrics to all screens for sixel sizing
+      # Propagate cell metrics to all pane screens for sixel sizing
       @tabs.each do |tab|
-        tab.screen.cell_pixel_width = @cell_width
-        tab.screen.cell_pixel_height = @cell_height
+        tab.panes.each do |pane|
+          pane.screen.cell_pixel_width = @cell_width
+          pane.screen.cell_pixel_height = @cell_height
+        end
       end
     end
 
