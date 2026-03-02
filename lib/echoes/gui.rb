@@ -37,13 +37,15 @@ module Echoes
       @pane_divider_color = make_color(*Echoes.config.pane_divider_color)
       @active_pane_border_color = make_color(*Echoes.config.active_pane_border_color)
       @copy_mode_cursor_color = make_color(*Echoes.config.copy_mode_cursor_color)
+      @window_states = []
+      @view_to_ws = {}
     end
 
     def run
-      create_tab
       setup_app
-      create_window
-      create_view
+      create_fonts
+      create_view_class
+      open_new_window
       setup_timer
       start_app
     end
@@ -69,7 +71,7 @@ module Echoes
       @tabs.delete_at(index)
 
       if @tabs.empty?
-        ObjC::MSG_VOID_1.call(@app, ObjC.sel('terminate:'), Fiddle::Pointer.new(0))
+        close_current_window
         return
       end
 
@@ -78,6 +80,81 @@ module Echoes
 
     def current_tab
       @tabs[@active_tab]
+    end
+
+    def activate_for_view(view_ptr)
+      ws = @view_to_ws[view_ptr.to_i]
+      return unless ws
+      save_window_state
+      load_window_state(ws)
+    end
+
+    private def save_window_state
+      return unless @window
+      ws = @view_to_ws[@view.to_i]
+      return unless ws
+      ws[:nswindow] = @window
+      ws[:nsview] = @view
+      ws[:tabs] = @tabs
+      ws[:active_tab] = @active_tab
+      ws[:search_mode] = @search_mode
+      ws[:search_query] = @search_query
+      ws[:search_matches] = @search_matches
+      ws[:search_index] = @search_index
+      ws[:bell_flash] = @bell_flash
+      ws[:marked_text] = @marked_text
+      ws[:current_event] = @current_event
+      ws[:selection_anchor] = @selection_anchor
+      ws[:selection_end] = @selection_end
+      ws[:view_height] = @view_height
+      ws[:rows] = @rows
+      ws[:cols] = @cols
+    end
+
+    private def load_window_state(ws)
+      @window = ws[:nswindow]
+      @view = ws[:nsview]
+      @tabs = ws[:tabs]
+      @active_tab = ws[:active_tab]
+      @search_mode = ws[:search_mode]
+      @search_query = ws[:search_query]
+      @search_matches = ws[:search_matches]
+      @search_index = ws[:search_index]
+      @bell_flash = ws[:bell_flash]
+      @marked_text = ws[:marked_text]
+      @current_event = ws[:current_event]
+      @selection_anchor = ws[:selection_anchor]
+      @selection_end = ws[:selection_end]
+      @view_height = ws[:view_height]
+      @rows = ws[:rows]
+      @cols = ws[:cols]
+    end
+
+    private def close_current_window
+      closing_view = @view
+      ws = @view_to_ws[closing_view.to_i]
+      @view_to_ws.delete(closing_view.to_i)
+      @window_states.delete(ws)
+      ObjC::MSG_VOID_1.call(@window, ObjC.sel('orderOut:'), Fiddle::Pointer.new(0))
+
+      if @window_states.empty?
+        ObjC::MSG_VOID_1.call(@app, ObjC.sel('terminate:'), Fiddle::Pointer.new(0))
+        return
+      end
+
+      load_window_state(@window_states.last)
+
+      # If the timer targeted the closed view, retarget it
+      if @timer && closing_view.to_i == @timer_view_id
+        ObjC::MSG_VOID.call(@timer, ObjC.sel('invalidate'))
+        @timer_view_id = @view.to_i
+        @timer = ObjC::MSG_PTR_D_P_P_P_I.call(
+          ObjC.cls('NSTimer'),
+          ObjC.sel('scheduledTimerWithTimeInterval:target:selector:userInfo:repeats:'),
+          1.0 / 60.0, @view, ObjC.sel('timerFired:'),
+          Fiddle::Pointer.new(0), 1
+        )
+      end
     end
 
     def tab_bar_height
@@ -153,6 +230,7 @@ module Echoes
 
       # Shell menu
       shell_menu = create_menu('Shell')
+      add_menu_item(shell_menu, "New Window", 'newWindow:', 'n')
       add_menu_item(shell_menu, "New Tab", 'newTab:', 't')
       add_menu_item(shell_menu, "Close Tab", 'closeTab:', 'w')
       add_separator(shell_menu)
@@ -195,43 +273,25 @@ module Echoes
       ObjC::MSG_VOID_1.call(parent, ObjC.sel('addItem:'), item)
     end
 
-    def create_window
+    def create_fonts
       @font = ObjC.retain(create_nsfont(@font_size))
       @bold_font = ObjC.retain(create_bold_nsfont(@font))
-
       update_cell_metrics
-
-      win_width = @cell_width * @cols
-      win_height = @cell_height * @rows
-
-      win = ObjC::MSG_PTR.call(ObjC.cls('NSWindow'), ObjC.sel('alloc'))
-      @window = ObjC::MSG_PTR_RECT_L_L_I.call(
-        win, ObjC.sel('initWithContentRect:styleMask:backing:defer:'),
-        0.0, 0.0, win_width, win_height,
-        ObjC::NSWindowStyleMaskDefault,
-        ObjC::NSBackingStoreBuffered,
-        0
-      )
-
-      ObjC::MSG_VOID_1.call(@window, ObjC.sel('setTitle:'), ObjC.nsstring(Echoes.config.window_title))
-      # Enable full screen button
-      ObjC::MSG_VOID_L.call(@window, ObjC.sel('setCollectionBehavior:'), 1 << 7)
-      ObjC::MSG_VOID.call(@window, ObjC.sel('center'))
     end
 
-    def create_view
+    def create_view_class
       gui = self
 
       @draw_rect_closure = Fiddle::Closure::BlockCaller.new(
         Fiddle::TYPE_VOID,
         [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP,
          Fiddle::TYPE_DOUBLE, Fiddle::TYPE_DOUBLE, Fiddle::TYPE_DOUBLE, Fiddle::TYPE_DOUBLE]
-      ) { |_self, _cmd, x, y, w, h| gui.draw_rect(y, y + h) }
+      ) { |_self, _cmd, x, y, w, h| gui.activate_for_view(_self); gui.draw_rect(y, y + h) }
 
       @key_down_closure = Fiddle::Closure::BlockCaller.new(
         Fiddle::TYPE_VOID,
         [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP]
-      ) { |_self, _cmd, event| gui.key_down(event) }
+      ) { |_self, _cmd, event| gui.activate_for_view(_self); gui.key_down(event) }
 
       @accepts_fr_closure = Fiddle::Closure::BlockCaller.new(
         Fiddle::TYPE_INT,
@@ -251,57 +311,57 @@ module Echoes
       @scroll_wheel_closure = Fiddle::Closure::BlockCaller.new(
         Fiddle::TYPE_VOID,
         [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP]
-      ) { |_self, _cmd, event| gui.scroll_wheel(event) }
+      ) { |_self, _cmd, event| gui.activate_for_view(_self); gui.scroll_wheel(event) }
 
       @mouse_down_closure = Fiddle::Closure::BlockCaller.new(
         Fiddle::TYPE_VOID,
         [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP]
-      ) { |_self, _cmd, event| gui.mouse_down(event) }
+      ) { |_self, _cmd, event| gui.activate_for_view(_self); gui.mouse_down(event) }
 
       @mouse_dragged_closure = Fiddle::Closure::BlockCaller.new(
         Fiddle::TYPE_VOID,
         [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP]
-      ) { |_self, _cmd, event| gui.mouse_dragged(event) }
+      ) { |_self, _cmd, event| gui.activate_for_view(_self); gui.mouse_dragged(event) }
 
       @mouse_up_closure = Fiddle::Closure::BlockCaller.new(
         Fiddle::TYPE_VOID,
         [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP]
-      ) { |_self, _cmd, event| gui.mouse_up(event) }
+      ) { |_self, _cmd, event| gui.activate_for_view(_self); gui.mouse_up(event) }
 
       @right_mouse_down_closure = Fiddle::Closure::BlockCaller.new(
         Fiddle::TYPE_VOID,
         [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP]
-      ) { |_self, _cmd, event| gui.right_mouse_down(event) }
+      ) { |_self, _cmd, event| gui.activate_for_view(_self); gui.right_mouse_down(event) }
 
       @right_mouse_dragged_closure = Fiddle::Closure::BlockCaller.new(
         Fiddle::TYPE_VOID,
         [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP]
-      ) { |_self, _cmd, event| gui.right_mouse_dragged(event) }
+      ) { |_self, _cmd, event| gui.activate_for_view(_self); gui.right_mouse_dragged(event) }
 
       @right_mouse_up_closure = Fiddle::Closure::BlockCaller.new(
         Fiddle::TYPE_VOID,
         [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP]
-      ) { |_self, _cmd, event| gui.right_mouse_up(event) }
+      ) { |_self, _cmd, event| gui.activate_for_view(_self); gui.right_mouse_up(event) }
 
       @other_mouse_down_closure = Fiddle::Closure::BlockCaller.new(
         Fiddle::TYPE_VOID,
         [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP]
-      ) { |_self, _cmd, event| gui.other_mouse_down(event) }
+      ) { |_self, _cmd, event| gui.activate_for_view(_self); gui.other_mouse_down(event) }
 
       @other_mouse_dragged_closure = Fiddle::Closure::BlockCaller.new(
         Fiddle::TYPE_VOID,
         [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP]
-      ) { |_self, _cmd, event| gui.other_mouse_dragged(event) }
+      ) { |_self, _cmd, event| gui.activate_for_view(_self); gui.other_mouse_dragged(event) }
 
       @other_mouse_up_closure = Fiddle::Closure::BlockCaller.new(
         Fiddle::TYPE_VOID,
         [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP]
-      ) { |_self, _cmd, event| gui.other_mouse_up(event) }
+      ) { |_self, _cmd, event| gui.activate_for_view(_self); gui.other_mouse_up(event) }
 
       @perform_key_equiv_closure = Fiddle::Closure::BlockCaller.new(
         Fiddle::TYPE_INT,
         [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP]
-      ) { |_self, _cmd, event| gui.perform_key_equivalent(event) }
+      ) { |_self, _cmd, event| gui.activate_for_view(_self); gui.perform_key_equivalent(event) }
 
       # Get NSView's original setFrameSize: IMP so we can call super
       nsview_cls = ObjC.cls('NSView')
@@ -313,6 +373,7 @@ module Echoes
         [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_DOUBLE, Fiddle::TYPE_DOUBLE]
       ) { |_self, _cmd, w, h|
         @super_set_frame_size.call(_self, _cmd, w, h)
+        gui.activate_for_view(_self)
         gui.handle_resize(w, h)
       }
 
@@ -320,30 +381,30 @@ module Echoes
       @insert_text_closure = Fiddle::Closure::BlockCaller.new(
         Fiddle::TYPE_VOID,
         [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_LONG, Fiddle::TYPE_LONG]
-      ) { |_self, _cmd, text, _rep_loc, _rep_len| gui.ime_insert_text(text) }
+      ) { |_self, _cmd, text, _rep_loc, _rep_len| gui.activate_for_view(_self); gui.ime_insert_text(text) }
 
       @insert_text_simple_closure = Fiddle::Closure::BlockCaller.new(
         Fiddle::TYPE_VOID,
         [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP]
-      ) { |_self, _cmd, text| gui.ime_insert_text(text) }
+      ) { |_self, _cmd, text| gui.activate_for_view(_self); gui.ime_insert_text(text) }
 
       @do_command_closure = Fiddle::Closure::BlockCaller.new(
         Fiddle::TYPE_VOID,
         [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP]
-      ) { |_self, _cmd, _selector| gui.ime_do_command }
+      ) { |_self, _cmd, _selector| gui.activate_for_view(_self); gui.ime_do_command }
 
       @set_marked_text_closure = Fiddle::Closure::BlockCaller.new(
         Fiddle::TYPE_VOID,
         [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP,
          Fiddle::TYPE_LONG, Fiddle::TYPE_LONG, Fiddle::TYPE_LONG, Fiddle::TYPE_LONG]
       ) { |_self, _cmd, text, sel_loc, sel_len, _rep_loc, _rep_len|
-        gui.ime_set_marked_text(text, sel_loc, sel_len)
+        gui.activate_for_view(_self); gui.ime_set_marked_text(text, sel_loc, sel_len)
       }
 
       @unmark_text_closure = Fiddle::Closure::BlockCaller.new(
         Fiddle::TYPE_VOID,
         [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP]
-      ) { |_self, _cmd| gui.ime_unmark_text }
+      ) { |_self, _cmd| gui.activate_for_view(_self); gui.ime_unmark_text }
 
       @has_marked_text_closure = Fiddle::Closure::BlockCaller.new(
         Fiddle::TYPE_INT,
@@ -384,9 +445,10 @@ module Echoes
         Fiddle::Closure::BlockCaller.new(
           Fiddle::TYPE_VOID,
           [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP]
-        ) { |_self, _cmd, _sender| action_block.call }
+        ) { |_self, _cmd, _sender| gui.activate_for_view(_self); action_block.call }
       }
 
+      @new_window_closure = menu_action.call(-> { open_new_window })
       @new_tab_closure = menu_action.call(-> {
         create_tab
         ObjC::MSG_VOID_I.call(@view, ObjC.sel('setNeedsDisplay:'), 1)
@@ -473,12 +535,12 @@ module Echoes
       @focus_gained_closure = Fiddle::Closure::BlockCaller.new(
         Fiddle::TYPE_VOID,
         [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP]
-      ) { |_self, _cmd, _notification| gui.window_focus_changed(true) }
+      ) { |_self, _cmd, _notification| gui.activate_for_view(_self); gui.window_focus_changed(true) }
 
       @focus_lost_closure = Fiddle::Closure::BlockCaller.new(
         Fiddle::TYPE_VOID,
         [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP]
-      ) { |_self, _cmd, _notification| gui.window_focus_changed(false) }
+      ) { |_self, _cmd, _notification| gui.activate_for_view(_self); gui.window_focus_changed(false) }
 
       @view_class = ObjC.define_class('EchoesTerminalView', 'NSView', {
         'drawRect:'             => ['v@:{CGRect=dddd}', @draw_rect_closure],
@@ -500,6 +562,7 @@ module Echoes
         'setFrameSize:'         => ['v@:{CGSize=dd}', @set_frame_size_closure],
         'windowDidBecomeKey:'   => ['v@:@', @focus_gained_closure],
         'windowDidResignKey:'   => ['v@:@', @focus_lost_closure],
+        'newWindow:'             => ['v@:@', @new_window_closure],
         'newTab:'               => ['v@:@', @new_tab_closure],
         'closeTab:'             => ['v@:@', @close_tab_closure],
         'copy:'                 => ['v@:@', @copy_closure],
@@ -537,35 +600,10 @@ module Echoes
       # Add NSTextInputClient protocol conformance for IME
       protocol = ObjC::GetProtocol.call('NSTextInputClient')
       ObjC::AddProtocol.call(@view_class, protocol) unless protocol.null?
-
-      win_width = @cell_width * @cols
-      win_height = @cell_height * @rows
-
-      view = ObjC::MSG_PTR.call(@view_class, ObjC.sel('alloc'))
-      @view = ObjC::MSG_PTR_RECT.call(
-        view, ObjC.sel('initWithFrame:'),
-        0.0, 0.0, win_width, win_height
-      )
-
-      ObjC::MSG_VOID_1.call(@window, ObjC.sel('setContentView:'), @view)
-      ObjC::MSG_VOID_1.call(@window, ObjC.sel('makeKeyAndOrderFront:'), @app)
-      ObjC::MSG_VOID_1.call(@window, ObjC.sel('makeFirstResponder:'), @view)
-      ObjC::MSG_VOID_I.call(@app, ObjC.sel('activateIgnoringOtherApps:'), 1)
-
-      setup_focus_notifications
-    end
-
-    def setup_focus_notifications
-      nc = ObjC::MSG_PTR.call(ObjC.cls('NSNotificationCenter'), ObjC.sel('defaultCenter'))
-      ObjC::MSG_VOID_4.call(nc, ObjC.sel('addObserver:selector:name:object:'),
-        @view, ObjC.sel('windowDidBecomeKey:'),
-        ObjC.nsstring('NSWindowDidBecomeKeyNotification'), @window)
-      ObjC::MSG_VOID_4.call(nc, ObjC.sel('addObserver:selector:name:object:'),
-        @view, ObjC.sel('windowDidResignKey:'),
-        ObjC.nsstring('NSWindowDidResignKeyNotification'), @window)
     end
 
     def setup_timer
+      @timer_view_id = @view.to_i
       @timer = ObjC::MSG_PTR_D_P_P_P_I.call(
         ObjC.cls('NSTimer'),
         ObjC.sel('scheduledTimerWithTimeInterval:target:selector:userInfo:repeats:'),
@@ -1059,6 +1097,23 @@ module Echoes
     end
 
     def timer_fired
+      save_window_state
+
+      @cursor_blink_counter += 1
+      blink_toggled = false
+      if @cursor_blink_counter >= 30
+        @cursor_blink_counter = 0
+        @cursor_blink_on = !@cursor_blink_on
+        blink_toggled = true
+      end
+
+      @window_states.each do |ws|
+        load_window_state(ws)
+        timer_fired_for_window(ws, blink_toggled)
+      end
+    end
+
+    private def timer_fired_for_window(ws, blink_toggled)
       need_redraw = false
 
       @tabs.each do |tab|
@@ -1096,7 +1151,8 @@ module Echoes
         dead.each { |t| t.close }
         @tabs -= dead
         if @tabs.empty?
-          ObjC::MSG_VOID_1.call(@app, ObjC.sel('terminate:'), Fiddle::Pointer.new(0))
+          save_window_state
+          close_current_window
           return
         end
         @active_tab = @active_tab.clamp(0, @tabs.size - 1)
@@ -1104,8 +1160,10 @@ module Echoes
       end
 
       tab = current_tab
+      return unless tab
+
       # Check bell on active pane
-      active_pane = tab&.active_pane
+      active_pane = tab.active_pane
       if active_pane&.screen&.bell
         active_pane.screen.bell = false
         @bell_flash = 3
@@ -1115,17 +1173,9 @@ module Echoes
         need_redraw = true
       end
 
-      @cursor_blink_counter += 1
-      if @cursor_blink_counter >= 30
-        @cursor_blink_counter = 0
-        @cursor_blink_on = !@cursor_blink_on
-        need_redraw = true
-      end
+      need_redraw = true if blink_toggled
 
-      tab = current_tab
-      return unless tab
-
-      full_redraw = !need_redraw && (@bell_flash > 0 || @cursor_blink_counter == 0)
+      full_redraw = @bell_flash > 0 || blink_toggled
 
       if need_redraw
         ObjC::MSG_VOID_1.call(@window, ObjC.sel('setTitle:'), ObjC.nsstring(tab.title))
@@ -1144,6 +1194,8 @@ module Echoes
       elsif full_redraw
         ObjC::MSG_VOID_I.call(@view, ObjC.sel('setNeedsDisplay:'), 1)
       end
+
+      save_window_state
     end
 
     def invalidate_dirty_rows(dirty_rows)
@@ -1362,14 +1414,90 @@ module Echoes
       @font_cache = {}
       update_cell_metrics
 
-      win_width = @cell_width * @cols
-      win_height = tab_bar_height + @cell_height * @rows
-
-      ObjC::MSG_VOID_2D.call(@window, ObjC.sel('setContentSize:'), win_width, win_height)
-      ObjC::MSG_VOID_I.call(@view, ObjC.sel('setNeedsDisplay:'), 1)
+      @window_states.each do |ws|
+        load_window_state(ws)
+        win_width = @cell_width * @cols
+        win_height = tab_bar_height + @cell_height * @rows
+        ObjC::MSG_VOID_2D.call(@window, ObjC.sel('setContentSize:'), win_width, win_height)
+        ObjC::MSG_VOID_I.call(@view, ObjC.sel('setNeedsDisplay:'), 1)
+        save_window_state
+      end
     end
 
     private
+
+    def open_new_window
+      save_window_state
+
+      # Create tab
+      tab = Tab.new(command: @command, rows: @rows, cols: @cols)
+      tab.title = "Shell"
+      tab.panes.each do |pane|
+        if @cell_width && @cell_height
+          pane.screen.cell_pixel_width = @cell_width
+          pane.screen.cell_pixel_height = @cell_height
+        end
+        pane.screen.clipboard_handler = method(:handle_clipboard)
+      end
+
+      # Create NSWindow
+      win_width = @cell_width * @cols
+      win_height = @cell_height * @rows
+      win = ObjC::MSG_PTR.call(ObjC.cls('NSWindow'), ObjC.sel('alloc'))
+      @window = ObjC::MSG_PTR_RECT_L_L_I.call(
+        win, ObjC.sel('initWithContentRect:styleMask:backing:defer:'),
+        0.0, 0.0, win_width, win_height,
+        ObjC::NSWindowStyleMaskDefault,
+        ObjC::NSBackingStoreBuffered,
+        0
+      )
+      ObjC::MSG_VOID_1.call(@window, ObjC.sel('setTitle:'), ObjC.nsstring(Echoes.config.window_title))
+      ObjC::MSG_VOID_L.call(@window, ObjC.sel('setCollectionBehavior:'), 1 << 7)
+
+      # Create NSView
+      view = ObjC::MSG_PTR.call(@view_class, ObjC.sel('alloc'))
+      @view = ObjC::MSG_PTR_RECT.call(
+        view, ObjC.sel('initWithFrame:'),
+        0.0, 0.0, win_width, win_height
+      )
+
+      # Connect
+      ObjC::MSG_VOID_1.call(@window, ObjC.sel('setContentView:'), @view)
+      ObjC::MSG_VOID_1.call(@window, ObjC.sel('makeKeyAndOrderFront:'), @app)
+      ObjC::MSG_VOID_1.call(@window, ObjC.sel('makeFirstResponder:'), @view)
+      ObjC::MSG_VOID_I.call(@app, ObjC.sel('activateIgnoringOtherApps:'), 1)
+
+      ObjC::MSG_VOID.call(@window, ObjC.sel('center'))
+
+      # Focus notifications
+      nc = ObjC::MSG_PTR.call(ObjC.cls('NSNotificationCenter'), ObjC.sel('defaultCenter'))
+      ObjC::MSG_VOID_4.call(nc, ObjC.sel('addObserver:selector:name:object:'),
+        @view, ObjC.sel('windowDidBecomeKey:'),
+        ObjC.nsstring('NSWindowDidBecomeKeyNotification'), @window)
+      ObjC::MSG_VOID_4.call(nc, ObjC.sel('addObserver:selector:name:object:'),
+        @view, ObjC.sel('windowDidResignKey:'),
+        ObjC.nsstring('NSWindowDidResignKeyNotification'), @window)
+
+      # Set per-window state
+      @tabs = [tab]
+      @active_tab = 0
+      @search_mode = false
+      @search_query = +""
+      @search_matches = []
+      @search_index = -1
+      @bell_flash = 0
+      @marked_text = nil
+      @current_event = nil
+      @selection_anchor = nil
+      @selection_end = nil
+      @view_height = nil
+
+      # Register window state
+      ws = {}
+      @window_states << ws
+      @view_to_ws[@view.to_i] = ws
+      save_window_state
+    end
 
     def select_all
       tab = current_tab
@@ -1773,10 +1901,12 @@ module Echoes
       @cell_height = ascender - descender + leading
 
       # Propagate cell metrics to all pane screens for sixel sizing
-      @tabs.each do |tab|
-        tab.panes.each do |pane|
-          pane.screen.cell_pixel_width = @cell_width
-          pane.screen.cell_pixel_height = @cell_height
+      @window_states.each do |ws|
+        ws[:tabs]&.each do |tab|
+          tab.panes.each do |pane|
+            pane.screen.cell_pixel_width = @cell_width
+            pane.screen.cell_pixel_height = @cell_height
+          end
         end
       end
     end
