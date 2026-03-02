@@ -4,6 +4,22 @@ require 'pty'
 
 module Echoes
   class GUI
+    CRASH_LOG = File.join(Dir.home, '.local', 'share', 'echoes', 'crash.log')
+
+    def log_crash(exception, context: nil)
+      dir = File.dirname(CRASH_LOG)
+      Dir.mkdir(dir) unless Dir.exist?(dir)
+      File.open(CRASH_LOG, 'a') do |f|
+        f.puts "--- #{Time.now} ---"
+        f.puts "Context: #{context}" if context
+        f.puts "#{exception.class}: #{exception.message}"
+        exception.backtrace&.each { |line| f.puts "  #{line}" }
+        f.puts
+      end
+      STDERR.puts "echoes: #{exception.class}: #{exception.message} (logged to #{CRASH_LOG})"
+    rescue # log_crash itself must never raise
+    end
+
     def initialize(command: Echoes.config.shell, rows: Echoes.config.rows, cols: Echoes.config.cols, font_size: Echoes.config.font_size)
       @rows = rows
       @cols = cols
@@ -286,12 +302,20 @@ module Echoes
         Fiddle::TYPE_VOID,
         [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP,
          Fiddle::TYPE_DOUBLE, Fiddle::TYPE_DOUBLE, Fiddle::TYPE_DOUBLE, Fiddle::TYPE_DOUBLE]
-      ) { |_self, _cmd, x, y, w, h| gui.activate_for_view(_self); gui.draw_rect(y, y + h) }
+      ) do |_self, _cmd, x, y, w, h|
+        gui.activate_for_view(_self); gui.draw_rect(y, y + h)
+      rescue => e
+        gui.log_crash(e, context: 'draw_rect')
+      end
 
       @key_down_closure = Fiddle::Closure::BlockCaller.new(
         Fiddle::TYPE_VOID,
         [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP]
-      ) { |_self, _cmd, event| gui.activate_for_view(_self); gui.key_down(event) }
+      ) do |_self, _cmd, event|
+        gui.activate_for_view(_self); gui.key_down(event)
+      rescue => e
+        gui.log_crash(e, context: 'key_down')
+      end
 
       @accepts_fr_closure = Fiddle::Closure::BlockCaller.new(
         Fiddle::TYPE_INT,
@@ -301,7 +325,11 @@ module Echoes
       @timer_fired_closure = Fiddle::Closure::BlockCaller.new(
         Fiddle::TYPE_VOID,
         [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP]
-      ) { |_self, _cmd, _timer| gui.timer_fired }
+      ) do |_self, _cmd, _timer|
+        gui.timer_fired
+      rescue => e
+        gui.log_crash(e, context: 'timer_fired')
+      end
 
       @is_flipped_closure = Fiddle::Closure::BlockCaller.new(
         Fiddle::TYPE_INT,
@@ -311,52 +339,92 @@ module Echoes
       @scroll_wheel_closure = Fiddle::Closure::BlockCaller.new(
         Fiddle::TYPE_VOID,
         [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP]
-      ) { |_self, _cmd, event| gui.activate_for_view(_self); gui.scroll_wheel(event) }
+      ) do |_self, _cmd, event|
+        gui.activate_for_view(_self); gui.scroll_wheel(event)
+      rescue => e
+        gui.log_crash(e, context: 'scroll_wheel')
+      end
 
       @mouse_down_closure = Fiddle::Closure::BlockCaller.new(
         Fiddle::TYPE_VOID,
         [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP]
-      ) { |_self, _cmd, event| gui.activate_for_view(_self); gui.mouse_down(event) }
+      ) do |_self, _cmd, event|
+        gui.activate_for_view(_self); gui.mouse_down(event)
+      rescue => e
+        gui.log_crash(e, context: 'mouse_down')
+      end
 
       @mouse_dragged_closure = Fiddle::Closure::BlockCaller.new(
         Fiddle::TYPE_VOID,
         [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP]
-      ) { |_self, _cmd, event| gui.activate_for_view(_self); gui.mouse_dragged(event) }
+      ) do |_self, _cmd, event|
+        gui.activate_for_view(_self); gui.mouse_dragged(event)
+      rescue => e
+        gui.log_crash(e, context: 'mouse_dragged')
+      end
 
       @mouse_up_closure = Fiddle::Closure::BlockCaller.new(
         Fiddle::TYPE_VOID,
         [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP]
-      ) { |_self, _cmd, event| gui.activate_for_view(_self); gui.mouse_up(event) }
+      ) do |_self, _cmd, event|
+        gui.activate_for_view(_self); gui.mouse_up(event)
+      rescue => e
+        gui.log_crash(e, context: 'mouse_up')
+      end
 
       @right_mouse_down_closure = Fiddle::Closure::BlockCaller.new(
         Fiddle::TYPE_VOID,
         [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP]
-      ) { |_self, _cmd, event| gui.activate_for_view(_self); gui.right_mouse_down(event) }
+      ) do |_self, _cmd, event|
+        gui.activate_for_view(_self); gui.right_mouse_down(event)
+      rescue => e
+        gui.log_crash(e, context: 'right_mouse_down')
+      end
 
       @right_mouse_dragged_closure = Fiddle::Closure::BlockCaller.new(
         Fiddle::TYPE_VOID,
         [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP]
-      ) { |_self, _cmd, event| gui.activate_for_view(_self); gui.right_mouse_dragged(event) }
+      ) do |_self, _cmd, event|
+        gui.activate_for_view(_self); gui.right_mouse_dragged(event)
+      rescue => e
+        gui.log_crash(e, context: 'right_mouse_dragged')
+      end
 
       @right_mouse_up_closure = Fiddle::Closure::BlockCaller.new(
         Fiddle::TYPE_VOID,
         [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP]
-      ) { |_self, _cmd, event| gui.activate_for_view(_self); gui.right_mouse_up(event) }
+      ) do |_self, _cmd, event|
+        gui.activate_for_view(_self); gui.right_mouse_up(event)
+      rescue => e
+        gui.log_crash(e, context: 'right_mouse_up')
+      end
 
       @other_mouse_down_closure = Fiddle::Closure::BlockCaller.new(
         Fiddle::TYPE_VOID,
         [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP]
-      ) { |_self, _cmd, event| gui.activate_for_view(_self); gui.other_mouse_down(event) }
+      ) do |_self, _cmd, event|
+        gui.activate_for_view(_self); gui.other_mouse_down(event)
+      rescue => e
+        gui.log_crash(e, context: 'other_mouse_down')
+      end
 
       @other_mouse_dragged_closure = Fiddle::Closure::BlockCaller.new(
         Fiddle::TYPE_VOID,
         [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP]
-      ) { |_self, _cmd, event| gui.activate_for_view(_self); gui.other_mouse_dragged(event) }
+      ) do |_self, _cmd, event|
+        gui.activate_for_view(_self); gui.other_mouse_dragged(event)
+      rescue => e
+        gui.log_crash(e, context: 'other_mouse_dragged')
+      end
 
       @other_mouse_up_closure = Fiddle::Closure::BlockCaller.new(
         Fiddle::TYPE_VOID,
         [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP]
-      ) { |_self, _cmd, event| gui.activate_for_view(_self); gui.other_mouse_up(event) }
+      ) do |_self, _cmd, event|
+        gui.activate_for_view(_self); gui.other_mouse_up(event)
+      rescue => e
+        gui.log_crash(e, context: 'other_mouse_up')
+      end
 
       @perform_key_equiv_closure = Fiddle::Closure::BlockCaller.new(
         Fiddle::TYPE_INT,
@@ -371,40 +439,60 @@ module Echoes
       @set_frame_size_closure = Fiddle::Closure::BlockCaller.new(
         Fiddle::TYPE_VOID,
         [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_DOUBLE, Fiddle::TYPE_DOUBLE]
-      ) { |_self, _cmd, w, h|
+      ) do |_self, _cmd, w, h|
         @super_set_frame_size.call(_self, _cmd, w, h)
         gui.activate_for_view(_self)
         gui.handle_resize(w, h)
-      }
+      rescue => e
+        gui.log_crash(e, context: 'set_frame_size')
+      end
 
       # NSTextInputClient protocol closures for IME support
       @insert_text_closure = Fiddle::Closure::BlockCaller.new(
         Fiddle::TYPE_VOID,
         [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_LONG, Fiddle::TYPE_LONG]
-      ) { |_self, _cmd, text, _rep_loc, _rep_len| gui.activate_for_view(_self); gui.ime_insert_text(text) }
+      ) do |_self, _cmd, text, _rep_loc, _rep_len|
+        gui.activate_for_view(_self); gui.ime_insert_text(text)
+      rescue => e
+        gui.log_crash(e, context: 'insert_text')
+      end
 
       @insert_text_simple_closure = Fiddle::Closure::BlockCaller.new(
         Fiddle::TYPE_VOID,
         [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP]
-      ) { |_self, _cmd, text| gui.activate_for_view(_self); gui.ime_insert_text(text) }
+      ) do |_self, _cmd, text|
+        gui.activate_for_view(_self); gui.ime_insert_text(text)
+      rescue => e
+        gui.log_crash(e, context: 'insert_text_simple')
+      end
 
       @do_command_closure = Fiddle::Closure::BlockCaller.new(
         Fiddle::TYPE_VOID,
         [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP]
-      ) { |_self, _cmd, _selector| gui.activate_for_view(_self); gui.ime_do_command }
+      ) do |_self, _cmd, _selector|
+        gui.activate_for_view(_self); gui.ime_do_command
+      rescue => e
+        gui.log_crash(e, context: 'do_command')
+      end
 
       @set_marked_text_closure = Fiddle::Closure::BlockCaller.new(
         Fiddle::TYPE_VOID,
         [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP,
          Fiddle::TYPE_LONG, Fiddle::TYPE_LONG, Fiddle::TYPE_LONG, Fiddle::TYPE_LONG]
-      ) { |_self, _cmd, text, sel_loc, sel_len, _rep_loc, _rep_len|
+      ) do |_self, _cmd, text, sel_loc, sel_len, _rep_loc, _rep_len|
         gui.activate_for_view(_self); gui.ime_set_marked_text(text, sel_loc, sel_len)
-      }
+      rescue => e
+        gui.log_crash(e, context: 'set_marked_text')
+      end
 
       @unmark_text_closure = Fiddle::Closure::BlockCaller.new(
         Fiddle::TYPE_VOID,
         [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP]
-      ) { |_self, _cmd| gui.activate_for_view(_self); gui.ime_unmark_text }
+      ) do |_self, _cmd|
+        gui.activate_for_view(_self); gui.ime_unmark_text
+      rescue => e
+        gui.log_crash(e, context: 'unmark_text')
+      end
 
       @has_marked_text_closure = Fiddle::Closure::BlockCaller.new(
         Fiddle::TYPE_INT,
@@ -445,7 +533,11 @@ module Echoes
         Fiddle::Closure::BlockCaller.new(
           Fiddle::TYPE_VOID,
           [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP]
-        ) { |_self, _cmd, _sender| gui.activate_for_view(_self); action_block.call }
+        ) do |_self, _cmd, _sender|
+          gui.activate_for_view(_self); action_block.call
+        rescue => e
+          gui.log_crash(e, context: 'menu_action')
+        end
       }
 
       @new_window_closure = menu_action.call(-> { open_new_window })
