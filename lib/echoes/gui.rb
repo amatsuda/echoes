@@ -627,6 +627,10 @@ module Echoes
       pool = ObjC::MSG_PTR.call(pool, ObjC.sel('init'))
 
       tab = current_tab
+      unless tab
+        ObjC::MSG_VOID.call(pool, ObjC.sel('drain'))
+        return
+      end
       tbh = tab_bar_height
       gy_off = grid_y_offset
 
@@ -702,9 +706,10 @@ module Echoes
         src = visible_start + r
         row = if src < scrollback.size
                 scrollback[src]
-              else
+              elsif src - scrollback.size < screen.grid.size
                 screen.grid[src - scrollback.size]
               end
+        next unless row
 
         row.each_with_index do |cell, c|
           next if cell.width == 0
@@ -974,7 +979,9 @@ module Echoes
       end
 
       tab = current_tab
+      return unless tab
       pane = tab.active_pane
+      return unless pane
 
       # Copy mode intercepts all keys
       if pane.copy_mode&.active
@@ -1047,7 +1054,10 @@ module Echoes
       @marked_text = nil
       return if text.empty?
 
-      pane = current_tab.active_pane
+      tab = current_tab
+      return unless tab
+      pane = tab.active_pane
+      return unless pane
       pane.pty_write.write(text)
     rescue Errno::EIO, IOError
       close_tab(@active_tab)
@@ -1056,7 +1066,10 @@ module Echoes
     def ime_do_command
       return unless @current_event
 
-      pane = current_tab.active_pane
+      tab = current_tab
+      return unless tab
+      pane = tab.active_pane
+      return unless pane
       event_ptr = @current_event
       flags = ObjC::MSG_RET_L.call(event_ptr, ObjC.sel('modifierFlags'))
       chars_ns = ObjC::MSG_PTR.call(event_ptr, ObjC.sel('characters'))
@@ -1210,6 +1223,7 @@ module Echoes
 
     def scroll_wheel(event_ptr)
       tab = current_tab
+      return unless tab
       screen = tab.screen
 
       if screen.mouse_tracking != :off
@@ -1236,6 +1250,7 @@ module Echoes
 
     def mouse_down(event_ptr)
       tab = current_tab
+      return unless tab
       pos = grid_position(event_ptr)
       click_count = ObjC::MSG_RET_L.call(event_ptr, ObjC.sel('clickCount'))
 
@@ -1282,6 +1297,7 @@ module Echoes
 
     def mouse_dragged(event_ptr)
       tab = current_tab
+      return unless tab
       pos = grid_position(event_ptr)
       return unless pos
 
@@ -1296,6 +1312,7 @@ module Echoes
 
     def mouse_up(event_ptr)
       tab = current_tab
+      return unless tab
       return if tab.screen.mouse_tracking == :off || tab.screen.mouse_tracking == :x10
 
       pos = grid_position(event_ptr)
@@ -1306,6 +1323,7 @@ module Echoes
 
     def right_mouse_down(event_ptr)
       tab = current_tab
+      return unless tab
       return if tab.screen.mouse_tracking == :off
 
       pos = grid_position(event_ptr)
@@ -1318,6 +1336,7 @@ module Echoes
 
     def right_mouse_dragged(event_ptr)
       tab = current_tab
+      return unless tab
       return unless tab.screen.mouse_tracking == :button_event || tab.screen.mouse_tracking == :any_event
 
       pos = grid_position(event_ptr)
@@ -1330,6 +1349,7 @@ module Echoes
 
     def right_mouse_up(event_ptr)
       tab = current_tab
+      return unless tab
       return if tab.screen.mouse_tracking == :off || tab.screen.mouse_tracking == :x10
 
       pos = grid_position(event_ptr)
@@ -1342,6 +1362,7 @@ module Echoes
 
     def other_mouse_down(event_ptr)
       tab = current_tab
+      return unless tab
       return if tab.screen.mouse_tracking == :off
 
       pos = grid_position(event_ptr)
@@ -1354,6 +1375,7 @@ module Echoes
 
     def other_mouse_dragged(event_ptr)
       tab = current_tab
+      return unless tab
       return unless tab.screen.mouse_tracking == :button_event || tab.screen.mouse_tracking == :any_event
 
       pos = grid_position(event_ptr)
@@ -1366,6 +1388,7 @@ module Echoes
 
     def other_mouse_up(event_ptr)
       tab = current_tab
+      return unless tab
       return if tab.screen.mouse_tracking == :off || tab.screen.mouse_tracking == :x10
 
       pos = grid_position(event_ptr)
@@ -1636,6 +1659,7 @@ module Echoes
       col = (x / @cell_width).to_i.clamp(0, @cols - 1)
       # Return absolute row (scrollback + grid index)
       tab = current_tab
+      return nil unless tab
       scrollback_size = tab.screen.scrollback.size
       abs_row = scrollback_size - tab.scroll_offset + visible_row
       [abs_row, col]

@@ -704,6 +704,8 @@ module Echoes
       @main_saved_cursor = @saved_cursor
       @main_scrollback = @scrollback
       @main_scrollback_wrapped = @scrollback_wrapped
+      @main_rows = @rows
+      @main_cols = @cols
 
       @grid = Array.new(@rows) { Array.new(@cols) { Cell.new } }
       @line_wrapped = Array.new(@rows, false)
@@ -722,6 +724,9 @@ module Echoes
     def switch_to_main_screen
       return unless @using_alt_screen
 
+      current_rows = @rows
+      current_cols = @cols
+
       @grid = @main_grid
       @line_wrapped = @main_line_wrapped
       @cursor = Cursor.new
@@ -731,6 +736,8 @@ module Echoes
       @saved_cursor = @main_saved_cursor
       @scrollback = @main_scrollback
       @scrollback_wrapped = @main_scrollback_wrapped
+      @rows = @main_rows
+      @cols = @main_cols
       @attrs = Cell.new
 
       @main_grid = nil
@@ -741,8 +748,16 @@ module Echoes
       @main_saved_cursor = nil
       @main_scrollback = nil
       @main_scrollback_wrapped = nil
+      @main_rows = nil
+      @main_cols = nil
       @pending_wrap = false
       @using_alt_screen = false
+
+      # If terminal was resized while in alt screen, adjust the restored main grid
+      if current_rows != @rows || current_cols != @cols
+        resize(current_rows, current_cols)
+      end
+
       mark_all_dirty
     end
 

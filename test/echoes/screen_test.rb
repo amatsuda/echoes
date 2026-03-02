@@ -659,6 +659,40 @@ class Echoes::ScreenTest < Test::Unit::TestCase
     assert_equal(false, @screen.grid[0][1].bold)
   end
 
+  # --- grid.size == rows invariant (regression: draw_pane_content crash) ---
+
+  test "grid size matches rows after switch to alt screen" do
+    @screen.switch_to_alt_screen
+    assert_equal(@screen.rows, @screen.grid.size)
+  end
+
+  test "grid size matches rows after switch back to main screen" do
+    @screen.switch_to_alt_screen
+    @screen.switch_to_main_screen
+    assert_equal(@screen.rows, @screen.grid.size)
+  end
+
+  test "grid size matches rows after resize in alt screen" do
+    @screen.switch_to_alt_screen
+    @screen.resize(30, 100)
+    assert_equal(30, @screen.grid.size)
+    assert_equal(@screen.rows, @screen.grid.size)
+  end
+
+  test "grid size matches rows after resize then switch to alt screen" do
+    @screen.resize(10, 20)
+    @screen.switch_to_alt_screen
+    assert_equal(10, @screen.grid.size)
+    assert_equal(@screen.rows, @screen.grid.size)
+  end
+
+  test "grid size matches rows after resize in alt screen then switch back" do
+    @screen.switch_to_alt_screen
+    @screen.resize(12, 40)
+    @screen.switch_to_main_screen
+    assert_equal(@screen.rows, @screen.grid.size)
+  end
+
   test "switch to alt screen marks all rows dirty" do
     @screen.clear_dirty
     assert(@screen.dirty_rows.empty?)
