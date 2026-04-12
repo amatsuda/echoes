@@ -292,6 +292,7 @@ module Echoes
     def create_fonts
       @font = ObjC.retain(create_nsfont(@font_size))
       @bold_font = ObjC.retain(create_bold_nsfont(@font))
+      @font_y_offset_cache = {}
       update_cell_metrics
     end
 
@@ -948,7 +949,8 @@ module Echoes
             end
             ns_attrs = ObjC.nsdict(attrs)
             ns_char = cached_nsstring(cell.char)
-            ObjC::MSG_VOID_PT_1.call(ns_char, ObjC.sel('drawAtPoint:withAttributes:'), x, y, ns_attrs)
+            dy = y + y_offset_for_font(base_font)
+            ObjC::MSG_VOID_PT_1.call(ns_char, ObjC.sel('drawAtPoint:withAttributes:'), x, dy, ns_attrs)
           end
         end
       end
@@ -984,12 +986,14 @@ module Echoes
               cell = screen.grid[screen.cursor.row][screen.cursor.col]
               if cell.char != ' '
                 inv_fg = @default_bg
+                cursor_font = cell.bold ? @bold_font : font_for_char(cell.char)
                 ns_attrs = ObjC.nsdict({
-                  ObjC::NSFontAttributeName => cell.bold ? @bold_font : font_for_char(cell.char),
+                  ObjC::NSFontAttributeName => cursor_font,
                   ObjC::NSForegroundColorAttributeName => inv_fg,
                 })
                 ns_char = cached_nsstring(cell.char)
-                ObjC::MSG_VOID_PT_1.call(ns_char, ObjC.sel('drawAtPoint:withAttributes:'), cx, cy, ns_attrs)
+                dy = cy + y_offset_for_font(cursor_font)
+                ObjC::MSG_VOID_PT_1.call(ns_char, ObjC.sel('drawAtPoint:withAttributes:'), cx, dy, ns_attrs)
               end
             end
           end
@@ -1527,6 +1531,7 @@ module Echoes
       ObjC.release(old_bold) if old_bold
       @font_cache.each_value { |f| ObjC.release(f) unless f.to_i == old_font&.to_i }
       @font_cache = {}
+      @font_y_offset_cache = {}
       update_cell_metrics
 
       @window_states.each do |ws|
@@ -2015,6 +2020,8 @@ module Echoes
       descender = ObjC::MSG_RET_D.call(@font, ObjC.sel('descender'))
       leading = ObjC::MSG_RET_D.call(@font, ObjC.sel('leading'))
       @cell_height = ascender - descender + leading
+      @font_ascender = ascender
+      @font_y_offset_cache = {} if @font_y_offset_cache
 
       # Propagate cell metrics to all pane screens for sixel sizing
       @window_states.each do |ws|
@@ -2042,6 +2049,14 @@ module Echoes
         @font_cache[char] = ObjC.retain(fallback)
       end
       @font_cache[char]
+    end
+
+    def y_offset_for_font(font)
+      return 0.0 if font.to_i == @font.to_i
+      cached = @font_y_offset_cache[font.to_i]
+      return cached if cached
+      asc = ObjC::MSG_RET_D.call(font, ObjC.sel('ascender'))
+      @font_y_offset_cache[font.to_i] = @font_ascender - asc
     end
 
     MODIFIED_KEYS = {
