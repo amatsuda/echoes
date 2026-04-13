@@ -2271,7 +2271,7 @@ module Echoes
     end
 
     def make_color_with_alpha(color, alpha)
-      ObjC::MSG_PTR_1D.call(color, ObjC.sel('colorWithAlphaComponent:'), alpha)
+      ObjC::MSG_PTR_D.call(color, ObjC.sel('colorWithAlphaComponent:'), alpha)
     end
 
     def cached_nsstring(str)

@@ -44,6 +44,7 @@ module Echoes
     MSG_VOID_L    = new_msg([P, P, L], V)            # void = msg(id, SEL, long)
     MSG_VOID_2D   = new_msg([P, P, D, D], V)         # void = msg(id, SEL, double, double)
     MSG_RET_D     = new_msg([P, P], D)               # double = msg(id, SEL)
+    MSG_PTR_D     = new_msg([P, P, D], P)            # id = msg(id, SEL, double)
     MSG_RET_D_1   = new_msg([P, P, P], D)            # double = msg(id, SEL, id)
     MSG_RET_L     = new_msg([P, P], L)               # long = msg(id, SEL)
 

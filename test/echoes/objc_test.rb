@@ -48,4 +48,15 @@ class Echoes::ObjCTest < Test::Unit::TestCase
     ns = Echoes::ObjC.nsstring("test")
     assert_false(ns.null?)
   end
+
+  test "MSG_PTR_D sends message with single double argument" do
+    color = Echoes::ObjC::MSG_PTR_4D.call(
+      Echoes::ObjC.cls('NSColor'), Echoes::ObjC.sel('colorWithRed:green:blue:alpha:'),
+      1.0, 0.0, 0.0, 1.0
+    )
+    result = Echoes::ObjC::MSG_PTR_D.call(color, Echoes::ObjC.sel('colorWithAlphaComponent:'), 0.5)
+    assert_false(result.null?)
+    alpha = Echoes::ObjC::MSG_RET_D.call(result, Echoes::ObjC.sel('alphaComponent'))
+    assert_in_delta(0.5, alpha, 0.001)
+  end
 end
