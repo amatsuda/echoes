@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'pty'
+require 'shellwords'
 
 module Echoes
   class GUI
@@ -625,6 +626,21 @@ module Echoes
         ObjC::MSG_VOID_I.call(@view, ObjC.sel('setNeedsDisplay:'), 1)
       })
 
+      @dragging_entered_closure = Fiddle::Closure::BlockCaller.new(
+        Fiddle::TYPE_LONG,
+        [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP]
+      ) { |_self, _cmd, _sender| 1 }  # NSDragOperationCopy
+
+      @perform_drag_closure = Fiddle::Closure::BlockCaller.new(
+        Fiddle::TYPE_INT,
+        [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP]
+      ) do |_self, _cmd, sender|
+        gui.activate_for_view(_self); gui.perform_drag_operation(sender) ? 1 : 0
+      rescue => e
+        gui.log_crash(e, context: 'performDragOperation')
+        0
+      end
+
       @focus_gained_closure = Fiddle::Closure::BlockCaller.new(
         Fiddle::TYPE_VOID,
         [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP]
@@ -688,6 +704,8 @@ module Echoes
         'attributedSubstringForProposedRange:actualRange:'  => ['@@:{_NSRange=QQ}^{_NSRange=QQ}', @attr_substring_closure],
         'firstRectForCharacterRange:actualRange:'           => ['{CGRect={CGPoint=dd}{CGSize=dd}}@:{_NSRange=QQ}^{_NSRange=QQ}', @first_rect_closure],
         'characterIndexForPoint:'                           => ['Q@:{CGPoint=dd}', @char_index_closure],
+        'draggingEntered:'                                  => ['Q@:@', @dragging_entered_closure],
+        'performDragOperation:'                             => ['c@:@', @perform_drag_closure],
       })
 
       # Add NSTextInputClient protocol conformance for IME
@@ -1544,6 +1562,41 @@ module Echoes
       end
     end
 
+    def perform_drag_operation(sender)
+      pb = ObjC::MSG_PTR.call(sender, ObjC.sel('draggingPasteboard'))
+      str = self.class.file_paths_from_pasteboard(pb)
+      return false if str.nil?
+
+      pane = current_tab.active_pane
+      if pane.screen.bracketed_paste_mode?
+        pane.pty_write.write("\e[200~")
+        pane.pty_write.write(str)
+        pane.pty_write.write("\e[201~")
+      else
+        pane.pty_write.write(str)
+      end
+      true
+    rescue Errno::EIO, IOError
+      false
+    end
+
+    def self.file_paths_from_pasteboard(pb)
+      nsurl_class = ObjC.cls('NSURL')
+      class_array = ObjC::MSG_PTR_1.call(ObjC.cls('NSArray'), ObjC.sel('arrayWithObject:'), nsurl_class)
+      urls = ObjC::MSG_PTR_2.call(pb, ObjC.sel('readObjectsForClasses:options:'), class_array, Fiddle::Pointer.new(0))
+      return nil if urls.null?
+
+      count = ObjC::MSG_RET_L.call(urls, ObjC.sel('count'))
+      return nil if count == 0
+
+      paths = count.times.map do |i|
+        url = ObjC::MSG_PTR_L.call(urls, ObjC.sel('objectAtIndex:'), i)
+        ns_path = ObjC::MSG_PTR.call(url, ObjC.sel('path'))
+        ObjC.to_ruby_string(ns_path).shellescape
+      end
+      paths.join(' ')
+    end
+
     private
 
     def open_new_window
@@ -1580,6 +1633,11 @@ module Echoes
         view, ObjC.sel('initWithFrame:'),
         0.0, 0.0, win_width, win_height
       )
+
+      # Register for file drag-and-drop
+      file_url_type = ObjC::NSPasteboardTypeFileURL
+      drag_types = ObjC::MSG_PTR_1.call(ObjC.cls('NSArray'), ObjC.sel('arrayWithObject:'), file_url_type)
+      ObjC::MSG_VOID_1.call(@view, ObjC.sel('registerForDraggedTypes:'), drag_types)
 
       # Connect
       ObjC::MSG_VOID_1.call(@window, ObjC.sel('setContentView:'), @view)

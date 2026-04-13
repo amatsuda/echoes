@@ -148,6 +148,7 @@ module Echoes
     NSUnderlineStyleAttributeName      = appkit_const('NSUnderlineStyleAttributeName')
     NSStrikethroughStyleAttributeName  = appkit_const('NSStrikethroughStyleAttributeName')
     NSPasteboardTypeString         = appkit_const('NSPasteboardTypeString')
+    NSPasteboardTypeFileURL        = appkit_const('NSPasteboardTypeFileURL')
 
     # CoreGraphics framework
     COREGRAPHICS = Fiddle.dlopen('/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics')
