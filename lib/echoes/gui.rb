@@ -151,6 +151,7 @@ module Echoes
       ws[:view_height] = @view_height
       ws[:rows] = @rows
       ws[:cols] = @cols
+      ws[:focused] = @window_focused
     end
 
     private def load_window_state(ws)
@@ -170,6 +171,7 @@ module Echoes
       @view_height = ws[:view_height]
       @rows = ws[:rows]
       @cols = ws[:cols]
+      @window_focused = ws.fetch(:focused, true)
     end
 
     private def close_current_window
@@ -1014,35 +1016,45 @@ module Echoes
       elsif pane.scroll_offset == 0 && screen.cursor.visible
         style = screen.cursor_style
         blink = style.odd? || style == 0
-        # Only blink for active pane
-        if !blink || (is_active ? @cursor_blink_on : true)
-          cx = px + screen.cursor.col * @cell_width
-          cy = py + screen.cursor.row * @cell_height
-          cursor_color = is_active ? make_color(*Echoes.config.cursor_color) : make_color(0.5, 0.5, 0.5, 0.3)
-          ObjC::MSG_VOID.call(cursor_color, ObjC.sel('setFill'))
-          case style
-          when 3, 4 # underline
-            ObjC::NSRectFill.call(cx, cy + @cell_height - 2.0, @cell_width, 2.0)
-          when 5, 6 # bar
-            ObjC::NSRectFill.call(cx, cy, 2.0, @cell_height)
-          else # block (0, 1, 2)
-            ObjC::NSRectFill.call(cx, cy, @cell_width, @cell_height)
-            # Draw character under cursor with inverted colors
-            if screen.cursor.row < pane_rows && screen.cursor.col < pane_cols
-              cell = screen.grid[screen.cursor.row][screen.cursor.col]
-              if cell.char != ' '
-                inv_fg = @default_bg
-                cursor_font = cell.bold ? @bold_font : font_for_char(cell.char)
-                ns_attrs = ObjC.nsdict({
-                  ObjC::NSFontAttributeName => cursor_font,
-                  ObjC::NSForegroundColorAttributeName => inv_fg,
-                })
-                ns_char = cached_nsstring(cell.char)
-                dy = cy + y_offset_for_font(cursor_font)
-                ObjC::MSG_VOID_PT_1.call(ns_char, ObjC.sel('drawAtPoint:withAttributes:'), cx, dy, ns_attrs)
+        cx = px + screen.cursor.col * @cell_width
+        cy = py + screen.cursor.row * @cell_height
+
+        if @window_focused
+          # Active window: filled cursor (blinking if requested)
+          if !blink || (is_active ? @cursor_blink_on : true)
+            cursor_color = is_active ? make_color(*Echoes.config.cursor_color) : make_color(0.5, 0.5, 0.5, 0.3)
+            ObjC::MSG_VOID.call(cursor_color, ObjC.sel('setFill'))
+            case style
+            when 3, 4 # underline
+              ObjC::NSRectFill.call(cx, cy + @cell_height - 2.0, @cell_width, 2.0)
+            when 5, 6 # bar
+              ObjC::NSRectFill.call(cx, cy, 2.0, @cell_height)
+            else # block (0, 1, 2)
+              ObjC::NSRectFill.call(cx, cy, @cell_width, @cell_height)
+              # Draw character under cursor with inverted colors
+              if screen.cursor.row < pane_rows && screen.cursor.col < pane_cols
+                cell = screen.grid[screen.cursor.row][screen.cursor.col]
+                if cell.char != ' '
+                  inv_fg = @default_bg
+                  cursor_font = cell.bold ? @bold_font : font_for_char(cell.char)
+                  ns_attrs = ObjC.nsdict({
+                    ObjC::NSFontAttributeName => cursor_font,
+                    ObjC::NSForegroundColorAttributeName => inv_fg,
+                  })
+                  ns_char = cached_nsstring(cell.char)
+                  dy = cy + y_offset_for_font(cursor_font)
+                  ObjC::MSG_VOID_PT_1.call(ns_char, ObjC.sel('drawAtPoint:withAttributes:'), cx, dy, ns_attrs)
+                end
               end
             end
           end
+        else
+          # Inactive window: hollow square outline (no blinking)
+          ObjC::MSG_VOID.call(make_color(*Echoes.config.cursor_color), ObjC.sel('setFill'))
+          ObjC::NSRectFill.call(cx, cy, @cell_width, 1.0)                       # top
+          ObjC::NSRectFill.call(cx, cy + @cell_height - 1.0, @cell_width, 1.0)  # bottom
+          ObjC::NSRectFill.call(cx, cy, 1.0, @cell_height)                      # left
+          ObjC::NSRectFill.call(cx + @cell_width - 1.0, cy, 1.0, @cell_height)  # right
         end
       end
 
@@ -1561,6 +1573,10 @@ module Echoes
     end
 
     def window_focus_changed(focused)
+      @window_focused = focused
+      save_window_state
+      ObjC::MSG_VOID_I.call(@view, ObjC.sel('setNeedsDisplay:'), 1) if @view
+
       tab = current_tab
       pane = tab&.active_pane
       return unless pane&.screen&.focus_reporting?
@@ -1705,6 +1721,7 @@ module Echoes
       @selection_anchor = nil
       @selection_end = nil
       @view_height = nil
+      @window_focused = true
 
       # Register window state
       ws = {}
