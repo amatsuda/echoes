@@ -1119,7 +1119,9 @@ module Echoes
 
       mod = modifier_param(flags)
 
-      if mod > 1 && (seq = map_modified_key(chars, mod))
+      if chars == "\u{19}"  # NSBackTabCharacter (Shift+Tab on macOS)
+        pane.pty_write.write("\e[Z")
+      elsif mod > 1 && (seq = map_modified_key(chars, mod))
         pane.pty_write.write(seq)
       elsif (flags & ObjC::NSEventModifierFlagControl) != 0
         ctrl_char = (chars[0].ord & 0x1F).chr
