@@ -7,9 +7,10 @@ module Echoes
     attr_accessor :screen, :parser, :pty_read, :pty_write, :pty_pid,
                   :scroll_offset, :scroll_accum, :title, :copy_mode
 
-    def initialize(command:, rows:, cols:)
+    def initialize(command:, rows:, cols:, cwd: nil)
       @screen = Screen.new(rows: rows, cols: cols)
-      Dir.chdir(Dir.home) do
+      start_dir = (cwd && Dir.exist?(cwd)) ? cwd : Dir.home
+      Dir.chdir(start_dir) do
         ENV['TERM'] = Echoes.config.term
         ENV['LANG'] ||= 'en_US.UTF-8'
         ENV['LC_CTYPE'] = 'UTF-8'

@@ -5,11 +5,11 @@ module Echoes
     attr_reader :pane_tree
     attr_accessor :title
 
-    def initialize(command:, rows:, cols:)
+    def initialize(command:, rows:, cols:, cwd: nil)
       @command = command
       @rows = rows
       @cols = cols
-      pane = Pane.new(command: command, rows: rows, cols: cols)
+      pane = Pane.new(command: command, rows: rows, cols: cols, cwd: cwd)
       @pane_tree = PaneTree.new(pane)
       @title = pane.title
     end

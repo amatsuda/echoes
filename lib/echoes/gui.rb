@@ -2,6 +2,8 @@
 
 require 'pty'
 require 'shellwords'
+require 'socket'
+require 'uri'
 
 module Echoes
   class GUI
@@ -68,7 +70,8 @@ module Echoes
     end
 
     def create_tab
-      tab = Tab.new(command: @command, rows: @rows, cols: @cols)
+      cwd = self.class.pane_local_cwd(current_tab&.active_pane)
+      tab = Tab.new(command: @command, rows: @rows, cols: @cols, cwd: cwd)
       tab.title = "Tab #{@tabs.size + 1}"
       tab.panes.each do |pane|
         if @cell_width && @cell_height
@@ -79,6 +82,28 @@ module Echoes
       end
       @tabs << tab
       @active_tab = @tabs.size - 1
+    end
+
+    # Convert the active pane's OSC 7 `current_directory` URI into a local
+    # filesystem path, or return nil if it isn't a usable local path
+    # (missing, malformed, points at a remote host, or doesn't exist).
+    def self.pane_local_cwd(pane)
+      uri_str = pane&.screen&.current_directory
+      cwd_from_osc7_uri(uri_str)
+    end
+
+    def self.cwd_from_osc7_uri(uri_str)
+      return nil if uri_str.nil? || uri_str.empty?
+      uri = URI.parse(uri_str) rescue nil
+      return nil unless uri && uri.scheme == 'file'
+      host = uri.host.to_s
+      local_host = Socket.gethostname
+      unless host.empty? || host == 'localhost' ||
+             host == local_host || host == local_host.split('.').first
+        return nil
+      end
+      path = URI.decode_www_form_component(uri.path) rescue nil
+      path if path && !path.empty? && Dir.exist?(path)
     end
 
     def close_tab(index)

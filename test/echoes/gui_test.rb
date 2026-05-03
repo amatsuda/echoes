@@ -74,3 +74,41 @@ class Echoes::GUIFileDropTest < Test::Unit::TestCase
     assert_equal("/tmp/file\\(1\\).txt", result)
   end
 end
+
+class Echoes::GUICwdFromOsc7UriTest < Test::Unit::TestCase
+  test "returns nil for nil or empty input" do
+    assert_nil(Echoes::GUI.cwd_from_osc7_uri(nil))
+    assert_nil(Echoes::GUI.cwd_from_osc7_uri(""))
+  end
+
+  test "returns the path for file://localhost/<existing path>" do
+    assert_equal("/tmp", Echoes::GUI.cwd_from_osc7_uri("file://localhost/tmp"))
+  end
+
+  test "returns the path for file:///<existing path> (empty host)" do
+    assert_equal("/tmp", Echoes::GUI.cwd_from_osc7_uri("file:///tmp"))
+  end
+
+  test "URL-decodes percent-encoded path components" do
+    Dir.mktmpdir("echoes test ") do |dir|
+      encoded = "file://localhost" + dir.gsub(' ', '%20')
+      assert_equal(dir, Echoes::GUI.cwd_from_osc7_uri(encoded))
+    end
+  end
+
+  test "returns nil for non-file scheme" do
+    assert_nil(Echoes::GUI.cwd_from_osc7_uri("http://localhost/tmp"))
+  end
+
+  test "returns nil for a remote host" do
+    assert_nil(Echoes::GUI.cwd_from_osc7_uri("file://other-host.example.com/tmp"))
+  end
+
+  test "returns nil for a path that does not exist locally" do
+    assert_nil(Echoes::GUI.cwd_from_osc7_uri("file:///nonexistent-#{rand(1 << 30)}"))
+  end
+
+  test "returns nil for a malformed URI" do
+    assert_nil(Echoes::GUI.cwd_from_osc7_uri("file://[bad"))
+  end
+end
