@@ -75,6 +75,52 @@ class Echoes::GUIFileDropTest < Test::Unit::TestCase
   end
 end
 
+class Echoes::GUIOpenNewWindowTest < Test::Unit::TestCase
+  # Regression: pressing cmd+n used to open a blank window with no shell
+  # rendering. makeKeyAndOrderFront: on the new window synchronously fires
+  # NSWindowDidResignKeyNotification on the previously-key window, whose
+  # observer is its NSView. That handler called activate_for_view, which
+  # reset @view back to the old window's view mid-construction. The new ws
+  # then got registered under the OLD view's pointer, overwriting the
+  # existing mapping; the new view was never invalidated, so the window
+  # stayed blank.
+  test "open_new_window: each new window's view is uniquely registered in @view_to_ws" do
+    gui = Echoes::GUI.new(command: '/bin/cat', rows: 24, cols: 80, font_size: 12.0)
+    gui.setup_app
+    gui.create_fonts
+    gui.create_view_class
+    gui.send(:open_new_window)
+    gui.send(:open_new_window)
+
+    window_states = gui.instance_variable_get(:@window_states)
+    view_to_ws = gui.instance_variable_get(:@view_to_ws)
+
+    assert_equal(2, window_states.size, "two open_new_window calls should produce two ws entries")
+    assert_equal(2, view_to_ws.size, "two open_new_window calls should produce two view->ws mappings")
+
+    view_ptrs = window_states.map { |ws| ws[:nsview].to_i }
+    assert_equal(view_ptrs.size, view_ptrs.uniq.size, "windows must have distinct view pointers")
+
+    window_states.each do |ws|
+      assert_equal(ws, view_to_ws[ws[:nsview].to_i],
+                   "each ws[:nsview] must map back to the same ws via @view_to_ws")
+    end
+  ensure
+    # Hide windows and reap shell processes so the test doesn't leak PTYs or
+    # leave windows on screen.
+    if defined?(window_states) && window_states
+      window_states.each do |ws|
+        ws[:tabs]&.each(&:close)
+        if ws[:nswindow]
+          Echoes::ObjC::MSG_VOID_1.call(ws[:nswindow], Echoes::ObjC.sel('orderOut:'),
+                                         Fiddle::Pointer.new(0)) rescue nil
+        end
+      end
+    end
+  end
+
+end
+
 class Echoes::GUICwdFromOsc7UriTest < Test::Unit::TestCase
   test "returns nil for nil or empty input" do
     assert_nil(Echoes::GUI.cwd_from_osc7_uri(nil))

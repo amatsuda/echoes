@@ -1283,8 +1283,8 @@ module Echoes
             end
           rescue IO::WaitReadable
             # No more data for this pane
-          rescue EOFError, Errno::EIO
-            # Pane's process exited — will be cleaned up
+          rescue EOFError, Errno::EIO, IOError
+            # Pane's process exited or stream was closed — will be cleaned up
           end
           if need_redraw && pane.screen.title
             tab.title = pane.screen.title if pane == tab.active_pane
@@ -1643,50 +1643,56 @@ module Echoes
         pane.screen.clipboard_handler = method(:handle_clipboard)
       end
 
-      # Create NSWindow
+      # Build window and view in locals — DO NOT touch @window / @view yet.
+      # makeKeyAndOrderFront: below fires NSWindowDidResignKeyNotification on
+      # the previously-key window synchronously; that handler calls
+      # activate_for_view, which would mutate @view mid-construction and
+      # corrupt the window-state mapping. Keeping the new pointers in locals
+      # lets the focus handler operate on the OLD window's state safely.
       win_width = @cell_width * @cols
       win_height = @cell_height * @rows
-      win = ObjC::MSG_PTR.call(ObjC.cls('NSWindow'), ObjC.sel('alloc'))
-      @window = ObjC::MSG_PTR_RECT_L_L_I.call(
-        win, ObjC.sel('initWithContentRect:styleMask:backing:defer:'),
+      new_window = ObjC::MSG_PTR.call(ObjC.cls('NSWindow'), ObjC.sel('alloc'))
+      new_window = ObjC::MSG_PTR_RECT_L_L_I.call(
+        new_window, ObjC.sel('initWithContentRect:styleMask:backing:defer:'),
         0.0, 0.0, win_width, win_height,
         ObjC::NSWindowStyleMaskDefault,
         ObjC::NSBackingStoreBuffered,
         0
       )
-      ObjC::MSG_VOID_1.call(@window, ObjC.sel('setTitle:'), ObjC.nsstring(Echoes.config.window_title))
-      ObjC::MSG_VOID_L.call(@window, ObjC.sel('setCollectionBehavior:'), 1 << 7)
+      ObjC::MSG_VOID_1.call(new_window, ObjC.sel('setTitle:'), ObjC.nsstring(Echoes.config.window_title))
+      ObjC::MSG_VOID_L.call(new_window, ObjC.sel('setCollectionBehavior:'), 1 << 7)
 
-      # Create NSView
-      view = ObjC::MSG_PTR.call(@view_class, ObjC.sel('alloc'))
-      @view = ObjC::MSG_PTR_RECT.call(
-        view, ObjC.sel('initWithFrame:'),
+      new_view = ObjC::MSG_PTR.call(@view_class, ObjC.sel('alloc'))
+      new_view = ObjC::MSG_PTR_RECT.call(
+        new_view, ObjC.sel('initWithFrame:'),
         0.0, 0.0, win_width, win_height
       )
 
       # Register for file drag-and-drop
-      file_url_type = ObjC::NSPasteboardTypeFileURL
-      drag_types = ObjC::MSG_PTR_1.call(ObjC.cls('NSArray'), ObjC.sel('arrayWithObject:'), file_url_type)
-      ObjC::MSG_VOID_1.call(@view, ObjC.sel('registerForDraggedTypes:'), drag_types)
+      drag_types = ObjC::MSG_PTR_1.call(ObjC.cls('NSArray'), ObjC.sel('arrayWithObject:'), ObjC::NSPasteboardTypeFileURL)
+      ObjC::MSG_VOID_1.call(new_view, ObjC.sel('registerForDraggedTypes:'), drag_types)
 
-      # Connect
-      ObjC::MSG_VOID_1.call(@window, ObjC.sel('setContentView:'), @view)
-      ObjC::MSG_VOID_1.call(@window, ObjC.sel('makeKeyAndOrderFront:'), @app)
-      ObjC::MSG_VOID_1.call(@window, ObjC.sel('makeFirstResponder:'), @view)
+      # Connect view to window and show it. makeKeyAndOrderFront: triggers a
+      # focus_lost handler on the prior key window that may call
+      # activate_for_view; using locals here keeps it from mutating @view.
+      ObjC::MSG_VOID_1.call(new_window, ObjC.sel('setContentView:'), new_view)
+      ObjC::MSG_VOID_1.call(new_window, ObjC.sel('makeKeyAndOrderFront:'), @app)
+      ObjC::MSG_VOID_1.call(new_window, ObjC.sel('makeFirstResponder:'), new_view)
       ObjC::MSG_VOID_I.call(@app, ObjC.sel('activateIgnoringOtherApps:'), 1)
+      ObjC::MSG_VOID.call(new_window, ObjC.sel('center'))
 
-      ObjC::MSG_VOID.call(@window, ObjC.sel('center'))
-
-      # Focus notifications
+      # Focus notification observers (target the new view + new window)
       nc = ObjC::MSG_PTR.call(ObjC.cls('NSNotificationCenter'), ObjC.sel('defaultCenter'))
       ObjC::MSG_VOID_4.call(nc, ObjC.sel('addObserver:selector:name:object:'),
-        @view, ObjC.sel('windowDidBecomeKey:'),
-        ObjC.nsstring('NSWindowDidBecomeKeyNotification'), @window)
+        new_view, ObjC.sel('windowDidBecomeKey:'),
+        ObjC.nsstring('NSWindowDidBecomeKeyNotification'), new_window)
       ObjC::MSG_VOID_4.call(nc, ObjC.sel('addObserver:selector:name:object:'),
-        @view, ObjC.sel('windowDidResignKey:'),
-        ObjC.nsstring('NSWindowDidResignKeyNotification'), @window)
+        new_view, ObjC.sel('windowDidResignKey:'),
+        ObjC.nsstring('NSWindowDidResignKeyNotification'), new_window)
 
-      # Set per-window state
+      # Now adopt the new window/view as the active state
+      @window = new_window
+      @view = new_view
       @tabs = [tab]
       @active_tab = 0
       @search_mode = false
