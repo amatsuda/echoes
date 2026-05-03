@@ -828,18 +828,21 @@ module Echoes
 
           fg_val = cell.fg
           bg_val = cell.bg
+          default_fg = @default_fg
+          default_bg = @default_bg
           if cell.inverse
             fg_val, bg_val = bg_val, fg_val
+            default_fg, default_bg = default_bg, default_fg
           end
 
-          fg_color = resolve_color(fg_val, @default_fg)
-          bg_color = resolve_color(bg_val, @default_bg)
+          fg_color = resolve_color(fg_val, default_fg)
+          bg_color = resolve_color(bg_val, default_bg)
 
           if cell.bold && fg_val.is_a?(Integer) && fg_val < 8
             fg_color = @colors[fg_val + 8]
           end
 
-          has_bg = !bg_val.nil?
+          has_bg = !bg_val.nil? || cell.inverse
 
           selected = is_active && cell_selected?(src, c)
           is_match = is_active && @search_mode && search_match_at?(src, c)
