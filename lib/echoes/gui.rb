@@ -148,7 +148,6 @@ module Echoes
       ws[:current_event] = @current_event
       ws[:selection_anchor] = @selection_anchor
       ws[:selection_end] = @selection_end
-      ws[:view_height] = @view_height
       ws[:rows] = @rows
       ws[:cols] = @cols
       ws[:focused] = @window_focused
@@ -168,7 +167,6 @@ module Echoes
       @current_event = ws[:current_event]
       @selection_anchor = ws[:selection_anchor]
       @selection_end = ws[:selection_end]
-      @view_height = ws[:view_height]
       @rows = ws[:rows]
       @cols = ws[:cols]
       @window_focused = ws.fetch(:focused, true)
@@ -1556,7 +1554,6 @@ module Echoes
     end
 
     def handle_resize(w, h)
-      @view_height = h
       tbh = tab_bar_height
       grid_height = h - tbh
 
@@ -1720,7 +1717,6 @@ module Echoes
       @current_event = nil
       @selection_anchor = nil
       @selection_end = nil
-      @view_height = nil
       @window_focused = true
 
       # Register window state
@@ -1857,8 +1853,7 @@ module Echoes
 
     def grid_position(event_ptr)
       x, y_in_window = event_location(event_ptr)
-      view_height = @view_height || (tab_bar_height + @rows * @cell_height)
-      y = view_height - y_in_window
+      y = view_frame_height - y_in_window
       gy_off = grid_y_offset
       grid_y = y - gy_off
       return nil if grid_y < 0 || grid_y >= @rows * @cell_height
@@ -2075,6 +2070,19 @@ module Echoes
       return col <= ec if row == er
 
       true
+    end
+
+    # NSView's frame.size.height in points. Querying live (rather than caching
+    # @view_height) avoids a class of bugs where the cached value got out of
+    # sync after macOS state restoration resized the window asynchronously.
+    def view_frame_height
+      buf = Fiddle::Pointer.malloc(32, Fiddle::RUBY_FREE)
+      sig = ObjC::MSG_PTR_1.call(ObjC.cls('NSView'), ObjC.sel('instanceMethodSignatureForSelector:'), ObjC.sel('frame'))
+      inv = ObjC::MSG_PTR_1.call(ObjC.cls('NSInvocation'), ObjC.sel('invocationWithMethodSignature:'), sig)
+      ObjC::MSG_VOID_1.call(inv, ObjC.sel('setSelector:'), ObjC.sel('frame'))
+      ObjC::MSG_VOID_1.call(inv, ObjC.sel('invokeWithTarget:'), @view)
+      ObjC::MSG_VOID_1.call(inv, ObjC.sel('getReturnValue:'), buf)
+      buf[0, 32].unpack('d4')[3]
     end
 
     # Extract NSPoint (x, y) from [event locationInWindow] via NSInvocation
