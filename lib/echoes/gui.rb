@@ -2078,8 +2078,8 @@ module Echoes
       descender = ObjC::MSG_RET_D.call(@font, ObjC.sel('descender'))
       leading = ObjC::MSG_RET_D.call(@font, ObjC.sel('leading'))
       @cell_height = ascender - descender + leading
-      @font_ascender = ascender
-      @font_y_offset_cache = {} if @font_y_offset_cache
+      @font_default_line_height = ObjC::MSG_RET_D.call(@font, ObjC.sel('defaultLineHeightForFont'))
+      @font_y_offset_cache = {}
 
       # Propagate cell metrics to all pane screens for sixel sizing
       @window_states.each do |ws|
@@ -2109,12 +2109,18 @@ module Echoes
       @font_cache[char]
     end
 
+    # AppKit's NSString drawing positions the line box using
+    # defaultLineHeightForFont, which can differ between regular and bold
+    # variants of the same font (e.g. PlemolJP35 Console NF: regular=24, bold=29).
+    # That difference shifts the bold baseline downward versus regular by
+    # `bold_lh - regular_lh` points. Compensate by shifting the draw origin
+    # by the negative of that difference so all baselines coincide.
     def y_offset_for_font(font)
       return 0.0 if font.to_i == @font.to_i
       cached = @font_y_offset_cache[font.to_i]
       return cached if cached
-      asc = ObjC::MSG_RET_D.call(font, ObjC.sel('ascender'))
-      @font_y_offset_cache[font.to_i] = @font_ascender - asc
+      font_lh = ObjC::MSG_RET_D.call(font, ObjC.sel('defaultLineHeightForFont'))
+      @font_y_offset_cache[font.to_i] = @font_default_line_height - font_lh
     end
 
     MODIFIED_KEYS = {
