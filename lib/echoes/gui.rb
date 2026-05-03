@@ -268,6 +268,11 @@ module Echoes
       add_separator(window_menu)
       add_menu_item(window_menu, "Toggle Copy Mode", 'toggleCopyMode:', 'c',
                     modifiers: ObjC::NSEventModifierFlagCommand | ObjC::NSEventModifierFlagShift)
+      add_separator(window_menu)
+      # Register the menu as NSApplication's "windows menu"; AppKit
+      # auto-populates it with one item per NSWindow (using the window's
+      # title) and handles activation when an item is selected.
+      ObjC::MSG_VOID_1.call(@app, ObjC.sel('setWindowsMenu:'), window_menu)
       add_submenu(main_menu, window_menu, 'Window')
 
       # Shell menu
