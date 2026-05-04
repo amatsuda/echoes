@@ -164,6 +164,22 @@ class Echoes::EmbeddedShellTest < Test::Unit::TestCase
     end
   end
 
+  test "pending_sentinel_prefix_len holds back only true sentinel prefixes" do
+    # The whole point: chunks that don't end in a sentinel-prefix flush
+    # entirely. Previously we held back the last 6 bytes of every chunk,
+    # which corrupted the parser when an OSC 7 ended in the held-back
+    # window — `...echoes\e\\` got split, leaving "hoes" stuck until
+    # later bytes finally flushed it (in the wrong parser state).
+    assert_equal 0, @shell.send(:pending_sentinel_prefix_len, "\e]7;file:///path/echoes\e\\")
+    assert_equal 0, @shell.send(:pending_sentinel_prefix_len, "plain text\r\n")
+    # Genuine sentinel-prefix at the tail must be held back.
+    assert_equal 1, @shell.send(:pending_sentinel_prefix_len, "abc\e")
+    assert_equal 2, @shell.send(:pending_sentinel_prefix_len, "abc\e]")
+    assert_equal 6, @shell.send(:pending_sentinel_prefix_len, "abc\e]7771")
+    # Empty input → nothing to hold back.
+    assert_equal 0, @shell.send(:pending_sentinel_prefix_len, "")
+  end
+
   test "submit_line returns immediately while the command runs" do
     # Async contract: the call site shouldn't block. We give the
     # command a short sleep so we have a window to inspect state in.

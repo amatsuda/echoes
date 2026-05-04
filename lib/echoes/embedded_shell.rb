@@ -73,9 +73,13 @@ module Echoes
       @sentinel_seen = false
       @reader = Thread.new(@master) do |m|
         # Accumulator handles a sentinel that straddles two chunks.
-        # Anything older than `DONE_SENTINEL.bytesize - 1` from the tail
-        # is safe to flush; the rest stays back for next-iteration
-        # overlap detection.
+        # After splitting on any complete sentinels, hold back ONLY the
+        # bytes at the tail of `acc` that match a prefix of the sentinel
+        # — anything else is safe to flush right away. Holding back
+        # blindly (e.g. always the last N-1 bytes) corrupts the host's
+        # parser when a long OSC sequence happens to end inside that
+        # window: the trailing bytes get released much later, by which
+        # time the parser has moved on and renders them as text.
         acc = +''
         begin
           loop do
@@ -87,7 +91,7 @@ module Echoes
               acc = acc[(idx + DONE_SENTINEL.bytesize)..] || +''
               @sentinel_seen = true
             end
-            keep = DONE_SENTINEL.bytesize - 1
+            keep = pending_sentinel_prefix_len(acc)
             if acc.bytesize > keep
               flush_n = acc.bytesize - keep
               @output_lock.synchronize { @output_buffer << acc.byteslice(0, flush_n) }
@@ -257,6 +261,18 @@ module Echoes
     # over a value object so colorize_input doesn't need to know it
     # came across a pipe.
     TokenView = Struct.new(:type, :value)
+
+    # Longest tail of `acc` that's also a prefix of DONE_SENTINEL —
+    # i.e. how many bytes might be the start of a sentinel that
+    # crosses into the next pty chunk. 0 if the tail can't possibly
+    # be a sentinel prefix, so the whole acc is safe to flush.
+    def pending_sentinel_prefix_len(acc)
+      max = [DONE_SENTINEL.bytesize - 1, acc.bytesize].min
+      max.downto(1) do |n|
+        return n if DONE_SENTINEL.byteslice(0, n) == acc.byteslice(-n, n)
+      end
+      0
+    end
 
     def handle_control_line(line)
       msg = JSON.parse(line) rescue nil
