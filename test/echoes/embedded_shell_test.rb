@@ -146,6 +146,72 @@ class Echoes::EmbeddedShellTest < Test::Unit::TestCase
     assert @shell.running?, "command should still be running"
     @shell.submit_and_wait("true")  # waits for the prior sleep too
   end
+
+  # --- ctty_safe? classifier (used by Ctrl-C support) ---
+
+  test "ctty_safe? is true for a single external command" do
+    assert @shell.ctty_safe?("ls")
+    assert @shell.ctty_safe?("/bin/sleep 0.1")
+    assert @shell.ctty_safe?("echo hi")
+  end
+
+  test "ctty_safe? is true for a command with redirects" do
+    assert @shell.ctty_safe?("ls > /tmp/x")
+    assert @shell.ctty_safe?("cat < /tmp/x")
+    assert @shell.ctty_safe?("ls 2> /tmp/err")
+  end
+
+  test "ctty_safe? is false for a pipeline" do
+    refute @shell.ctty_safe?("ls | grep foo")
+    refute @shell.ctty_safe?("cat | sort | uniq")
+  end
+
+  test "ctty_safe? is false for sequenced commands" do
+    refute @shell.ctty_safe?("echo hi; echo bye")
+    refute @shell.ctty_safe?("ls && echo ok")
+    refute @shell.ctty_safe?("ls || echo nope")
+  end
+
+  test "ctty_safe? is false for control structures" do
+    refute @shell.ctty_safe?("for i in 1 2 3; do echo $i; done")
+    refute @shell.ctty_safe?("while true; do echo hi; done")
+    refute @shell.ctty_safe?("if true; then echo x; fi")
+  end
+
+  test "ctty_safe? is false for empty / unparseable input" do
+    refute @shell.ctty_safe?("")
+    refute @shell.ctty_safe?("if true; then")  # incomplete
+  end
+
+  test "Ctrl-C interrupts a simple long-running external command" do
+    # Without the ctty hook, ETX → SIGINT routing has no foreground
+    # process group on the slave to deliver to. With the hook, the
+    # forked sleep is its own session leader with the slave as its
+    # ctty, so SIGINT reaches it.
+    t0 = Time.now
+    @shell.submit_line("/bin/sleep 5")
+    sleep 0.1
+    @shell.interrupt
+    deadline = Time.now + 3
+    sleep 0.05 while @shell.running? && Time.now < deadline
+    @shell.reap_if_done
+    elapsed = Time.now - t0
+    refute @shell.running?, "sleep should have exited after SIGINT"
+    assert_operator elapsed, :<, 2,
+      "expected sleep to exit promptly after Ctrl-C; took #{elapsed}s"
+  end
+
+  test "loops still work (don't claim ctty, so they're not broken by it)" do
+    # Regression guard for the "first session-leader child exits →
+    # kernel hangs the pty" pathology that broke loops in the previous
+    # naive ctty-claim attempt. The classifier now returns false for
+    # loops so the hook is a no-op.
+    @shell.submit_and_wait("for i in 1 2 3; do echo iter $i; done")
+    out = @shell.read_available_output
+    assert_includes out, "iter 1"
+    assert_includes out, "iter 2"
+    assert_includes out, "iter 3"
+  end
 end
 
 class Echoes::EmbeddedPaneTest < Test::Unit::TestCase

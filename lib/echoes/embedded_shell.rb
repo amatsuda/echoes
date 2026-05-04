@@ -27,6 +27,7 @@ module Echoes
   class EmbeddedShell
     def initialize
       require 'rubish'
+      require 'rubish/runtime/command'
       @repl = Rubish::REPL.new(no_rc: true)
       @output_buffer = +''
       @output_lock = Mutex.new
@@ -37,6 +38,60 @@ module Echoes
       # user can override by setting a value before launching Echoes.
       ENV['GIT_PAGER'] ||= 'cat'
       ENV['PAGER'] ||= 'cat'
+      install_child_pre_exec_hook
+    end
+
+    # macOS TIOCSCTTY ioctl request. Sent by the forked child against
+    # FD 0 (= the pty slave) to claim it as the controlling tty for
+    # the new session. With ctty in place, ETX bytes the host writes
+    # to the master side become SIGINT delivered to the child's
+    # foreground process group.
+    TIOCSCTTY_DARWIN = 0x20007461
+
+    # Install (once) a class-level Rubish::Command hook that
+    # runs in the forked child between fork() and exec(). The hook
+    # checks a thread-local flag the parent set just before forking;
+    # if true, it makes the child a session leader and claims the
+    # pty slave (already its FD 0) as the controlling tty.
+    #
+    # Why thread-local rather than baking the behavior in: multiple
+    # Echoes panes can submit commands concurrently and they may want
+    # different ctty policies (single command → ctty, loop/pipeline →
+    # no ctty). Each command thread sets the flag for its own fork.
+    # Children inherit the parent thread's locals, so the hook reads
+    # the correct policy for that command.
+    def install_child_pre_exec_hook
+      Rubish::Command.child_pre_exec_hook ||= ->{
+        next unless Thread.current[:echoes_claim_ctty]
+        Process.setsid rescue nil
+        STDIN.ioctl(TIOCSCTTY_DARWIN, 0) rescue nil
+      }
+    end
+
+    # Should this line use the per-command ctty trick? Yes only when
+    # rubish will fork exactly once — anything that forks twice (loop,
+    # pipeline, sequence, conditional, subshell) hits the "first
+    # session-leader child exits → kernel hangs the pty" problem and
+    # subsequent forks can't write back. Backgrounded commands skip
+    # ctty too: the user wants detachment, and putting them in their
+    # own session disrupts the normal & semantics.
+    def ctty_safe?(line)
+      ast = @repl.parse_ast(line)
+      return false unless ast
+      single_fork_ast?(ast)
+    end
+
+    def single_fork_ast?(node)
+      case node
+      when Rubish::AST::Command
+        true
+      when Rubish::AST::Redirect, Rubish::AST::VarnameRedirect,
+           Rubish::AST::Heredoc, Rubish::AST::Herestring,
+           Rubish::AST::Negation, Rubish::AST::Time
+        single_fork_ast?(node.command)
+      else
+        false
+      end
     end
 
     # Kick off a command line. Returns immediately. Use #running? to
@@ -92,7 +147,13 @@ module Echoes
       # sees it.
       Reline::HISTORY << line unless line.empty? || line.strip.empty?
 
+      claim_ctty = ctty_safe?(line)
       @command_thread = Thread.new do
+        # The pre-exec hook reads this flag in the forked child to
+        # decide whether to setsid + claim the pty as ctty. It must
+        # be set on this thread *before* rubish forks — children
+        # inherit the parent thread's locals.
+        Thread.current[:echoes_claim_ctty] = claim_ctty
         begin
           @repl.send(:execute, line)
           STDOUT.flush rescue nil
