@@ -25,6 +25,8 @@ module Echoes
         @title = 'rubish'
         @input_buffer = +''
         @embedded_running = false
+        @history_index = nil  # nil = not browsing; integer = browsing
+        @history_saved = nil  # input held aside while browsing
       else
         start_dir = (cwd && Dir.exist?(cwd)) ? cwd : Dir.home
         Dir.chdir(start_dir) do
@@ -151,17 +153,25 @@ module Echoes
       when "\r", "\n"
         line = @input_buffer
         @input_buffer = +''
+        @history_index = nil
+        @history_saved = nil
         process_output("\r\n")
-        @embedded_shell.submit_line(line)
+        @embedded_shell.submit_line(line, rows: @screen.rows, cols: @screen.cols)
         @embedded_running = true
       when "\u{7F}", "\b"
         unless @input_buffer.empty?
           @input_buffer.chop!
           process_output("\b \b")
         end
+      when "\u{F700}"  # NSUpArrowFunctionKey
+        history_step(-1)
+      when "\u{F701}"  # NSDownArrowFunctionKey
+        history_step(1)
       else
         first = chars.bytes.first
         if first && first >= 0x20
+          @history_index = nil  # editing ends history-walk mode
+          @history_saved = nil
           @input_buffer << chars
           process_output(chars)
         end
@@ -173,6 +183,39 @@ module Echoes
 
     def render_initial_prompt
       process_output(@embedded_shell.prompt.to_s)
+    end
+
+    # ↑/↓ history navigation. step is -1 (older) or +1 (newer).
+    def history_step(step)
+      hist = @embedded_shell.history
+      return if hist.empty?
+
+      if @history_index.nil?
+        return if step > 0  # already at "current input", down-arrow no-op
+        @history_saved = @input_buffer.dup
+        @history_index = hist.size  # one past last; about to decrement
+      end
+
+      new_index = @history_index + step
+      if new_index < 0
+        return  # already at oldest
+      elsif new_index >= hist.size
+        # past the newest entry → restore the user's saved in-progress input
+        replace_input_buffer(@history_saved || '')
+        @history_index = nil
+        @history_saved = nil
+      else
+        @history_index = new_index
+        replace_input_buffer(hist[@history_index] || '')
+      end
+    end
+
+    # Erase the currently-displayed input line and replace it with
+    # `new_line`, both in the buffer and on the screen.
+    def replace_input_buffer(new_line)
+      process_output("\b \b" * @input_buffer.length)
+      @input_buffer = +new_line
+      process_output(new_line)
     end
   end
 end

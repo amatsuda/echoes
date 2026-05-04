@@ -99,6 +99,25 @@ class Echoes::EmbeddedShellTest < Test::Unit::TestCase
     assert_equal "5000", lines.last
   end
 
+  test "submit_and_wait sets the pty winsize so programs see the right dimensions" do
+    @shell.submit_and_wait("/usr/bin/tput cols", rows: 30, cols: 132)
+    out = @shell.read_available_output.strip
+    assert_equal "132", out
+  end
+
+  test "submit_line appends the line to history" do
+    before = @shell.history.dup
+    @shell.submit_and_wait("echo hi")
+    assert_equal before + ["echo hi"], @shell.history
+  end
+
+  test "submit_line ignores empty/blank input for history" do
+    before = @shell.history.dup
+    @shell.submit_and_wait("")
+    @shell.submit_and_wait("   ")
+    assert_equal before, @shell.history
+  end
+
   test "submit_line returns immediately while the command runs" do
     # Async contract: the call site shouldn't block. We give the
     # command a short sleep so we have a window to inspect state in.
@@ -161,6 +180,34 @@ class Echoes::EmbeddedPaneTest < Test::Unit::TestCase
     assert_includes rows, "hi"
     # New prompt should appear after the output
     assert_match(/\$\s*$/, rows.last)
+  end
+
+  test "up arrow pulls the previous history entry into the input line" do
+    "echo first".chars.each { |c| @pane.handle_key(chars: c) }
+    @pane.handle_key(chars: "\r")
+    settle
+    "echo second".chars.each { |c| @pane.handle_key(chars: c) }
+    @pane.handle_key(chars: "\r")
+    settle
+    # browse with ↑
+    @pane.handle_key(chars: "\u{F700}")
+    rows = grid_rows
+    # The current prompt line should now show "echo second" (most recent)
+    assert_match(/echo second\z/, rows.last)
+    @pane.handle_key(chars: "\u{F700}")
+    rows = grid_rows
+    assert_match(/echo first\z/, rows.last)
+  end
+
+  test "down arrow at the newest entry restores the in-progress input" do
+    "echo prior".chars.each { |c| @pane.handle_key(chars: c) }
+    @pane.handle_key(chars: "\r")
+    settle
+    "in-progress".chars.each { |c| @pane.handle_key(chars: c) }
+    @pane.handle_key(chars: "\u{F700}")  # ↑ → "echo prior"
+    @pane.handle_key(chars: "\u{F701}")  # ↓ → restore "in-progress"
+    rows = grid_rows
+    assert_match(/in-progress\z/, rows.last)
   end
 
   test "backspace pops the input buffer and erases the last cell" do

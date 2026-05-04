@@ -44,10 +44,16 @@ module Echoes
     # check status, #read_available_output to stream output, and
     # #reap_if_done from the main thread to finalize when the command
     # has exited.
-    def submit_line(line)
+    #
+    # `rows:` / `cols:` set the pty winsize so programs that query
+    # terminal dimensions (vim, less, top, anything that calls
+    # `tcgetwinsize`) see the actual window size, not the kernel
+    # default of 24x80.
+    def submit_line(line, rows: 24, cols: 80)
       return if running?
 
       master, slave = PTY.open
+      slave.winsize = [rows, cols] rescue nil
       @master = master
       @slave  = slave
 
@@ -81,6 +87,12 @@ module Echoes
       $stderr = STDERR
       $stdin  = STDIN
 
+      # Bypassing rubish's process_line means we also bypass its
+      # history-append. Add the entry ourselves so up/down arrows in
+      # Echoes' line editor work, and so rubish's `history` builtin
+      # sees it.
+      Reline::HISTORY << line unless line.empty? || line.strip.empty?
+
       @command_thread = Thread.new do
         begin
           @repl.send(:execute, line)
@@ -92,6 +104,12 @@ module Echoes
           end
         end
       end
+    end
+
+    # Frozen snapshot of the command history (oldest first). Most-recent
+    # is the last element.
+    def history
+      Reline::HISTORY.to_a
     end
 
     def running?
@@ -158,8 +176,8 @@ module Echoes
     # Submit and block until the command exits. The async submit_line
     # is what the GUI uses; this helper is for scripts and tests that
     # don't have a tick loop.
-    def submit_and_wait(line, timeout: 30)
-      submit_line(line)
+    def submit_and_wait(line, rows: 24, cols: 80, timeout: 30)
+      submit_line(line, rows: rows, cols: cols)
       deadline = Time.now + timeout
       while running?
         if Time.now > deadline
