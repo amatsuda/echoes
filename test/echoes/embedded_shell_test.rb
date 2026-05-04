@@ -854,6 +854,40 @@ class Echoes::EmbeddedPaneTest < Test::Unit::TestCase
     assert_equal 0, @pane.scroll_offset
   end
 
+  test "last_command_output_text returns the output of the most recent completed command" do
+    "echo hello".chars.each { |c| @pane.handle_key(chars: c) }
+    @pane.handle_key(chars: "\r")
+    settle
+    out = @pane.last_command_output_text
+    assert_not_nil out
+    assert_match(/hello/, out)
+  end
+
+  test "last_command_output_text is nil before any command finishes" do
+    assert_nil @pane.last_command_output_text
+  end
+
+  test "copy_last_command_output dispatches through the screen's clipboard handler" do
+    captured = nil
+    @pane.screen.clipboard_handler = ->(action, text) { captured = [action, text] }
+    "echo clipme".chars.each { |c| @pane.handle_key(chars: c) }
+    @pane.handle_key(chars: "\r")
+    settle
+    assert @pane.copy_last_command_output
+    assert_equal :set, captured.first
+    assert_match(/clipme/, captured.last)
+  end
+
+  test "Cmd+Shift+O at the prompt copies last command output" do
+    captured = nil
+    @pane.screen.clipboard_handler = ->(_action, text) { captured = text }
+    "echo shortcut-test".chars.each { |c| @pane.handle_key(chars: c) }
+    @pane.handle_key(chars: "\r")
+    settle
+    @pane.handle_key(chars: "O", flags: CMD | SHIFT)
+    assert_match(/shortcut-test/, captured.to_s)
+  end
+
   test "Ctrl-C at the prompt records a fresh prompt mark" do
     n_before = @pane.screen.command_marks.size
     "abc".chars.each { |c| @pane.handle_key(chars: c) }

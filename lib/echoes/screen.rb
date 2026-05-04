@@ -702,6 +702,34 @@ module Echoes
       end
     end
 
+    # Extract the visible text of a command's output region. `mark` is
+    # one of the entries from `@command_marks`. Rows that have scrolled
+    # off the front of the scrollback are silently skipped — the text
+    # is no longer recoverable. Returns "" when the mark is incomplete
+    # (no :output_start or :output_end yet).
+    def text_for_command_output(mark)
+      return '' unless mark && mark[:output_start] && mark[:output_end]
+      from = mark[:output_start]
+      to   = mark[:output_end]
+      return '' if to <= from
+      sb_size = @scrollback.size
+      lines = []
+      (from...to).each do |abs_row|
+        row = abs_row < 0 ? nil :
+              abs_row < sb_size ? @scrollback[abs_row] :
+              @grid[abs_row - sb_size]
+        next unless row
+        lines << row.map { |c| c.char || ' ' }.join.rstrip
+      end
+      lines.join("\n")
+    end
+
+    # Most recently completed command mark (D was emitted). nil if no
+    # command has finished yet on this pane.
+    def last_completed_command_mark
+      @command_marks.reverse_each.find { |m| m[:output_end] }
+    end
+
     # When scrollback shifts (oldest row dropped), every row index in
     # @command_marks moves by `delta` (typically -1). Marks that would
     # now point before the scrollback floor are dropped — their content

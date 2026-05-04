@@ -150,6 +150,28 @@ module Echoes
       @parser.feed(data)
     end
 
+    # Text of the most recently completed command's output, extracted
+    # from the OSC 133 ;C..;D region. Returns nil when no command has
+    # finished yet on this pane. Useful for "copy last command output"
+    # workflows and for piping output to external tools.
+    def last_command_output_text
+      mark = @screen.last_completed_command_mark
+      return nil unless mark
+      text = @screen.text_for_command_output(mark)
+      text.empty? ? nil : text
+    end
+
+    # Convenience: copy `last_command_output_text` to the system
+    # clipboard via the screen's clipboard handler. Returns true on
+    # success, false if there's nothing to copy or no clipboard
+    # handler is wired (e.g., in tests).
+    def copy_last_command_output
+      text = last_command_output_text
+      return false unless text
+      @screen.set_clipboard(text)
+      true
+    end
+
     # Jump scroll position to the previous or next OSC 133 prompt
     # boundary recorded on @screen. Returns true if a jump happened,
     # false if there was no target in that direction. The Screen's
@@ -217,6 +239,17 @@ module Echoes
       option_held = (flags & NSEVENT_OPTION_FLAG) != 0
       cmd_held    = (flags & NSEVENT_COMMAND_FLAG) != 0
       shift_held  = (flags & NSEVENT_SHIFT_FLAG) != 0
+
+      # Cmd+Shift+letter: pane-level shortcuts that operate on OSC 133
+      # marks. Cmd+Shift+Up/Down (jump-to-prompt) is matched in the
+      # arrow-key cases below.
+      if cmd_held && shift_held && chars.length == 1
+        case chars.downcase
+        when 'o'
+          copy_last_command_output
+          return true
+        end
+      end
 
       case chars
       when "\r", "\n"
