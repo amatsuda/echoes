@@ -313,6 +313,57 @@ class Echoes::EmbeddedPaneTest < Test::Unit::TestCase
     assert_equal 0, cursor
   end
 
+  CTRL = 0x40000  # NSEventModifierFlagControl
+
+  test "Ctrl-A jumps cursor to start, Ctrl-E to end" do
+    "abcdef".chars.each { |c| @pane.handle_key(chars: c) }
+    @pane.handle_key(chars: "a", flags: CTRL)
+    assert_equal 0, cursor
+    @pane.handle_key(chars: "e", flags: CTRL)
+    assert_equal 6, cursor
+  end
+
+  test "Ctrl-B / Ctrl-F move the cursor by one" do
+    "xyz".chars.each { |c| @pane.handle_key(chars: c) }
+    @pane.handle_key(chars: "b", flags: CTRL)
+    assert_equal 2, cursor
+    @pane.handle_key(chars: "f", flags: CTRL)
+    assert_equal 3, cursor
+  end
+
+  test "Ctrl-K kills from cursor to end of line" do
+    # 19 chars; 9 lefts puts cursor at offset 10 (before "drop this")
+    "keep this drop this".chars.each { |c| @pane.handle_key(chars: c) }
+    9.times { @pane.handle_key(chars: "\u{F702}") }
+    @pane.handle_key(chars: "k", flags: CTRL)
+    assert_equal "keep this ", buf
+    assert_equal 10, cursor
+  end
+
+  test "Ctrl-U kills from cursor back to start of line" do
+    # 19 chars; 9 lefts puts cursor at offset 10 (before "keep this")
+    "drop this keep this".chars.each { |c| @pane.handle_key(chars: c) }
+    9.times { @pane.handle_key(chars: "\u{F702}") }
+    @pane.handle_key(chars: "u", flags: CTRL)
+    assert_equal "keep this", buf
+    assert_equal 0, cursor
+  end
+
+  test "Ctrl-W kills the word to the left of the cursor" do
+    "echo  hello world".chars.each { |c| @pane.handle_key(chars: c) }
+    @pane.handle_key(chars: "w", flags: CTRL)
+    assert_equal "echo  hello ", buf
+    @pane.handle_key(chars: "w", flags: CTRL)
+    assert_equal "echo  ", buf
+  end
+
+  test "Ctrl-C at prompt clears the input and drops a fresh prompt" do
+    "half typed".chars.each { |c| @pane.handle_key(chars: c) }
+    @pane.handle_key(chars: "c", flags: CTRL)
+    assert_equal "", buf
+    assert_equal 0, cursor
+  end
+
   test "Enter submits the buffer regardless of cursor position" do
     "echo mid-cursor".chars.each { |c| @pane.handle_key(chars: c) }
     5.times { @pane.handle_key(chars: "\u{F702}") }  # cursor != end

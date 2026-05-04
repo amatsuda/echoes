@@ -150,6 +150,13 @@ module Echoes
         return true
       end
 
+      # Emacs/readline-style bindings on Ctrl+letter at the prompt.
+      # macOS gives us `chars` as the plain letter (Cocoa's
+      # charactersIgnoringModifiers); flags carries the Control bit.
+      if (flags & NSEVENT_CONTROL_FLAG) != 0 && chars.length == 1 && chars.ord >= 0x20
+        return true if handle_ctrl_letter(chars.downcase)
+      end
+
       case chars
       when "\r", "\n"
         line = @input_buffer
@@ -298,6 +305,84 @@ module Echoes
       return if n == 0
       process_output("\e[#{n}C")
       @input_cursor = @input_buffer.length
+    end
+
+    # Emacs/readline keybindings handled at the prompt. Returns true
+    # if we consumed the keystroke. The PTY-mode pane still uses the
+    # GUI's existing Ctrl-letter -> control byte path; this only fires
+    # in embedded prompt mode.
+    def handle_ctrl_letter(letter)
+      case letter
+      when 'a' then cursor_home;        true
+      when 'e' then cursor_end;         true
+      when 'b' then cursor_left;        true
+      when 'f' then cursor_right;       true
+      when 'd'
+        # Bash convention: Ctrl-D on an empty line is "EOF / exit"; on
+        # a non-empty line it's forward-delete. We don't have an exit
+        # path yet for the embedded REPL — for now just no-op when
+        # empty.
+        delete_at_cursor unless @input_buffer.empty?
+        true
+      when 'k' then kill_to_end;        true
+      when 'u' then kill_to_start;      true
+      when 'w' then kill_word_left;     true
+      when 'l' then redraw_screen;      true
+      when 'c'
+        # Ctrl-C at the prompt: discard the in-progress line, drop
+        # the user on a fresh prompt below. Like bash.
+        process_output("^C\r\n")
+        @input_buffer = +''
+        @input_cursor = 0
+        @history_index = nil
+        @history_saved = nil
+        process_output(@embedded_shell.prompt.to_s)
+        true
+      else
+        false
+      end
+    end
+
+    def kill_to_end
+      return if @input_cursor >= @input_buffer.length
+      removed = @input_buffer.length - @input_cursor
+      @input_buffer.slice!(@input_cursor..)
+      process_output(' ' * removed)
+      process_output("\e[#{removed}D")
+    end
+
+    def kill_to_start
+      return if @input_cursor == 0
+      removed = @input_cursor
+      @input_buffer.slice!(0, removed)
+      tail = @input_buffer.dup
+      # back to the start, redraw tail, pad clobber, back to start
+      process_output("\e[#{removed}D")
+      process_output(tail + (' ' * removed))
+      process_output("\e[#{tail.length + removed}D")
+      @input_cursor = 0
+    end
+
+    def kill_word_left
+      return if @input_cursor == 0
+      i = @input_cursor
+      i -= 1 while i > 0 && @input_buffer[i - 1] == ' '
+      i -= 1 while i > 0 && @input_buffer[i - 1] != ' '
+      removed = @input_cursor - i
+      return if removed == 0
+      @input_buffer.slice!(i, removed)
+      tail = @input_buffer[i..] || ''
+      process_output("\e[#{removed}D" + tail + (' ' * removed))
+      process_output("\e[#{tail.length + removed}D")
+      @input_cursor = i
+    end
+
+    def redraw_screen
+      process_output("\e[2J\e[H")
+      process_output(@embedded_shell.prompt.to_s)
+      process_output(@input_buffer)
+      back = @input_buffer.length - @input_cursor
+      process_output("\e[#{back}D") if back > 0
     end
 
     # Translate a macOS NSEvent character (which uses U+F70x for
