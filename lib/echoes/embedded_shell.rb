@@ -223,6 +223,13 @@ module Echoes
       @repl.try_parse(line)
     end
 
+    # Tokenize a line for syntax highlighting. Returns an Array of
+    # `Rubish::Lexer::Token` (each has `:type` and `:value`). Empty
+    # array on lexer failure — never raises.
+    def tokenize(line)
+      @repl.tokenize(line)
+    end
+
     # Continuation prompt (PS2). Used when the user's input is
     # incomplete (e.g., they typed `if true; then` and pressed Enter
     # without a closing `fi`).

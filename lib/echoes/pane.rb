@@ -277,13 +277,16 @@ module Echoes
     # Lower-level variant: replace the input line with `new_line` and
     # position the cursor at `new_cursor` within it. Handles the
     # erase-old / draw-new / position-cursor dance with the parser.
+    # The drawn content is colorized via `colorize_input`; SGR escapes
+    # don't advance the cell cursor, so the count-based math here still
+    # holds.
     def replace_input_line(new_line, new_cursor)
       tail_len = @input_buffer.length - @input_cursor
       process_output("\e[#{tail_len}C") if tail_len > 0
       process_output("\b \b" * @input_buffer.length)
       @input_buffer = +new_line
       @input_cursor = new_cursor
-      process_output(new_line)
+      process_output(colorize_input(new_line))
       back = new_line.length - new_cursor
       process_output("\e[#{back}D") if back > 0
     end
@@ -293,32 +296,20 @@ module Echoes
     # cell-grid view in sync.
 
     def insert_at_cursor(chars)
-      @input_buffer.insert(@input_cursor, chars)
-      tail = @input_buffer[(@input_cursor + chars.length)..] || ''
-      @input_cursor += chars.length
-      # Echo the new chars + the tail that shifted right; then move
-      # the cursor back to its logical position.
-      process_output(chars + tail)
-      process_output("\e[#{tail.length}D") unless tail.empty?
+      new_line = @input_buffer.dup.insert(@input_cursor, chars)
+      replace_input_line(new_line, @input_cursor + chars.length)
     end
 
     def delete_before_cursor
       return if @input_cursor == 0
-      @input_buffer.slice!(@input_cursor - 1)
-      @input_cursor -= 1
-      tail = @input_buffer[@input_cursor..] || ''
-      # \b moves left over the doomed cell; rewrite tail; pad with
-      # space to clobber the leftover char at the end; move back.
-      process_output("\b" + tail + ' ')
-      process_output("\e[#{tail.length + 1}D")
+      new_line = @input_buffer.dup.tap { |s| s.slice!(@input_cursor - 1) }
+      replace_input_line(new_line, @input_cursor - 1)
     end
 
     def delete_at_cursor
       return if @input_cursor >= @input_buffer.length
-      @input_buffer.slice!(@input_cursor)
-      tail = @input_buffer[@input_cursor..] || ''
-      process_output(tail + ' ')
-      process_output("\e[#{tail.length + 1}D")
+      new_line = @input_buffer.dup.tap { |s| s.slice!(@input_cursor) }
+      replace_input_line(new_line, @input_cursor)
     end
 
     def cursor_left
@@ -393,23 +384,15 @@ module Echoes
     def kill_to_end
       return if @input_cursor >= @input_buffer.length
       @kill_ring = @input_buffer[@input_cursor..]
-      removed = @input_buffer.length - @input_cursor
-      @input_buffer.slice!(@input_cursor..)
-      process_output(' ' * removed)
-      process_output("\e[#{removed}D")
+      new_line = @input_buffer[0, @input_cursor]
+      replace_input_line(new_line, @input_cursor)
     end
 
     def kill_to_start
       return if @input_cursor == 0
       @kill_ring = @input_buffer[0, @input_cursor]
-      removed = @input_cursor
-      @input_buffer.slice!(0, removed)
-      tail = @input_buffer.dup
-      # back to the start, redraw tail, pad clobber, back to start
-      process_output("\e[#{removed}D")
-      process_output(tail + (' ' * removed))
-      process_output("\e[#{tail.length + removed}D")
-      @input_cursor = 0
+      new_line = @input_buffer[@input_cursor..] || ''
+      replace_input_line(new_line, 0)
     end
 
     def kill_word_left
@@ -420,11 +403,8 @@ module Echoes
       removed = @input_cursor - i
       return if removed == 0
       @kill_ring = @input_buffer[i, removed]
-      @input_buffer.slice!(i, removed)
-      tail = @input_buffer[i..] || ''
-      process_output("\e[#{removed}D" + tail + (' ' * removed))
-      process_output("\e[#{tail.length + removed}D")
-      @input_cursor = i
+      new_line = @input_buffer.dup.tap { |s| s.slice!(i, removed) }
+      replace_input_line(new_line, i)
     end
 
     # Mirror of kill_word_left: skip whitespace forward, then a word, kill
@@ -437,10 +417,8 @@ module Echoes
       removed = j - @input_cursor
       return if removed == 0
       @kill_ring = @input_buffer[@input_cursor, removed]
-      @input_buffer.slice!(@input_cursor, removed)
-      tail = @input_buffer[@input_cursor..] || ''
-      process_output(tail + (' ' * removed))
-      process_output("\e[#{tail.length + removed}D")
+      new_line = @input_buffer.dup.tap { |s| s.slice!(@input_cursor, removed) }
+      replace_input_line(new_line, @input_cursor)
     end
 
     # Re-insert the most recently killed text at the cursor.
@@ -454,25 +432,21 @@ module Echoes
     # (readline behavior). At start-of-line, no-op.
     def transpose_chars
       return if @input_buffer.length < 2 || @input_cursor == 0
+      new_line = @input_buffer.dup
       if @input_cursor == @input_buffer.length
-        a = @input_buffer[-2]; b = @input_buffer[-1]
-        @input_buffer[-2] = b
-        @input_buffer[-1] = a
-        process_output("\b\b#{b}#{a}")
+        new_line[-2], new_line[-1] = new_line[-1], new_line[-2]
+        replace_input_line(new_line, @input_cursor)
       else
-        a = @input_buffer[@input_cursor - 1]
-        b = @input_buffer[@input_cursor]
-        @input_buffer[@input_cursor - 1] = b
-        @input_buffer[@input_cursor] = a
-        process_output("\b#{b}#{a}")
-        @input_cursor += 1
+        new_line[@input_cursor - 1], new_line[@input_cursor] =
+          new_line[@input_cursor], new_line[@input_cursor - 1]
+        replace_input_line(new_line, @input_cursor + 1)
       end
     end
 
     def redraw_screen
       process_output("\e[2J\e[H")
       process_output(@embedded_shell.prompt.to_s)
-      process_output(@input_buffer)
+      process_output(colorize_input(@input_buffer))
       back = @input_buffer.length - @input_cursor
       process_output("\e[#{back}D") if back > 0
     end
@@ -556,9 +530,87 @@ module Echoes
         end
         process_output("\r\n") unless candidates.size % per_row == 0
         process_output(@embedded_shell.prompt.to_s)
-        process_output(@input_buffer)
+        process_output(colorize_input(@input_buffer))
         # Cursor on screen is at end after the redraw; sync state.
         @input_cursor = @input_buffer.length
+      end
+    end
+
+    # Map of token type → SGR escape. Keywords get bold yellow; the
+    # control-flow operators get bright cyan; redirections get bright
+    # magenta. Word tokens are handled separately below — quoted ones
+    # render green, the first word at command position renders bold.
+    TOKEN_COLOR_MAP = {
+      IF: "\e[1;33m", THEN: "\e[1;33m", ELSE: "\e[1;33m", ELIF: "\e[1;33m",
+      ELSIF: "\e[1;33m", FI: "\e[1;33m", UNLESS: "\e[1;33m", WHILE: "\e[1;33m",
+      UNTIL: "\e[1;33m", FOR: "\e[1;33m", SELECT: "\e[1;33m", CASE: "\e[1;33m",
+      WHEN: "\e[1;33m", ESAC: "\e[1;33m", FUNCTION: "\e[1;33m", DEF: "\e[1;33m",
+      COPROC: "\e[1;33m", TIME: "\e[1;33m", LAZY_LOAD: "\e[1;33m",
+      PIPE: "\e[96m", PIPE_BOTH: "\e[96m", SEMICOLON: "\e[96m",
+      DOUBLE_SEMI: "\e[96m", AND: "\e[96m", OR: "\e[96m", AMPERSAND: "\e[96m",
+      REDIRECT_OUT: "\e[95m", REDIRECT_APPEND: "\e[95m", REDIRECT_IN: "\e[95m",
+      REDIRECT_ERR: "\e[95m", REDIRECT_CLOBBER: "\e[95m", DUP_OUT: "\e[95m",
+      DUP_IN: "\e[95m", HEREDOC: "\e[95m", HEREDOC_INDENT: "\e[95m",
+      HERESTRING: "\e[95m",
+    }.freeze
+
+    # Token types that put the *next* WORD into "command position" — i.e.
+    # this is where the user types a program name, which we render bold.
+    COMMAND_BOUNDARY_TYPES = %i[
+      SEMICOLON PIPE PIPE_BOTH AND OR AMPERSAND
+      IF THEN ELSE ELIF ELSIF WHILE UNTIL FOR SELECT CASE WHEN
+      DOUBLE_SEMI CASE_FALL CASE_CONT LBRACE LPAREN
+    ].freeze
+
+    # Take the user's in-progress input line and return a copy with
+    # ANSI SGR escapes wrapped around each token. SGRs don't advance
+    # the cell-grid cursor, so the surrounding cell-count math in
+    # `replace_input_line` is unchanged. Falls back to the plain line
+    # on any failure — highlighting must never lose user input.
+    def colorize_input(line)
+      return line if line.empty?
+      tokens = @embedded_shell.tokenize(line)
+      return line if tokens.empty?
+
+      out = +''
+      pos = 0
+      command_position = true
+      tokens.each do |tok|
+        val = tok.value.to_s
+        next if val.empty?
+        idx = line.index(val, pos)
+        break unless idx
+        # Whitespace skipped by the lexer copies through verbatim.
+        out << line[pos...idx] if idx > pos
+
+        sgr = sgr_for_token(tok, command_position)
+        if sgr
+          out << sgr << val << "\e[0m"
+        else
+          out << val
+        end
+        pos = idx + val.length
+
+        if tok.type == :WORD
+          command_position = false
+        elsif COMMAND_BOUNDARY_TYPES.include?(tok.type)
+          command_position = true
+        end
+      end
+      out << line[pos..] if pos < line.length
+      out
+    rescue
+      line
+    end
+
+    def sgr_for_token(tok, command_position)
+      if tok.type == :WORD
+        first = tok.value.to_s[0]
+        return "\e[32m" if first == '"' || first == "'"
+        return "\e[1m"  if command_position
+        nil
+      else
+        TOKEN_COLOR_MAP[tok.type]
       end
     end
   end

@@ -511,6 +511,60 @@ class Echoes::EmbeddedPaneTest < Test::Unit::TestCase
     assert_match(/mid-cursor/, flat)
   end
 
+  # Reach into the private colorize_input for direct assertion. The
+  # rendered output is what matters, but checking the SGR-wrapped string
+  # separately is the most precise way to lock in highlighting behavior
+  # across token types.
+  def colorize(line)
+    @pane.send(:colorize_input, line)
+  end
+
+  test "syntax highlighting wraps keywords in bold-yellow SGR" do
+    out = colorize("if true; then echo hi; fi")
+    assert_includes out, "\e[1;33mif\e[0m"
+    assert_includes out, "\e[1;33mthen\e[0m"
+    assert_includes out, "\e[1;33mfi\e[0m"
+  end
+
+  test "syntax highlighting wraps the first word at command position in bold" do
+    out = colorize("echo hello")
+    assert_includes out, "\e[1mecho\e[0m"
+    # 'hello' is an argument, not bold
+    refute_includes out, "\e[1mhello\e[0m"
+  end
+
+  test "syntax highlighting wraps quoted words in green" do
+    out = colorize(%q{echo "hi" 'there'})
+    assert_includes out, "\e[32m\"hi\"\e[0m"
+    assert_includes out, "\e[32m'there'\e[0m"
+  end
+
+  test "syntax highlighting wraps pipe and redirect in their colors" do
+    out = colorize("ls | grep foo > /tmp/x")
+    assert_includes out, "\e[96m|\e[0m"
+    assert_includes out, "\e[95m>\e[0m"
+  end
+
+  test "syntax highlighting puts the second pipeline stage's first word into command position" do
+    out = colorize("ls | grep foo")
+    # both 'ls' and 'grep' are command-position WORDs
+    assert_includes out, "\e[1mls\e[0m"
+    assert_includes out, "\e[1mgrep\e[0m"
+    refute_includes out, "\e[1mfoo\e[0m"
+  end
+
+  test "syntax highlighting falls back to plain text on empty input" do
+    assert_equal "", colorize("")
+  end
+
+  test "highlighted input doesn't pollute the cell grid with escape characters" do
+    "echo hello".chars.each { |c| @pane.handle_key(chars: c) }
+    flat = grid_text
+    # SGRs are consumed by the parser and do not appear in cell chars
+    refute_includes flat, "\e"
+    assert_match(/echo hello/, flat)
+  end
+
   test "backspace pops the input buffer and erases the last cell" do
     "echo abc".chars.each { |c| @pane.handle_key(chars: c) }
     3.times { @pane.handle_key(chars: "\u{7F}") }  # erase "abc"
