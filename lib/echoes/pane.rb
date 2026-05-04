@@ -5,8 +5,9 @@ require 'pty'
 module Echoes
   # A Pane is one shell session within a Tab. It owns a Screen (the cell
   # grid the user sees) and a backing shell — either an external program
-  # spawned via PTY (the default), or a Rubish::REPL running in-process
-  # via Echoes::EmbeddedShell.
+  # spawned via PTY (the default), or a Rubish::REPL running in a per-pane
+  # helper subprocess via Echoes::EmbeddedShell. The helper owns the pty
+  # as its controlling tty so Ctrl-C / SIGWINCH / job control all work.
   #
   # Callers that need to send bytes to the shell or pull bytes back use
   # `write_input` / `read_available_output`. Don't reach for the legacy
@@ -129,14 +130,7 @@ module Echoes
 
     def close
       if embedded?
-        # Closing an embedded pane while a command is in flight is a
-        # nuanced case: simple single-fork commands have a ctty and
-        # would respond to SIGINT (see EmbeddedShell#interrupt), but
-        # loops/pipelines run without ctty (the "first session-leader
-        # exits → kernel hangs the pty" pathology) so a stray running
-        # background loop has no clean kill. For now: leave any
-        # in-flight command running; it'll exit on its own when
-        # echoes does.
+        @embedded_shell.shutdown
         return
       end
       @pty_write.close rescue nil

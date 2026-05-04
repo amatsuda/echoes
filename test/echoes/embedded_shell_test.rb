@@ -2,6 +2,7 @@
 
 require "test_helper"
 require "echoes/embedded_shell"
+require "tmpdir"
 
 class Echoes::EmbeddedShellTest < Test::Unit::TestCase
   def setup
@@ -11,6 +12,7 @@ class Echoes::EmbeddedShellTest < Test::Unit::TestCase
 
   def teardown
     Dir.chdir(@original_dir)
+    @shell.shutdown rescue nil
   end
 
   test "captures stdout from a builtin" do
@@ -147,65 +149,45 @@ class Echoes::EmbeddedShellTest < Test::Unit::TestCase
     @shell.submit_and_wait("true")  # waits for the prior sleep too
   end
 
-  # --- ctty_safe? classifier (used by Ctrl-C support) ---
-
-  test "ctty_safe? is true for a single external command" do
-    assert @shell.ctty_safe?("ls")
-    assert @shell.ctty_safe?("/bin/sleep 0.1")
-    assert @shell.ctty_safe?("echo hi")
-  end
-
-  test "ctty_safe? is true for a command with redirects" do
-    assert @shell.ctty_safe?("ls > /tmp/x")
-    assert @shell.ctty_safe?("cat < /tmp/x")
-    assert @shell.ctty_safe?("ls 2> /tmp/err")
-  end
-
-  test "ctty_safe? is false for a pipeline" do
-    refute @shell.ctty_safe?("ls | grep foo")
-    refute @shell.ctty_safe?("cat | sort | uniq")
-  end
-
-  test "ctty_safe? is false for sequenced commands" do
-    refute @shell.ctty_safe?("echo hi; echo bye")
-    refute @shell.ctty_safe?("ls && echo ok")
-    refute @shell.ctty_safe?("ls || echo nope")
-  end
-
-  test "ctty_safe? is false for control structures" do
-    refute @shell.ctty_safe?("for i in 1 2 3; do echo $i; done")
-    refute @shell.ctty_safe?("while true; do echo hi; done")
-    refute @shell.ctty_safe?("if true; then echo x; fi")
-  end
-
-  test "ctty_safe? is false for empty / unparseable input" do
-    refute @shell.ctty_safe?("")
-    refute @shell.ctty_safe?("if true; then")  # incomplete
-  end
-
   test "Ctrl-C interrupts a simple long-running external command" do
-    # Without the ctty hook, ETX → SIGINT routing has no foreground
-    # process group on the slave to deliver to. With the hook, the
-    # forked sleep is its own session leader with the slave as its
-    # ctty, so SIGINT reaches it.
+    # The helper is the session leader and ctty owner; ETX on the
+    # master → SIGINT to the foreground pgrp → the forked /bin/sleep
+    # terminates. The helper itself ignores SIGINT (Ruby trap with
+    # empty block) so it stays alive across commands.
     t0 = Time.now
     @shell.submit_line("/bin/sleep 5")
-    sleep 0.1
+    sleep 0.5  # let the helper actually fork & exec /bin/sleep
     @shell.interrupt
     deadline = Time.now + 3
     sleep 0.05 while @shell.running? && Time.now < deadline
-    @shell.reap_if_done
     elapsed = Time.now - t0
     refute @shell.running?, "sleep should have exited after SIGINT"
-    assert_operator elapsed, :<, 2,
+    assert_operator elapsed, :<, 2.5,
       "expected sleep to exit promptly after Ctrl-C; took #{elapsed}s"
   end
 
-  test "loops still work (don't claim ctty, so they're not broken by it)" do
+  test "Ctrl-C interrupts a loop (the case the helper architecture exists for)" do
+    # Three /bin/sleep 5 in a loop = 15s normally. Ctrl-C should kill
+    # the *currently-running* sleep AND propagate up so the loop body
+    # exits without starting the next iteration. We use a short overall
+    # deadline so a regression is unmistakable.
+    t0 = Time.now
+    @shell.submit_line("for i in 1 2 3; do /bin/sleep 5; done")
+    sleep 0.5  # let the loop start its first sleep
+    @shell.interrupt
+    deadline = Time.now + 4
+    sleep 0.05 while @shell.running? && Time.now < deadline
+    elapsed = Time.now - t0
+    refute @shell.running?, "loop should have terminated after SIGINT"
+    assert_operator elapsed, :<, 3.5,
+      "expected loop to exit promptly after Ctrl-C; took #{elapsed}s"
+  end
+
+  test "loops still produce all their output" do
     # Regression guard for the "first session-leader child exits →
-    # kernel hangs the pty" pathology that broke loops in the previous
-    # naive ctty-claim attempt. The classifier now returns false for
-    # loops so the hook is a no-op.
+    # kernel hangs the pty" pathology — the helper architecture keeps
+    # one long-lived session leader so each iteration's child can
+    # write to the pty without EIO.
     @shell.submit_and_wait("for i in 1 2 3; do echo iter $i; done")
     out = @shell.read_available_output
     assert_includes out, "iter 1"
@@ -220,17 +202,13 @@ class Echoes::EmbeddedPaneTest < Test::Unit::TestCase
 
   def setup
     require "echoes/pane"
-    require "reline"
-    # Reline::HISTORY is class-level state shared across tests; reset
-    # it so per-test history walks aren't contaminated by prior tests'
-    # submissions.
-    Reline::HISTORY.clear
     @pane = Echoes::Pane.new(command: "/bin/sh", rows: 24, cols: 80, embedded: true)
     @original_dir = Dir.pwd
   end
 
   def teardown
     Dir.chdir(@original_dir)
+    @pane.embedded_shell.shutdown rescue nil
   end
 
   def grid_rows(n = 8)
