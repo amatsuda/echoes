@@ -115,7 +115,15 @@ module Echoes
     end
 
     def close
-      return if embedded?
+      if embedded?
+        # Closing an embedded pane while a command is running is a
+        # known phase-1 limitation: rubish forks the child without
+        # setsid + opening the pty slave as ctty, so our pty has no
+        # foreground process group and ETX-via-the-master can't
+        # deliver SIGINT. The child orphans and runs to completion;
+        # the command thread joins the reader naturally on exit.
+        return
+      end
       @pty_write.close rescue nil
       @pty_read.close rescue nil
       Process.kill(:HUP, @pty_pid) rescue nil
@@ -157,6 +165,8 @@ module Echoes
         return true if handle_ctrl_letter(chars.downcase)
       end
 
+      option_held = (flags & NSEVENT_OPTION_FLAG) != 0
+
       case chars
       when "\r", "\n"
         line = @input_buffer
@@ -172,9 +182,9 @@ module Echoes
       when "\u{F728}"  # NSDeleteFunctionKey (forward delete)
         delete_at_cursor
       when "\u{F702}"  # NSLeftArrowFunctionKey
-        cursor_left
+        option_held ? word_left : cursor_left
       when "\u{F703}"  # NSRightArrowFunctionKey
-        cursor_right
+        option_held ? word_right : cursor_right
       when "\u{F729}"  # NSHomeFunctionKey
         cursor_home
       when "\u{F72B}"  # NSEndFunctionKey
@@ -402,6 +412,29 @@ module Echoes
     }.freeze
 
     NSEVENT_CONTROL_FLAG = 0x40000
+    NSEVENT_OPTION_FLAG  = 0x80000
+
+    def word_left
+      return if @input_cursor == 0
+      i = @input_cursor
+      i -= 1 while i > 0 && @input_buffer[i - 1] == ' '
+      i -= 1 while i > 0 && @input_buffer[i - 1] != ' '
+      steps = @input_cursor - i
+      return if steps == 0
+      process_output("\e[#{steps}D")
+      @input_cursor = i
+    end
+
+    def word_right
+      return if @input_cursor >= @input_buffer.length
+      i = @input_cursor
+      i += 1 while i < @input_buffer.length && @input_buffer[i] != ' '
+      i += 1 while i < @input_buffer.length && @input_buffer[i] == ' '
+      steps = i - @input_cursor
+      return if steps == 0
+      process_output("\e[#{steps}C")
+      @input_cursor = i
+    end
 
     def translate_for_pty(chars, flags)
       mapped = SPECIAL_KEY_TO_ANSI[chars]

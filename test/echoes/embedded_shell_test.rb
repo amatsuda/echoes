@@ -313,7 +313,30 @@ class Echoes::EmbeddedPaneTest < Test::Unit::TestCase
     assert_equal 0, cursor
   end
 
-  CTRL = 0x40000  # NSEventModifierFlagControl
+  CTRL   = 0x40000  # NSEventModifierFlagControl
+  OPTION = 0x80000  # NSEventModifierFlagOption
+
+  test "Option+Left jumps the cursor by a word" do
+    "echo hello world".chars.each { |c| @pane.handle_key(chars: c) }
+    @pane.handle_key(chars: "\u{F702}", flags: OPTION)
+    assert_equal "echo hello ".length, cursor
+    @pane.handle_key(chars: "\u{F702}", flags: OPTION)
+    assert_equal "echo ".length, cursor
+    @pane.handle_key(chars: "\u{F702}", flags: OPTION)
+    assert_equal 0, cursor
+  end
+
+  test "Option+Right jumps the cursor by a word" do
+    "echo hello world".chars.each { |c| @pane.handle_key(chars: c) }
+    @pane.handle_key(chars: "\u{F729}")  # Home
+    @pane.handle_key(chars: "\u{F703}", flags: OPTION)
+    assert_equal "echo ".length, cursor
+    @pane.handle_key(chars: "\u{F703}", flags: OPTION)
+    assert_equal "echo hello ".length, cursor
+    @pane.handle_key(chars: "\u{F703}", flags: OPTION)
+    assert_equal "echo hello world".length, cursor
+  end
+
 
   test "Ctrl-A jumps cursor to start, Ctrl-E to end" do
     "abcdef".chars.each { |c| @pane.handle_key(chars: c) }
