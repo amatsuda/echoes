@@ -32,6 +32,7 @@ module Echoes
         @continuation_lines = []  # collected lines while waiting for a complete command
         @kill_ring = +''      # last killed text (for Ctrl-Y yank)
         @autosuggestion = +''  # fish-style: tail of the most recent matching history entry
+        @right_prompt_segments = nil  # cached at prompt time; redrawn after every input edit
         @input_mode = :prompt  # :prompt | :search (running uses @embedded_shell.running?)
         @search_query = +''    # Ctrl-R substring being typed
         @search_index = nil    # index into history of the current match (nil = no match)
@@ -103,6 +104,7 @@ module Echoes
           process_output(osc133_a)
           render_prompt_natively
           process_output(osc133_b)
+          render_input_area
           @embedded_running = false
         end
         out
@@ -325,20 +327,19 @@ module Echoes
       process_output(osc133_a)
       render_prompt_natively
       process_output(osc133_b)
+      render_input_area  # draws the rprompt for the (empty) initial input
     end
 
     # Render the current prompt by pulling rubish's structured
     # `prompt_segments` and writing them directly to cells via
     # `Screen#put_styled_segments` — no ANSI SGR roundtrip. Falls
     # back to the legacy ANSI string path if segments aren't
-    # available (defensive — empty array can mean an unhelpful
-    # default-styled prompt with no text).
+    # available.
     #
-    # If rubish also exposes a right-prompt (RPROMPT-style), it's
-    # rendered on the same row aligned to the right margin, then the
-    # cursor is restored to the input position so typing lands in the
-    # right place. The rprompt is skipped when it would overlap the
-    # main prompt or the user's input area.
+    # Also refreshes the rprompt cache. Drawing the rprompt itself is
+    # done by render_input_area so it follows the input on every
+    # edit; that way the rprompt isn't lost when the user's input
+    # grows long enough to overwrite its cells and is then shortened.
     def render_prompt_natively
       segments = @embedded_shell.prompt_segments
       if segments && !segments.empty?
@@ -346,30 +347,41 @@ module Echoes
       else
         process_output(@embedded_shell.prompt.to_s)
       end
-      render_right_prompt
+      @right_prompt_segments = @embedded_shell.right_prompt_segments
     end
 
-    # Right-aligned prompt rendering. No-op when rubish has nothing
-    # configured. Saves the cursor position (which is at the end of
-    # the main prompt = where input goes), draws the rprompt at the
-    # right edge, and restores.
-    def render_right_prompt
-      rsegs = @embedded_shell.right_prompt_segments
+    # Render the input area: colored input, dim autosuggestion, then
+    # the cached right-prompt at the right edge, and finally restores
+    # the cursor to the user's logical input position. Assumed cursor
+    # entry: at the start of the input area (just past the main prompt).
+    def render_input_area
+      process_output(colorize_input(@input_buffer))
+      process_output("\e[2m" + @autosuggestion + "\e[0m") unless @autosuggestion.empty?
+      input_visible = @input_buffer.length + @autosuggestion.length
+      draw_right_prompt_inline(input_visible)
+      back = input_visible - @input_cursor
+      process_output("\e[#{back}D") if back > 0
+    end
+
+    # Draw the cached rprompt at the right edge of the current row.
+    # On entry the cursor sits right after the input + suggestion (at
+    # column `input_start_col + input_visible`); on exit it's back at
+    # that same column. Skipped when it would overlap the input.
+    def draw_right_prompt_inline(input_visible)
+      rsegs = @right_prompt_segments
       return if rsegs.nil? || rsegs.empty?
-      width = rsegs.sum { |s| (s[:text] || '').length }
-      return if width == 0
+      rwidth = rsegs.sum { |s| (s[:text] || '').length }
+      return if rwidth == 0
+      cols       = @screen.cols
+      cursor_col = @screen.cursor.col
+      target_col = cols - rwidth
+      return if cursor_col >= target_col  # not enough room
 
-      saved_row = @screen.cursor.row
-      saved_col = @screen.cursor.col
-      cols     = @screen.cols
-      target_col = cols - width
-      # Skip when the rprompt would overlap the main prompt (no room).
-      return if target_col <= saved_col
-
-      @screen.cursor.col = target_col
+      delta = target_col - cursor_col
+      process_output("\e[#{delta}C")
       @screen.put_styled_segments(rsegs)
-      @screen.cursor.row = saved_row
-      @screen.cursor.col = saved_col
+      # cursor is now at column `cols`; jump back to where it was
+      process_output("\e[#{delta + rwidth}D")
     end
 
     # OSC 133 escape strings. Hosts surrounding shells in their own
@@ -452,12 +464,10 @@ module Echoes
     end
 
     # Lower-level variant: replace the input line with `new_line` and
-    # position the cursor at `new_cursor` within it. Handles the
-    # erase-old / draw-new / position-cursor dance with the parser.
-    # The drawn content is colorized via `colorize_input`; SGR escapes
-    # don't advance the cell cursor, so the count-based math here still
-    # holds. After redrawing the input, the dim autosuggestion (if any)
-    # is appended and the cursor is moved back to the logical position.
+    # position the cursor at `new_cursor` within it. Erases the old
+    # input + autosuggestion, then delegates to `render_input_area` so
+    # the input, autosuggestion, and rprompt are all redrawn from the
+    # cached state in lockstep.
     def replace_input_line(new_line, new_cursor)
       prev_visible = @input_buffer.length + @autosuggestion.length
       tail_len = prev_visible - @input_cursor
@@ -466,10 +476,7 @@ module Echoes
       @input_buffer = +new_line
       @input_cursor = new_cursor
       @autosuggestion = compute_autosuggestion
-      process_output(colorize_input(new_line))
-      process_output("\e[2m" + @autosuggestion + "\e[0m") unless @autosuggestion.empty?
-      back = new_line.length + @autosuggestion.length - new_cursor
-      process_output("\e[#{back}D") if back > 0
+      render_input_area
     end
 
     # ---- Mid-line editing primitives. All operate on @input_buffer
@@ -576,6 +583,7 @@ module Echoes
         process_output(osc133_a)
         render_prompt_natively
         process_output(osc133_b)
+        render_input_area
         true
       else
         false
@@ -647,10 +655,7 @@ module Echoes
     def redraw_screen
       process_output("\e[2J\e[H")
       render_prompt_natively
-      process_output(colorize_input(@input_buffer))
-      process_output("\e[2m" + @autosuggestion + "\e[0m") unless @autosuggestion.empty?
-      back = @input_buffer.length + @autosuggestion.length - @input_cursor
-      process_output("\e[#{back}D") if back > 0
+      render_input_area
     end
 
     # Translate a macOS NSEvent character (which uses U+F70x for
@@ -777,14 +782,9 @@ module Echoes
         end
         process_output("\r\n") unless candidates.size % per_row == 0
         render_prompt_natively
-        process_output(colorize_input(@input_buffer))
-        # Cursor on screen is at end after the redraw; sync state.
         @input_cursor = @input_buffer.length
         @autosuggestion = compute_autosuggestion
-        unless @autosuggestion.empty?
-          process_output("\e[2m" + @autosuggestion + "\e[0m")
-          process_output("\e[#{@autosuggestion.length}D")
-        end
+        render_input_area
       end
     end
 
@@ -1024,7 +1024,7 @@ module Echoes
         @search_saved_autosuggestion = nil
         process_output("\r\e[K")
         render_prompt_natively
-        process_output(colorize_input(@input_buffer))
+        render_input_area
         submit_or_continue
       else  # :cancel
         @input_buffer = @search_saved_buffer || +''
@@ -1038,10 +1038,7 @@ module Echoes
         @search_saved_autosuggestion = nil
         process_output("\r\e[K")
         render_prompt_natively
-        process_output(colorize_input(@input_buffer))
-        process_output("\e[2m" + @autosuggestion + "\e[0m") unless @autosuggestion.empty?
-        back = @input_buffer.length + @autosuggestion.length - @input_cursor
-        process_output("\e[#{back}D") if back > 0
+        render_input_area
       end
     end
 

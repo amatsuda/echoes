@@ -267,53 +267,51 @@ class Echoes::EmbeddedPaneTest < Test::Unit::TestCase
 
   # --- right prompt (RPROMPT) rendering ---
 
-  # Stub the embedded shell's right_prompt_segments so we can drive
-  # the render path without depending on the user's rubishrc.
-  def with_right_prompt(segments)
-    shell = @pane.embedded_shell
-    shell.define_singleton_method(:right_prompt_segments) { segments }
-    yield
+  def stash_right_prompt(segments)
+    @pane.instance_variable_set(:@right_prompt_segments, segments)
   end
 
   test "right_prompt is rendered at the right edge of the row" do
-    with_right_prompt([{text: "RP", fg: 1, bg: nil, bold: false, italic: false, underline: false, inverse: false}]) do
-      @pane.send(:render_right_prompt)
-      cols = @pane.screen.cols
-      assert_equal "R", @pane.screen.grid[0][cols - 2].char
-      assert_equal "P", @pane.screen.grid[0][cols - 1].char
-      assert_equal 1,   @pane.screen.grid[0][cols - 2].fg
-    end
-  end
-
-  test "right_prompt rendering restores the cursor position" do
-    # Place cursor at column 5; render should put it back there.
-    @pane.screen.cursor.col = 5
-    saved_col = 5
-    with_right_prompt([{text: "X", fg: nil, bg: nil, bold: false, italic: false, underline: false, inverse: false}]) do
-      @pane.send(:render_right_prompt)
-      assert_equal saved_col, @pane.screen.cursor.col
-    end
-  end
-
-  test "right_prompt is skipped if it would overlap the main prompt" do
+    stash_right_prompt([{text: "RP", fg: 1, bg: nil, bold: false, italic: false, underline: false, inverse: false}])
+    @pane.send(:draw_right_prompt_inline, 0)
     cols = @pane.screen.cols
-    # Cursor near right edge — would overlap a multi-char rprompt.
-    @pane.screen.cursor.col = cols - 1
-    rsegs = [{text: "ABCDE", fg: nil, bg: nil, bold: false, italic: false, underline: false, inverse: false}]
-    with_right_prompt(rsegs) do
-      @pane.send(:render_right_prompt)
-      # Cursor untouched; right edge cell stays blank
-      assert_equal cols - 1, @pane.screen.cursor.col
-      assert_equal " ", @pane.screen.grid[0][cols - 1].char
-    end
+    assert_equal "R", @pane.screen.grid[0][cols - 2].char
+    assert_equal "P", @pane.screen.grid[0][cols - 1].char
+    assert_equal 1,   @pane.screen.grid[0][cols - 2].fg
   end
 
-  test "right_prompt is a no-op when the helper returns no segments" do
+  test "right_prompt is skipped if it would overlap the input" do
+    cols = @pane.screen.cols
+    @pane.screen.cursor.col = cols - 1
+    stash_right_prompt([{text: "ABCDE", fg: nil, bg: nil, bold: false, italic: false, underline: false, inverse: false}])
+    @pane.send(:draw_right_prompt_inline, 0)
+    assert_equal cols - 1, @pane.screen.cursor.col
+    assert_equal " ", @pane.screen.grid[0][cols - 1].char
+  end
+
+  test "right_prompt is a no-op when there's nothing cached" do
     saved_col = @pane.screen.cursor.col
-    with_right_prompt([]) do
-      @pane.send(:render_right_prompt)
-      assert_equal saved_col, @pane.screen.cursor.col
-    end
+    stash_right_prompt([])
+    @pane.send(:draw_right_prompt_inline, 0)
+    assert_equal saved_col, @pane.screen.cursor.col
+  end
+
+  test "rprompt persists when the input shrinks back from being long" do
+    # Simulate a cached rprompt and a re-render after the user typed
+    # a long line and then deleted some of it. After replace_input_line
+    # finishes, the rprompt cells must be back in place.
+    cols = @pane.screen.cols
+    rsegs = [{text: "RP", fg: nil, bg: nil, bold: false, italic: false, underline: false, inverse: false}]
+    stash_right_prompt(rsegs)
+    # Type a long string that would overlap the rprompt, then erase
+    # most of it.
+    long = "x" * (cols - 5)  # plenty long, overlaps rprompt cells [cols-2, cols)
+    long.chars.each { |c| @pane.handle_key(chars: c) }
+    # Now backspace until input is short again; rprompt cells should be
+    # redrawn each iteration.
+    20.times { @pane.handle_key(chars: "\u{7F}") }
+    assert_equal "R", @pane.screen.grid[0][cols - 2].char
+    assert_equal "P", @pane.screen.grid[0][cols - 1].char
   end
 
   test "the initial prompt is rendered natively (no SGR escapes in cells)" do
