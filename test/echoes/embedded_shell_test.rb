@@ -337,6 +337,39 @@ class Echoes::EmbeddedPaneTest < Test::Unit::TestCase
     assert_equal "echo hello world".length, cursor
   end
 
+  test "Option+Backspace deletes the word before the cursor" do
+    "echo hello world".chars.each { |c| @pane.handle_key(chars: c) }
+    @pane.handle_key(chars: "\u{7F}", flags: OPTION)
+    assert_equal "echo hello ", buf
+    @pane.handle_key(chars: "\u{7F}", flags: OPTION)
+    assert_equal "echo ", buf
+    @pane.handle_key(chars: "\u{7F}", flags: OPTION)
+    assert_equal "", buf
+  end
+
+  test "Option+Delete deletes the word at the cursor" do
+    "echo hello world".chars.each { |c| @pane.handle_key(chars: c) }
+    @pane.handle_key(chars: "\u{F729}")  # Home
+    @pane.handle_key(chars: "\u{F728}", flags: OPTION)
+    assert_equal " hello world", buf
+    @pane.handle_key(chars: "\u{F728}", flags: OPTION)
+    assert_equal " world", buf
+    @pane.handle_key(chars: "\u{F728}", flags: OPTION)
+    assert_equal "", buf
+  end
+
+  test "Option+Backspace mid-line removes the word before the cursor and preserves the tail" do
+    "alpha beta gamma".chars.each { |c| @pane.handle_key(chars: c) }
+    # cursor at end. move left into "gamma" so cursor sits before 'a' at end of beta-space
+    "alpha beta ".length.tap do |target|
+      back = "alpha beta gamma".length - target
+      back.times { @pane.handle_key(chars: "\u{F702}") }
+    end
+    @pane.handle_key(chars: "\u{7F}", flags: OPTION)
+    assert_equal "alpha gamma", buf
+    assert_equal "alpha ".length, cursor
+  end
+
 
   test "Ctrl-A jumps cursor to start, Ctrl-E to end" do
     "abcdef".chars.each { |c| @pane.handle_key(chars: c) }

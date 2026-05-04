@@ -177,9 +177,9 @@ module Echoes
       when "\r", "\n"
         submit_or_continue
       when "\u{7F}", "\b"
-        delete_before_cursor
+        option_held ? kill_word_left : delete_before_cursor
       when "\u{F728}"  # NSDeleteFunctionKey (forward delete)
-        delete_at_cursor
+        option_held ? kill_word_right : delete_at_cursor
       when "\u{F702}"  # NSLeftArrowFunctionKey
         option_held ? word_left : cursor_left
       when "\u{F703}"  # NSRightArrowFunctionKey
@@ -425,6 +425,22 @@ module Echoes
       process_output("\e[#{removed}D" + tail + (' ' * removed))
       process_output("\e[#{tail.length + removed}D")
       @input_cursor = i
+    end
+
+    # Mirror of kill_word_left: skip whitespace forward, then a word, kill
+    # that span. Bound to Option+forward-Delete; matches macOS muscle memory.
+    def kill_word_right
+      return if @input_cursor >= @input_buffer.length
+      j = @input_cursor
+      j += 1 while j < @input_buffer.length && @input_buffer[j] == ' '
+      j += 1 while j < @input_buffer.length && @input_buffer[j] != ' '
+      removed = j - @input_cursor
+      return if removed == 0
+      @kill_ring = @input_buffer[@input_cursor, removed]
+      @input_buffer.slice!(@input_cursor, removed)
+      tail = @input_buffer[@input_cursor..] || ''
+      process_output(tail + (' ' * removed))
+      process_output("\e[#{tail.length + removed}D")
     end
 
     # Re-insert the most recently killed text at the cursor.
