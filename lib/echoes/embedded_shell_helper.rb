@@ -58,7 +58,15 @@ module Echoes
       # thread; from there we raise Interrupt on the command thread.
       Signal.trap('INT')  { @command_thread&.raise(Interrupt) rescue nil }
       Signal.trap('QUIT') { @command_thread&.raise(Interrupt) rescue nil }
-      @repl = Rubish::REPL.new(no_rc: true)
+      no_rc = ENV['ECHOES_HELPER_NO_RC'] == '1'
+      @repl = Rubish::REPL.new(no_rc: no_rc)
+      # Rubish normally calls these from its `run` loop, which we
+      # bypass — the line editor and prompt rendering live in echoes.
+      # Drive them explicitly so ~/.rubishrc et al take effect,
+      # default aliases land in the env, and history is restored.
+      @repl.send(:setup_default_aliases) rescue nil
+      @repl.send(:load_config) rescue nil
+      @repl.send(:load_history) rescue nil unless no_rc
       @control_in  = IO.for_fd(3, 'r')
       @control_out = IO.for_fd(4, 'w')
       @control_out.sync = true

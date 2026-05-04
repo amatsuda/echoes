@@ -6,7 +6,9 @@ require "tmpdir"
 
 class Echoes::EmbeddedShellTest < Test::Unit::TestCase
   def setup
-    @shell = Echoes::EmbeddedShell.new
+    # no_rc so the test environment isn't polluted by the user's
+    # personal ~/.rubishrc (prompt format, aliases, etc.).
+    @shell = Echoes::EmbeddedShell.new(no_rc: true)
     @original_dir = Dir.pwd
   end
 
@@ -202,7 +204,8 @@ class Echoes::EmbeddedPaneTest < Test::Unit::TestCase
 
   def setup
     require "echoes/pane"
-    @pane = Echoes::Pane.new(command: "/bin/sh", rows: 24, cols: 80, embedded: true)
+    @pane = Echoes::Pane.new(command: "/bin/sh", rows: 24, cols: 80,
+                             embedded: true, no_rc: true)
     @original_dir = Dir.pwd
   end
 

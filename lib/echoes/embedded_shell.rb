@@ -33,10 +33,15 @@ module Echoes
     # `reap_if_done` waits for.
     DONE_SENTINEL = "\e]7771\a"
 
-    def initialize
+    # `no_rc:` skips rubish's startup-file loading (~/.rubishrc, /etc/bashrc,
+    # …) and history file restore in the helper. Tests pass true so the
+    # subprocess starts from a known-clean environment; production
+    # callers leave it false so the user's config takes effect.
+    def initialize(no_rc: false)
       ENV['GIT_PAGER'] ||= 'cat'
       ENV['PAGER']     ||= 'cat'
 
+      helper_env = {'ECHOES_HELPER_NO_RC' => no_rc ? '1' : nil}
       @master, slave = PTY.open
       # Bidirectional JSON-line control pipes. Helper reads requests on
       # fd 3 and writes responses/events on fd 4.
@@ -56,7 +61,7 @@ module Echoes
 
       load_paths = $LOAD_PATH.flat_map { |p| ['-I', p] }
       @helper_pid = Process.spawn(
-        RbConfig.ruby, *load_paths, HELPER_SCRIPT,
+        helper_env, RbConfig.ruby, *load_paths, HELPER_SCRIPT,
         in: slave, out: slave, err: slave,
         3 => ctl_in_r, 4 => ctl_out_w,
         close_others: true,

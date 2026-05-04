@@ -17,11 +17,11 @@ module Echoes
                   :scroll_offset, :scroll_accum, :title, :copy_mode
     attr_reader :embedded_shell
 
-    def initialize(command:, rows:, cols:, cwd: nil, embedded: false)
+    def initialize(command:, rows:, cols:, cwd: nil, embedded: false, no_rc: false)
       @screen = Screen.new(rows: rows, cols: cols)
       if embedded
         require_relative 'embedded_shell'
-        @embedded_shell = EmbeddedShell.new
+        @embedded_shell = EmbeddedShell.new(no_rc: no_rc)
         @parser = Parser.new(@screen, writer: ->(_s) { })
         @title = 'rubish'
         @input_buffer = +''
