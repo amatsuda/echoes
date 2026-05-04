@@ -387,6 +387,46 @@ class Echoes::EmbeddedPaneTest < Test::Unit::TestCase
     assert_equal 2, cursor
   end
 
+  test "Ctrl-J submits the line (alias for Enter)" do
+    "echo j-test".chars.each { |c| @pane.handle_key(chars: c) }
+    @pane.handle_key(chars: "j", flags: CTRL)
+    settle
+    assert_match(/j-test/, grid_text)
+  end
+
+  test "Ctrl-M submits the line (alias for Enter)" do
+    "echo m-test".chars.each { |c| @pane.handle_key(chars: c) }
+    @pane.handle_key(chars: "m", flags: CTRL)
+    settle
+    assert_match(/m-test/, grid_text)
+  end
+
+  test "Ctrl-I completes (alias for Tab)" do
+    Dir.mktmpdir do |dir|
+      File.write(File.join(dir, "uniquetab.txt"), "")
+      "ls #{dir}/u".chars.each { |c| @pane.handle_key(chars: c) }
+      @pane.handle_key(chars: "i", flags: CTRL)
+      assert_match(/uniquetab\.txt/, grid_text)
+    end
+  end
+
+  test "Ctrl-T transposes the two chars around the cursor" do
+    "abdc".chars.each { |c| @pane.handle_key(chars: c) }
+    # cursor at end. transpose: last two ("dc") -> "cd"
+    @pane.handle_key(chars: "t", flags: CTRL)
+    assert_equal "abcd", buf
+  end
+
+  test "Ctrl-Y yanks the most recently killed text" do
+    "echo hello world".chars.each { |c| @pane.handle_key(chars: c) }
+    # cursor at end. Ctrl-W kills "world".
+    @pane.handle_key(chars: "w", flags: CTRL)
+    assert_equal "echo hello ", buf
+    # Ctrl-Y pastes it back.
+    @pane.handle_key(chars: "y", flags: CTRL)
+    assert_equal "echo hello world", buf
+  end
+
   test "Ctrl-P / Ctrl-N walk history (aliases for ↑/↓)" do
     "echo hi".chars.each { |c| @pane.handle_key(chars: c) }
     @pane.handle_key(chars: "\r")

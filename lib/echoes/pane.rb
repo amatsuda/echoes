@@ -29,6 +29,7 @@ module Echoes
         @history_index = nil  # nil = not browsing; integer = browsing
         @history_saved = nil  # input held aside while browsing
         @continuation_lines = []  # collected lines while waiting for a complete command
+        @kill_ring = +''      # last killed text (for Ctrl-Y yank)
       else
         start_dir = (cwd && Dir.exist?(cwd)) ? cwd : Dir.home
         Dir.chdir(start_dir) do
@@ -351,13 +352,18 @@ module Echoes
     # in embedded prompt mode.
     def handle_ctrl_letter(letter)
       case letter
-      when 'a' then cursor_home;        true
-      when 'e' then cursor_end;         true
-      when 'b' then cursor_left;        true
-      when 'f' then cursor_right;       true
+      when 'a' then cursor_home;          true
+      when 'e' then cursor_end;           true
+      when 'b' then cursor_left;          true
+      when 'f' then cursor_right;         true
       when 'h' then delete_before_cursor; true   # ASCII 0x08 (BS)
+      when 'i' then complete_input;       true   # ASCII 0x09 (Tab)
+      when 'j' then submit_or_continue;   true   # ASCII 0x0A (LF / Enter)
+      when 'm' then submit_or_continue;   true   # ASCII 0x0D (CR / Enter)
       when 'p' then history_step(-1);     true   # readline alias for ↑
       when 'n' then history_step(1);      true   # readline alias for ↓
+      when 't' then transpose_chars;      true
+      when 'y' then yank_kill_ring;       true
       when 'd'
         # Bash convention: Ctrl-D on an empty line is "EOF / exit"; on
         # a non-empty line it's forward-delete. We don't have an exit
@@ -365,10 +371,10 @@ module Echoes
         # empty.
         delete_at_cursor unless @input_buffer.empty?
         true
-      when 'k' then kill_to_end;        true
-      when 'u' then kill_to_start;      true
-      when 'w' then kill_word_left;     true
-      when 'l' then redraw_screen;      true
+      when 'k' then kill_to_end;          true
+      when 'u' then kill_to_start;        true
+      when 'w' then kill_word_left;       true
+      when 'l' then redraw_screen;        true
       when 'c'
         # Ctrl-C at the prompt: discard the in-progress line, drop
         # the user on a fresh prompt below. Like bash.
@@ -386,6 +392,7 @@ module Echoes
 
     def kill_to_end
       return if @input_cursor >= @input_buffer.length
+      @kill_ring = @input_buffer[@input_cursor..]
       removed = @input_buffer.length - @input_cursor
       @input_buffer.slice!(@input_cursor..)
       process_output(' ' * removed)
@@ -394,6 +401,7 @@ module Echoes
 
     def kill_to_start
       return if @input_cursor == 0
+      @kill_ring = @input_buffer[0, @input_cursor]
       removed = @input_cursor
       @input_buffer.slice!(0, removed)
       tail = @input_buffer.dup
@@ -411,11 +419,38 @@ module Echoes
       i -= 1 while i > 0 && @input_buffer[i - 1] != ' '
       removed = @input_cursor - i
       return if removed == 0
+      @kill_ring = @input_buffer[i, removed]
       @input_buffer.slice!(i, removed)
       tail = @input_buffer[i..] || ''
       process_output("\e[#{removed}D" + tail + (' ' * removed))
       process_output("\e[#{tail.length + removed}D")
       @input_cursor = i
+    end
+
+    # Re-insert the most recently killed text at the cursor.
+    def yank_kill_ring
+      return if @kill_ring.empty?
+      insert_at_cursor(@kill_ring)
+    end
+
+    # Swap the char before the cursor with the char at the cursor and
+    # advance one position. At end-of-line, swaps the last two chars
+    # (readline behavior). At start-of-line, no-op.
+    def transpose_chars
+      return if @input_buffer.length < 2 || @input_cursor == 0
+      if @input_cursor == @input_buffer.length
+        a = @input_buffer[-2]; b = @input_buffer[-1]
+        @input_buffer[-2] = b
+        @input_buffer[-1] = a
+        process_output("\b\b#{b}#{a}")
+      else
+        a = @input_buffer[@input_cursor - 1]
+        b = @input_buffer[@input_cursor]
+        @input_buffer[@input_cursor - 1] = b
+        @input_buffer[@input_cursor] = a
+        process_output("\b#{b}#{a}")
+        @input_cursor += 1
+      end
     end
 
     def redraw_screen
