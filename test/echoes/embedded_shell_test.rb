@@ -14,15 +14,17 @@ class Echoes::EmbeddedShellTest < Test::Unit::TestCase
   end
 
   test "captures stdout from a builtin" do
+    # Capture is via a pty, so the kernel's ONLCR converts "\n" to "\r\n"
+    # — the same shape a real terminal would see from the same builtin.
     @shell.submit_line("echo hello")
-    assert_equal "hello\n", @shell.read_available_output
+    assert_equal "hello\r\n", @shell.read_available_output
   end
 
   test "read_available_output drains the buffer" do
     @shell.submit_line("echo a")
     @shell.read_available_output
     @shell.submit_line("echo b")
-    assert_equal "b\n", @shell.read_available_output
+    assert_equal "b\r\n", @shell.read_available_output
   end
 
   test "cd changes the embedded shell's cwd" do
@@ -61,9 +63,9 @@ class Echoes::EmbeddedShellTest < Test::Unit::TestCase
 
   test "captures stdout from a forked external command" do
     # /bin/echo is a real fork+exec; the StringIO trick wouldn't catch
-    # this. The pipe-redirect path must.
+    # this. The pty-redirect path must.
     @shell.submit_line("/bin/echo external hello")
-    assert_equal "external hello\n", @shell.read_available_output
+    assert_equal "external hello\r\n", @shell.read_available_output
   end
 
   test "captures stdout from an external command in a pipeline" do
@@ -77,12 +79,21 @@ class Echoes::EmbeddedShellTest < Test::Unit::TestCase
     end
   end
 
-  test "captures larger external output (exceeds pipe buffer if not drained)" do
+  test "external commands see a real TTY on stdout" do
+    # Programs branch on isatty(stdout) — the pipe-based capture would
+    # have failed this test (children's FD 1 was a pipe, not a tty).
+    # With the pty-based capture, FD 1 is a pty slave (a real tty
+    # device), so isatty returns true.
+    @shell.submit_line("test -t 1 && echo TTY || echo NO_TTY")
+    assert_equal "TTY\r\n", @shell.read_available_output
+  end
+
+  test "captures larger external output (exceeds pty buffer if not drained)" do
     # seq writes to FD 1 quickly; the reader thread must drain
-    # concurrently or the child blocks at the pipe buffer boundary.
+    # concurrently or the child blocks at the kernel pty buffer.
     @shell.submit_line("seq 5000")
     out = @shell.read_available_output
-    lines = out.split("\n")
+    lines = out.split("\r\n")
     assert_equal 5000, lines.size
     assert_equal "1", lines.first
     assert_equal "5000", lines.last

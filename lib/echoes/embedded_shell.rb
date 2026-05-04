@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'stringio'
+require 'pty'
 
 module Echoes
   # Wraps a Rubish::REPL running in the same Ruby process as Echoes,
@@ -69,21 +70,29 @@ module Echoes
     private
 
     # Capture stdout and stderr produced during the block, including
-    # writes from forked child processes. Uses an OS pipe and
-    # STDOUT.reopen so anything that ends up on FD 1 / FD 2 of this
-    # process (or any child that inherits them) lands in the buffer —
-    # not just Ruby-level $stdout writes from builtins.
+    # writes from forked child processes — and additionally make those
+    # writes look like they're going to a real terminal, so programs
+    # that branch on isatty(stdout) (`ls --color=auto`, `git log`,
+    # paginators, …) emit their richer output instead of the
+    # "redirected to a file" variant.
     #
-    # A reader thread drains the pipe concurrently so a child
-    # producing more than the kernel pipe buffer (~64 KiB) doesn't
-    # deadlock.
+    # We do this by allocating a pty pair (master, slave). The slave
+    # is a TTY device. We point this process's FD 1 / FD 2 at the
+    # slave (via STDOUT.reopen). Any fork() that follows inherits FD
+    # 1/2 still pointing at the slave, so isatty returns true for the
+    # child too.
+    #
+    # A reader thread drains the master concurrently so a child
+    # producing more than the kernel pty buffer doesn't deadlock.
+    # Errno::EIO is the canonical "all writers closed" outcome on
+    # macOS PTY masters; we treat it as EOF.
     def capture_output
-      reader_io, writer_io = IO.pipe
+      master, slave = PTY.open
       reader = Thread.new do
         captured = +''
         begin
-          loop { captured << reader_io.readpartial(4096) }
-        rescue EOFError, IOError
+          loop { captured << master.readpartial(4096) }
+        rescue EOFError, IOError, Errno::EIO
         end
         captured
       end
@@ -93,8 +102,8 @@ module Echoes
       saved_stdout_glob = $stdout
       saved_stderr_glob = $stderr
 
-      STDOUT.reopen(writer_io)
-      STDERR.reopen(writer_io)
+      STDOUT.reopen(slave)
+      STDERR.reopen(slave)
       $stdout = STDOUT
       $stderr = STDERR
 
@@ -109,11 +118,11 @@ module Echoes
         saved_stderr.close
         $stdout = saved_stdout_glob
         $stderr = saved_stderr_glob
-        writer_io.close
+        slave.close
       end
 
       @output_buffer << reader.value
-      reader_io.close
+      master.close
     end
   end
 end
