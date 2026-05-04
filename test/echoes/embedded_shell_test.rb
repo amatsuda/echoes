@@ -58,6 +58,35 @@ class Echoes::EmbeddedShellTest < Test::Unit::TestCase
     @shell.submit_line("true")
     assert_equal 0, @shell.last_status
   end
+
+  test "captures stdout from a forked external command" do
+    # /bin/echo is a real fork+exec; the StringIO trick wouldn't catch
+    # this. The pipe-redirect path must.
+    @shell.submit_line("/bin/echo external hello")
+    assert_equal "external hello\n", @shell.read_available_output
+  end
+
+  test "captures stdout from an external command in a pipeline" do
+    Dir.mktmpdir do |dir|
+      File.write(File.join(dir, "a.txt"), "")
+      File.write(File.join(dir, "b.txt"), "")
+      @shell.submit_line("ls #{dir}")
+      out = @shell.read_available_output
+      assert_includes out, "a.txt"
+      assert_includes out, "b.txt"
+    end
+  end
+
+  test "captures larger external output (exceeds pipe buffer if not drained)" do
+    # seq writes to FD 1 quickly; the reader thread must drain
+    # concurrently or the child blocks at the pipe buffer boundary.
+    @shell.submit_line("seq 5000")
+    out = @shell.read_available_output
+    lines = out.split("\n")
+    assert_equal 5000, lines.size
+    assert_equal "1", lines.first
+    assert_equal "5000", lines.last
+  end
 end
 
 class Echoes::EmbeddedPaneTest < Test::Unit::TestCase

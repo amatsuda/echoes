@@ -68,17 +68,52 @@ module Echoes
 
     private
 
+    # Capture stdout and stderr produced during the block, including
+    # writes from forked child processes. Uses an OS pipe and
+    # STDOUT.reopen so anything that ends up on FD 1 / FD 2 of this
+    # process (or any child that inherits them) lands in the buffer —
+    # not just Ruby-level $stdout writes from builtins.
+    #
+    # A reader thread drains the pipe concurrently so a child
+    # producing more than the kernel pipe buffer (~64 KiB) doesn't
+    # deadlock.
     def capture_output
-      old_out = $stdout
-      old_err = $stderr
-      $stdout = StringIO.new
-      $stderr = StringIO.new
-      yield
-      @output_buffer << $stdout.string
-      @output_buffer << $stderr.string
-    ensure
-      $stdout = old_out
-      $stderr = old_err
+      reader_io, writer_io = IO.pipe
+      reader = Thread.new do
+        captured = +''
+        begin
+          loop { captured << reader_io.readpartial(4096) }
+        rescue EOFError, IOError
+        end
+        captured
+      end
+
+      saved_stdout = STDOUT.dup
+      saved_stderr = STDERR.dup
+      saved_stdout_glob = $stdout
+      saved_stderr_glob = $stderr
+
+      STDOUT.reopen(writer_io)
+      STDERR.reopen(writer_io)
+      $stdout = STDOUT
+      $stderr = STDERR
+
+      begin
+        yield
+        STDOUT.flush rescue nil
+        STDERR.flush rescue nil
+      ensure
+        STDOUT.reopen(saved_stdout)
+        STDERR.reopen(saved_stderr)
+        saved_stdout.close
+        saved_stderr.close
+        $stdout = saved_stdout_glob
+        $stderr = saved_stderr_glob
+        writer_io.close
+      end
+
+      @output_buffer << reader.value
+      reader_io.close
     end
   end
 end
