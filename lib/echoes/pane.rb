@@ -24,6 +24,7 @@ module Echoes
         @parser = Parser.new(@screen, writer: ->(_s) { })
         @title = 'rubish'
         @input_buffer = +''
+        @embedded_running = false
       else
         start_dir = (cwd && Dir.exist?(cwd)) ? cwd : Dir.home
         Dir.chdir(start_dir) do
@@ -70,9 +71,19 @@ module Echoes
 
     # Drain whatever output bytes are available from the shell right now.
     # Returns "" if nothing is ready; never blocks; never raises.
+    #
+    # In embedded mode this is also where we detect that an async
+    # command has finished — we drain its trailing output, append a
+    # fresh prompt, and re-enable the in-pane line editor.
     def read_available_output(max = 16384)
       if embedded?
-        @embedded_shell.read_available_output
+        out = @embedded_shell.read_available_output
+        if @embedded_running && @embedded_shell.reap_if_done
+          out << @embedded_shell.read_available_output
+          out << @embedded_shell.prompt.to_s
+          @embedded_running = false
+        end
+        out
       else
         @pty_read.read_nonblock(max)
       end
@@ -111,14 +122,30 @@ module Echoes
     # the event, false if the GUI should fall through to its own
     # PTY-style handling (which is the only mode in non-embedded panes).
     #
-    # Phase 1: a tiny line editor — printable chars echo to the screen
-    # and append to @input_buffer; Backspace pops a char and erases the
-    # last cell; Enter submits the buffered line, captures output, and
-    # re-renders the prompt. No history nav, no left/right cursor moves,
-    # no Tab completion yet.
+    # Two states:
+    #   - prompt mode (no command running): printable chars echo to the
+    #     screen and append to @input_buffer; Backspace pops a char and
+    #     erases the last cell; Enter submits the buffered line for
+    #     async execution.
+    #   - running mode (a command is in flight): keystrokes get
+    #     forwarded to the command's stdin via the pty master, so the
+    #     user can type into vim, scroll less, etc. Ctrl-C interrupts.
     def handle_key(chars:, flags: 0)
       return false unless embedded?
       return true if chars.nil? || chars.empty?
+
+      if @embedded_shell.running?
+        # Ctrl-C → ETX on the pty's master, kernel turns it into SIGINT
+        # delivered to the foreground process group on the pty.
+        if (flags & 0x40000) != 0 && chars.length == 1 && chars.ord >= 0x20
+          # Cocoa ControlKeyMask = 0x40000; chars is the literal pressed
+          # key (e.g. "c"); 0x1F mask gives the control byte.
+          @embedded_shell.forward_input((chars.ord & 0x1F).chr)
+        else
+          @embedded_shell.forward_input(chars)
+        end
+        return true
+      end
 
       case chars
       when "\r", "\n"
@@ -126,16 +153,13 @@ module Echoes
         @input_buffer = +''
         process_output("\r\n")
         @embedded_shell.submit_line(line)
-        drain_and_render_output
-        render_prompt
-      when "\u{7F}", "\b"  # DEL (macOS Backspace) or BS
+        @embedded_running = true
+      when "\u{7F}", "\b"
         unless @input_buffer.empty?
           @input_buffer.chop!
           process_output("\b \b")
         end
       else
-        # Printable ASCII / multibyte; ignore single-byte controls (< 0x20)
-        # other than the cases above.
         first = chars.bytes.first
         if first && first >= 0x20
           @input_buffer << chars
@@ -147,19 +171,7 @@ module Echoes
 
     private
 
-    def drain_and_render_output
-      out = @embedded_shell.read_available_output
-      return if out.empty?
-      # Builtins emit bare \n; the cell-grid parser expects \r\n.
-      process_output(out.gsub(/(?<!\r)\n/, "\r\n"))
-    end
-
     def render_initial_prompt
-      drain_and_render_output  # in case any startup output is buffered
-      render_prompt
-    end
-
-    def render_prompt
       process_output(@embedded_shell.prompt.to_s)
     end
   end

@@ -16,19 +16,19 @@ class Echoes::EmbeddedShellTest < Test::Unit::TestCase
   test "captures stdout from a builtin" do
     # Capture is via a pty, so the kernel's ONLCR converts "\n" to "\r\n"
     # — the same shape a real terminal would see from the same builtin.
-    @shell.submit_line("echo hello")
+    @shell.submit_and_wait("echo hello")
     assert_equal "hello\r\n", @shell.read_available_output
   end
 
   test "read_available_output drains the buffer" do
-    @shell.submit_line("echo a")
+    @shell.submit_and_wait("echo a")
     @shell.read_available_output
-    @shell.submit_line("echo b")
+    @shell.submit_and_wait("echo b")
     assert_equal "b\r\n", @shell.read_available_output
   end
 
   test "cd changes the embedded shell's cwd" do
-    @shell.submit_line("cd /tmp")
+    @shell.submit_and_wait("cd /tmp")
     assert_equal "/private/tmp", @shell.cwd
   end
 
@@ -57,14 +57,14 @@ class Echoes::EmbeddedShellTest < Test::Unit::TestCase
   end
 
   test "last_status reflects the last command's exit status" do
-    @shell.submit_line("true")
+    @shell.submit_and_wait("true")
     assert_equal 0, @shell.last_status
   end
 
   test "captures stdout from a forked external command" do
     # /bin/echo is a real fork+exec; the StringIO trick wouldn't catch
     # this. The pty-redirect path must.
-    @shell.submit_line("/bin/echo external hello")
+    @shell.submit_and_wait("/bin/echo external hello")
     assert_equal "external hello\r\n", @shell.read_available_output
   end
 
@@ -72,7 +72,7 @@ class Echoes::EmbeddedShellTest < Test::Unit::TestCase
     Dir.mktmpdir do |dir|
       File.write(File.join(dir, "a.txt"), "")
       File.write(File.join(dir, "b.txt"), "")
-      @shell.submit_line("ls #{dir}")
+      @shell.submit_and_wait("ls #{dir}")
       out = @shell.read_available_output
       assert_includes out, "a.txt"
       assert_includes out, "b.txt"
@@ -84,19 +84,31 @@ class Echoes::EmbeddedShellTest < Test::Unit::TestCase
     # have failed this test (children's FD 1 was a pipe, not a tty).
     # With the pty-based capture, FD 1 is a pty slave (a real tty
     # device), so isatty returns true.
-    @shell.submit_line("test -t 1 && echo TTY || echo NO_TTY")
+    @shell.submit_and_wait("test -t 1 && echo TTY || echo NO_TTY")
     assert_equal "TTY\r\n", @shell.read_available_output
   end
 
   test "captures larger external output (exceeds pty buffer if not drained)" do
     # seq writes to FD 1 quickly; the reader thread must drain
     # concurrently or the child blocks at the kernel pty buffer.
-    @shell.submit_line("seq 5000")
+    @shell.submit_and_wait("seq 5000")
     out = @shell.read_available_output
     lines = out.split("\r\n")
     assert_equal 5000, lines.size
     assert_equal "1", lines.first
     assert_equal "5000", lines.last
+  end
+
+  test "submit_line returns immediately while the command runs" do
+    # Async contract: the call site shouldn't block. We give the
+    # command a short sleep so we have a window to inspect state in.
+    t0 = Time.now
+    @shell.submit_line("/bin/sleep 0.5")
+    elapsed = Time.now - t0
+    assert_operator elapsed, :<, 0.2,
+      "submit_line should return immediately, took #{elapsed}s"
+    assert @shell.running?, "command should still be running"
+    @shell.submit_and_wait("true")  # waits for the prior sleep too
   end
 end
 
@@ -120,6 +132,21 @@ class Echoes::EmbeddedPaneTest < Test::Unit::TestCase
     }.reject(&:empty?)
   end
 
+  # Drive a tick loop until the embedded shell has finished its in-flight
+  # command (mirrors what the GUI's NSTimer does).
+  def settle(timeout: 5)
+    deadline = Time.now + timeout
+    while Time.now < deadline
+      out = @pane.read_available_output
+      @pane.process_output(out) unless out.empty?
+      break unless @pane.embedded_shell.running?
+      sleep 0.01
+    end
+    # one final drain to capture trailing output + new prompt
+    out = @pane.read_available_output
+    @pane.process_output(out) unless out.empty?
+  end
+
   test "embedded pane renders an initial prompt on construction" do
     assert_operator grid_rows.size, :>=, 1
     assert_match(/\$\s*$/, grid_rows.first)
@@ -128,6 +155,7 @@ class Echoes::EmbeddedPaneTest < Test::Unit::TestCase
   test "typing echoes characters to the screen and Enter submits the line" do
     "echo hi".chars.each { |c| @pane.handle_key(chars: c) }
     @pane.handle_key(chars: "\r")
+    settle
     rows = grid_rows
     assert(rows.any? { |r| r.include?("echo hi") }, "expected typed line in #{rows.inspect}")
     assert_includes rows, "hi"
@@ -140,6 +168,7 @@ class Echoes::EmbeddedPaneTest < Test::Unit::TestCase
     3.times { @pane.handle_key(chars: "\u{7F}") }  # erase "abc"
     "x".chars.each { |c| @pane.handle_key(chars: c) }
     @pane.handle_key(chars: "\r")
+    settle
     rows = grid_rows
     assert rows.any? { |r| r.include?("echo x") }, "expected 'echo x' line in #{rows.inspect}"
     assert_includes rows, "x"
