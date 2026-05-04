@@ -387,6 +387,16 @@ class Echoes::EmbeddedPaneTest < Test::Unit::TestCase
     assert_equal 2, cursor
   end
 
+  test "Ctrl-P / Ctrl-N walk history (aliases for ↑/↓)" do
+    "echo hi".chars.each { |c| @pane.handle_key(chars: c) }
+    @pane.handle_key(chars: "\r")
+    settle
+    @pane.handle_key(chars: "p", flags: CTRL)  # ↑
+    assert_equal "echo hi", buf
+    @pane.handle_key(chars: "n", flags: CTRL)  # ↓
+    assert_equal "", buf
+  end
+
   test "Ctrl-C at prompt clears the input and drops a fresh prompt" do
     "half typed".chars.each { |c| @pane.handle_key(chars: c) }
     @pane.handle_key(chars: "c", flags: CTRL)
