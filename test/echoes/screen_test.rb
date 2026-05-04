@@ -709,4 +709,56 @@ class Echoes::ScreenTest < Test::Unit::TestCase
     @screen.switch_to_main_screen
     assert_equal((0...5).to_a.to_set, @screen.dirty_rows)
   end
+
+  # --- put_styled_segments (native prompt rendering) ---
+
+  test "put_styled_segments writes plain text into cells" do
+    @screen.put_styled_segments([{text: "hi", fg: nil, bg: nil}])
+    assert_equal "h", @screen.grid[0][0].char
+    assert_equal "i", @screen.grid[0][1].char
+  end
+
+  test "put_styled_segments applies fg/bg/bold/italic/underline/inverse" do
+    seg = {text: "X", fg: 1, bg: 2, bold: true, italic: true,
+           underline: true, inverse: true}
+    @screen.put_styled_segments([seg])
+    cell = @screen.grid[0][0]
+    assert_equal "X",  cell.char
+    assert_equal 1,    cell.fg
+    assert_equal 2,    cell.bg
+    assert_equal true, cell.bold
+    assert_equal true, cell.italic
+    assert_equal true, cell.underline
+    assert_equal true, cell.inverse
+  end
+
+  test "put_styled_segments translates [:rgb, r, g, b] to [r, g, b]" do
+    @screen.put_styled_segments([{text: "X", fg: [:rgb, 10, 20, 30], bg: [:rgb, 40, 50, 60]}])
+    cell = @screen.grid[0][0]
+    assert_equal [10, 20, 30], cell.fg
+    assert_equal [40, 50, 60], cell.bg
+  end
+
+  test "put_styled_segments restores prior @attrs after writing" do
+    # Pre-load some SGR state via the parser path.
+    parser = Echoes::Parser.new(@screen)
+    parser.feed("\e[31m")  # red fg
+    @screen.put_styled_segments([{text: "Y", fg: 4, bold: true}])
+    parser.feed("Z")
+    assert_equal 4, @screen.grid[0][0].fg
+    assert_equal 1, @screen.grid[0][1].fg  # red restored — Z is red
+    assert_equal false, @screen.grid[0][1].bold
+  end
+
+  test "put_styled_segments handles multiple segments with mixed attrs" do
+    segs = [
+      {text: "ab",  fg: 1, bold: true},
+      {text: "cd",  fg: 2, bold: false},
+    ]
+    @screen.put_styled_segments(segs)
+    assert_equal 1, @screen.grid[0][0].fg
+    assert_equal true, @screen.grid[0][0].bold
+    assert_equal 2, @screen.grid[0][2].fg
+    assert_equal false, @screen.grid[0][2].bold
+  end
 end

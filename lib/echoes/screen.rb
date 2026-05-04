@@ -670,6 +670,55 @@ module Echoes
       @attrs.hyperlink = uri
     end
 
+    # Write a sequence of styled prompt segments directly into the
+    # cell grid, bypassing the ANSI SGR parser. Each segment is a
+    # `{text:, fg:, bg:, bold:, italic:, underline:, inverse:}` Hash
+    # (see `Rubish::REPL#prompt_segments`). Color values follow
+    # rubish's encoding: nil = default, 0..255 = palette index,
+    # `[:rgb, r, g, b]` = true color (translated to `[r, g, b]` for
+    # this Screen's storage convention).
+    #
+    # Existing `@attrs` is snapshotted and restored so any in-flight
+    # SGR state from prior parser-driven rendering is preserved.
+    def put_styled_segments(segments)
+      saved_fg        = @attrs.fg
+      saved_bg        = @attrs.bg
+      saved_bold      = @attrs.bold
+      saved_italic    = @attrs.italic
+      saved_underline = @attrs.underline
+      saved_inverse   = @attrs.inverse
+      begin
+        segments.each do |seg|
+          @attrs.fg        = translate_segment_color(seg[:fg])
+          @attrs.bg        = translate_segment_color(seg[:bg])
+          @attrs.bold      = !!seg[:bold]
+          @attrs.italic    = !!seg[:italic]
+          @attrs.underline = !!seg[:underline]
+          @attrs.inverse   = !!seg[:inverse]
+          (seg[:text] || '').each_char { |c| put_char(c) }
+        end
+      ensure
+        @attrs.fg        = saved_fg
+        @attrs.bg        = saved_bg
+        @attrs.bold      = saved_bold
+        @attrs.italic    = saved_italic
+        @attrs.underline = saved_underline
+        @attrs.inverse   = saved_inverse
+      end
+    end
+
+    private def translate_segment_color(color)
+      case color
+      when nil       then nil
+      when Integer   then color
+      when Array
+        # rubish exposes true color as [:rgb, r, g, b]; this Screen
+        # stores it as [r, g, b].
+        color.first == :rgb ? color[1..3] : color
+      end
+    end
+    public
+
     # OSC 133 prompt boundary marker. `kind` is one of:
     #   :prompt_start  — OSC 133 ; A — beginning of a fresh prompt block
     #   :prompt_end    — OSC 133 ; B — end of prompt / start of input

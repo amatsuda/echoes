@@ -95,9 +95,14 @@ module Echoes
         if @embedded_running && @embedded_shell.reap_if_done
           out << @embedded_shell.read_available_output
           out << osc133_d(@embedded_shell.last_status)
-          out << osc133_a
-          out << @embedded_shell.prompt.to_s
-          out << osc133_b
+          # Drain trailing output + ;D through the parser ourselves
+          # so we can render the next prompt natively (skipping the
+          # ANSI SGR roundtrip) before returning.
+          process_output(out)
+          out = +''
+          process_output(osc133_a)
+          render_prompt_natively
+          process_output(osc133_b)
           @embedded_running = false
         end
         out
@@ -318,8 +323,23 @@ module Echoes
 
     def render_initial_prompt
       process_output(osc133_a)
-      process_output(@embedded_shell.prompt.to_s)
+      render_prompt_natively
       process_output(osc133_b)
+    end
+
+    # Render the current prompt by pulling rubish's structured
+    # `prompt_segments` and writing them directly to cells via
+    # `Screen#put_styled_segments` — no ANSI SGR roundtrip. Falls
+    # back to the legacy ANSI string path if segments aren't
+    # available (defensive — empty array can mean an unhelpful
+    # default-styled prompt with no text).
+    def render_prompt_natively
+      segments = @embedded_shell.prompt_segments
+      if segments && !segments.empty?
+        @screen.put_styled_segments(segments)
+      else
+        process_output(@embedded_shell.prompt.to_s)
+      end
     end
 
     # OSC 133 escape strings. Hosts surrounding shells in their own
@@ -524,7 +544,7 @@ module Echoes
         @history_saved = nil
         @autosuggestion = +''
         process_output(osc133_a)
-        process_output(@embedded_shell.prompt.to_s)
+        render_prompt_natively
         process_output(osc133_b)
         true
       else
@@ -596,7 +616,7 @@ module Echoes
 
     def redraw_screen
       process_output("\e[2J\e[H")
-      process_output(@embedded_shell.prompt.to_s)
+      render_prompt_natively
       process_output(colorize_input(@input_buffer))
       process_output("\e[2m" + @autosuggestion + "\e[0m") unless @autosuggestion.empty?
       back = @input_buffer.length + @autosuggestion.length - @input_cursor
@@ -726,7 +746,7 @@ module Echoes
           process_output("\r\n") if i % per_row == per_row - 1
         end
         process_output("\r\n") unless candidates.size % per_row == 0
-        process_output(@embedded_shell.prompt.to_s)
+        render_prompt_natively
         process_output(colorize_input(@input_buffer))
         # Cursor on screen is at end after the redraw; sync state.
         @input_cursor = @input_buffer.length
@@ -973,7 +993,7 @@ module Echoes
         @search_saved_cursor = nil
         @search_saved_autosuggestion = nil
         process_output("\r\e[K")
-        process_output(@embedded_shell.prompt.to_s)
+        render_prompt_natively
         process_output(colorize_input(@input_buffer))
         submit_or_continue
       else  # :cancel
@@ -987,7 +1007,7 @@ module Echoes
         @search_saved_cursor = nil
         @search_saved_autosuggestion = nil
         process_output("\r\e[K")
-        process_output(@embedded_shell.prompt.to_s)
+        render_prompt_natively
         process_output(colorize_input(@input_buffer))
         process_output("\e[2m" + @autosuggestion + "\e[0m") unless @autosuggestion.empty?
         back = @input_buffer.length + @autosuggestion.length - @input_cursor

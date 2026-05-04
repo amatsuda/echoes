@@ -240,6 +240,12 @@ class Echoes::EmbeddedPaneTest < Test::Unit::TestCase
     assert_match(/\$\s*$/, grid_rows.first)
   end
 
+  test "the initial prompt is rendered natively (no SGR escapes in cells)" do
+    flat = @pane.screen.grid.map { |row| row.map { |c| c.char || ' ' }.join }.join
+    refute_includes flat, "\e", "raw escape characters should never land in cells"
+    refute_includes flat, "[", "ANSI bracket marker should never land in cells"
+  end
+
   test "typing echoes characters to the screen and Enter submits the line" do
     "echo hi".chars.each { |c| @pane.handle_key(chars: c) }
     @pane.handle_key(chars: "\r")
