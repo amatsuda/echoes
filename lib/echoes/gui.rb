@@ -1160,14 +1160,14 @@ module Echoes
       mod = modifier_param(flags)
 
       if chars == "\u{19}"  # NSBackTabCharacter (Shift+Tab on macOS)
-        pane.pty_write.write("\e[Z")
+        pane.write_input("\e[Z")
       elsif mod > 1 && (seq = map_modified_key(chars, mod))
-        pane.pty_write.write(seq)
+        pane.write_input(seq)
       elsif (flags & ObjC::NSEventModifierFlagControl) != 0
         ctrl_char = (chars[0].ord & 0x1F).chr
-        pane.pty_write.write(ctrl_char)
+        pane.write_input(ctrl_char)
       elsif (flags & ObjC::NSEventModifierFlagOption) != 0
-        pane.pty_write.write("\e#{chars}")
+        pane.write_input("\e#{chars}")
       else
         # Route through input method for IME support
         @current_event = event_ptr
@@ -1217,7 +1217,7 @@ module Echoes
       return unless tab
       pane = tab.active_pane
       return unless pane
-      pane.pty_write.write(text)
+      pane.write_input(text)
     rescue Errno::EIO, IOError
       close_tab(@active_tab)
     end
@@ -1238,7 +1238,7 @@ module Echoes
 
       numpad = (flags & ObjC::NSEventModifierFlagNumericPad) != 0
       actual = chars.empty? ? chars2 : chars
-      pane.pty_write.write(map_special_keys(actual, pane.screen.application_cursor_keys?, app_keypad: numpad && pane.screen.application_keypad))
+      pane.write_input(map_special_keys(actual, pane.screen.application_cursor_keys?, app_keypad: numpad && pane.screen.application_keypad))
     rescue Errno::EIO, IOError
       close_tab(@active_tab)
     end
@@ -1290,16 +1290,11 @@ module Echoes
 
       @tabs.each do |tab|
         tab.panes.each do |pane|
-          begin
-            loop do
-              data = pane.pty_read.read_nonblock(16384)
-              pane.process_output(data)
-              need_redraw = true
-            end
-          rescue IO::WaitReadable
-            # No more data for this pane
-          rescue EOFError, Errno::EIO, IOError
-            # Pane's process exited or stream was closed — will be cleaned up
+          loop do
+            data = pane.read_available_output(16384)
+            break if data.empty?
+            pane.process_output(data)
+            need_redraw = true
           end
           if need_redraw && pane.screen.title
             tab.title = pane.screen.title if pane == tab.active_pane
@@ -1584,7 +1579,7 @@ module Echoes
       return unless pane&.screen&.focus_reporting?
 
       seq = focused ? "\e[I" : "\e[O"
-      pane.pty_write.write(seq) rescue nil
+      pane.write_input(seq)
     end
 
     def update_font(new_size)
@@ -1617,11 +1612,11 @@ module Echoes
 
       pane = current_tab.active_pane
       if pane.screen.bracketed_paste_mode?
-        pane.pty_write.write("\e[200~")
-        pane.pty_write.write(str)
-        pane.pty_write.write("\e[201~")
+        pane.write_input("\e[200~")
+        pane.write_input(str)
+        pane.write_input("\e[201~")
       else
-        pane.pty_write.write(str)
+        pane.write_input(str)
       end
       true
     rescue Errno::EIO, IOError
@@ -1777,11 +1772,11 @@ module Echoes
 
       pane = current_tab.active_pane
       if pane.screen.bracketed_paste_mode?
-        pane.pty_write.write("\e[200~")
-        pane.pty_write.write(str)
-        pane.pty_write.write("\e[201~")
+        pane.write_input("\e[200~")
+        pane.write_input(str)
+        pane.write_input("\e[201~")
       else
-        pane.pty_write.write(str)
+        pane.write_input(str)
       end
     rescue Errno::EIO, IOError
     end
@@ -2324,9 +2319,9 @@ module Echoes
       cy = row + 1
       if tab.screen.mouse_encoding == :sgr
         final = release ? 'm' : 'M'
-        tab.pty_write.write("\e[<#{button};#{cx};#{cy}#{final}")
+        tab.write_input("\e[<#{button};#{cx};#{cy}#{final}")
       else
-        tab.pty_write.write("\e[M#{(button + 32).chr}#{(cx + 32).chr}#{(cy + 32).chr}")
+        tab.write_input("\e[M#{(button + 32).chr}#{(cx + 32).chr}#{(cy + 32).chr}")
       end
     rescue Errno::EIO, IOError
     end

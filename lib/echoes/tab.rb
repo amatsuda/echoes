@@ -40,6 +40,18 @@ module Echoes
       active_pane.pty_pid
     end
 
+    def write_input(bytes)
+      active_pane.write_input(bytes)
+    end
+
+    def submit_line(line)
+      active_pane.submit_line(line)
+    end
+
+    def read_available_output(max = 16384)
+      active_pane.read_available_output(max)
+    end
+
     def scroll_offset
       active_pane.scroll_offset
     end
