@@ -41,6 +41,13 @@ module Echoes
       @repl.prompt_segments
     end
 
+    # The prompt as a single String containing ANSI escape codes — useful
+    # for hosts that already have an ANSI-aware renderer and want to feed
+    # the prompt through it (vs. parsing segments themselves).
+    def prompt
+      @repl.prompt
+    end
+
     # Tab-completion candidates for the given input line and cursor
     # position. Returns an Array of String.
     def complete_at(line:, point:)

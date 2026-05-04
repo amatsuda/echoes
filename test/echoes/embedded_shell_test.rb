@@ -59,3 +59,49 @@ class Echoes::EmbeddedShellTest < Test::Unit::TestCase
     assert_equal 0, @shell.last_status
   end
 end
+
+class Echoes::EmbeddedPaneTest < Test::Unit::TestCase
+  # Phase-1 line editor lives on Pane; verify keystroke -> echo -> submit
+  # cycle works end-to-end against an embedded shell.
+
+  def setup
+    require "echoes/pane"
+    @pane = Echoes::Pane.new(command: "/bin/sh", rows: 24, cols: 80, embedded: true)
+    @original_dir = Dir.pwd
+  end
+
+  def teardown
+    Dir.chdir(@original_dir)
+  end
+
+  def grid_rows(n = 8)
+    @pane.screen.grid.first(n).map { |row|
+      row.map { |c| c.char || " " }.join.rstrip
+    }.reject(&:empty?)
+  end
+
+  test "embedded pane renders an initial prompt on construction" do
+    assert_operator grid_rows.size, :>=, 1
+    assert_match(/\$\s*$/, grid_rows.first)
+  end
+
+  test "typing echoes characters to the screen and Enter submits the line" do
+    "echo hi".chars.each { |c| @pane.handle_key(chars: c) }
+    @pane.handle_key(chars: "\r")
+    rows = grid_rows
+    assert(rows.any? { |r| r.include?("echo hi") }, "expected typed line in #{rows.inspect}")
+    assert_includes rows, "hi"
+    # New prompt should appear after the output
+    assert_match(/\$\s*$/, rows.last)
+  end
+
+  test "backspace pops the input buffer and erases the last cell" do
+    "echo abc".chars.each { |c| @pane.handle_key(chars: c) }
+    3.times { @pane.handle_key(chars: "\u{7F}") }  # erase "abc"
+    "x".chars.each { |c| @pane.handle_key(chars: c) }
+    @pane.handle_key(chars: "\r")
+    rows = grid_rows
+    assert rows.any? { |r| r.include?("echo x") }, "expected 'echo x' line in #{rows.inspect}"
+    assert_includes rows, "x"
+  end
+end

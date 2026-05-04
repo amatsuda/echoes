@@ -71,7 +71,7 @@ module Echoes
 
     def create_tab
       cwd = self.class.pane_local_cwd(current_tab&.active_pane)
-      tab = Tab.new(command: @command, rows: @rows, cols: @cols, cwd: cwd)
+      tab = Tab.new(command: @command, rows: @rows, cols: @cols, cwd: cwd, embedded: embedded_mode?)
       tab.title = "Tab #{@tabs.size + 1}"
       tab.panes.each do |pane|
         if @cell_width && @cell_height
@@ -122,6 +122,13 @@ module Echoes
 
     def current_tab
       @tabs[@active_tab]
+    end
+
+    # Phase 1 launch flag for the in-process Rubish embedding. Setting
+    # ECHOES_EMBED=1 in the environment routes new Tab/Pane creation
+    # through Echoes::EmbeddedShell instead of PTY.spawn.
+    def embedded_mode?
+      ENV['ECHOES_EMBED'] == '1'
     end
 
     def activate_for_view(view_ptr)
@@ -1157,6 +1164,15 @@ module Echoes
       chars = ObjC.to_ruby_string(chars_ns)
       return if chars.empty?
 
+      # Embedded-shell panes don't speak the byte-stream / escape-code
+      # protocol; they have an in-Echoes line editor that submits
+      # finished lines to a Rubish::REPL via direct method calls.
+      if pane.embedded?
+        pane.handle_key(chars: chars, flags: flags)
+        ObjC::MSG_VOID_I.call(@view, ObjC.sel('setNeedsDisplay:'), 1)
+        return
+      end
+
       mod = modifier_param(flags)
 
       if chars == "\u{19}"  # NSBackTabCharacter (Shift+Tab on macOS)
@@ -1646,7 +1662,7 @@ module Echoes
       save_window_state
 
       # Create tab
-      tab = Tab.new(command: @command, rows: @rows, cols: @cols)
+      tab = Tab.new(command: @command, rows: @rows, cols: @cols, embedded: embedded_mode?)
       tab.title = "Shell"
       tab.panes.each do |pane|
         if @cell_width && @cell_height
