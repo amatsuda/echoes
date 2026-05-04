@@ -116,12 +116,16 @@ module Echoes
 
     def close
       if embedded?
-        # Closing an embedded pane while a command is running is a
-        # known phase-1 limitation: rubish forks the child without
-        # setsid + opening the pty slave as ctty, so our pty has no
-        # foreground process group and ETX-via-the-master can't
-        # deliver SIGINT. The child orphans and runs to completion;
-        # the command thread joins the reader naturally on exit.
+        # Phase-1 known limitation: rubish forks children in echoes'
+        # own session without ctty, so ETX-via-pty-master can't
+        # deliver SIGINT (no foreground process group on the pty).
+        # The naive fix — having the child claim the pty as ctty —
+        # works for one-shot commands but breaks loops/pipelines:
+        # when the first session-leader child exits, the kernel
+        # hangs the pty up and subsequent writes return EIO. The
+        # right fix is a long-lived ctty owner (a per-pane helper
+        # process), which is bigger than phase 1. For now: leave
+        # any in-flight command running; it'll exit on its own.
         return
       end
       @pty_write.close rescue nil

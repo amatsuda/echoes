@@ -30,12 +30,11 @@ module Echoes
       @repl = Rubish::REPL.new(no_rc: true)
       @output_buffer = +''
       @output_lock = Mutex.new
-      # Phase 1 has no way to forward keystrokes to running programs
-      # outside of an explicitly running command, so anything that auto-
-      # launches a pager (`git log`, `git diff`, `man`, …) would hang.
-      # Default the pager-related env vars to `cat` so those tools just
-      # dump their output. The user can override by setting a value
-      # before launching Echoes.
+      # Anything that auto-launches a pager (`git log`, `git diff`,
+      # `man`, …) would otherwise sit waiting for keys we don't
+      # forward to the running command yet. Default the pager-related
+      # env vars to `cat` so those tools just dump their output. The
+      # user can override by setting a value before launching Echoes.
       ENV['GIT_PAGER'] ||= 'cat'
       ENV['PAGER'] ||= 'cat'
     end
