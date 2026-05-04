@@ -656,23 +656,55 @@ module Echoes
     # cursor, splice it in and add a trailing space (or `/` for dirs).
     # Multiple candidates → print them inline below the prompt and
     # redraw the input. Zero → no-op (silent).
+    #
+    # The data-only `completion_request` and the splice helper
+    # `apply_completion` are public so the GUI can intercept multi-
+    # candidate completions and show a native NSMenu popup instead of
+    # the inline list.
     WORD_BREAK_CHARS = " \t\n\"'><=;|&{("
 
-    def complete_input
+    public  # the completion API is reached from gui.rb (the popup)
+
+    # Pure-data: ask the embedded shell what completions are available
+    # at the current cursor and locate the start of the word being
+    # completed. Returns nil when there are no candidates. Has no
+    # side effects on the screen.
+    def completion_request
       point = @input_cursor
       candidates = @embedded_shell.complete_at(line: @input_buffer, point: point)
-      return if candidates.empty?
+      return nil if candidates.empty?
+      word_start = point
+      word_start -= 1 while word_start > 0 && !WORD_BREAK_CHARS.include?(@input_buffer[word_start - 1])
+      {candidates: candidates, word_start: word_start, point: point}
+    end
+
+    # Splice `completion` into the input buffer in place of the partial
+    # word that starts at `word_start`. Adds a trailing space unless
+    # the completion already ends with `/` (a directory). Re-renders
+    # via `replace_input_line` so highlighting + autosuggestion stay
+    # consistent.
+    def apply_completion(word_start:, completion:)
+      completion = "#{completion} " unless completion.end_with?('/')
+      tail = @input_buffer[@input_cursor..] || ''
+      new_input = @input_buffer[0...word_start] + completion + tail
+      new_cursor = word_start + completion.length
+      replace_input_line(new_input, new_cursor)
+    end
+
+    private
+
+    def complete_input
+      req = completion_request
+      return unless req
+      candidates = req[:candidates]
 
       if candidates.size == 1
-        word_start = point
-        word_start -= 1 while word_start > 0 && !WORD_BREAK_CHARS.include?(@input_buffer[word_start - 1])
-        completion = candidates.first
-        completion = "#{completion} " unless completion.end_with?('/')
-        tail = @input_buffer[point..] || ''
-        new_input = @input_buffer[0...word_start] + completion + tail
-        new_cursor = word_start + completion.length
-        replace_input_line(new_input, new_cursor)
+        apply_completion(word_start: req[:word_start], completion: candidates.first)
       else
+        # GUI-less fallback (and what tests exercise): print the
+        # candidates inline below the prompt and redraw the input.
+        # In the windowed app the GUI intercepts Tab before this
+        # branch and shows an NSMenu popup instead.
         process_output("\r\n")
         per_row = 4
         candidates.each_with_index do |c, i|

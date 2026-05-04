@@ -651,6 +651,19 @@ module Echoes
         current_tab.prev_pane
         ObjC::MSG_VOID_I.call(@view, ObjC.sel('setNeedsDisplay:'), 1)
       })
+      # NSMenu items dispatched from the tab-completion popup. Unlike the
+      # main-menu actions, the completion picker needs the sender so we
+      # can read its tag (= candidate index); menu_action's no-arg
+      # convention isn't a fit, so wire it manually.
+      @completion_picked_closure = Fiddle::Closure::BlockCaller.new(
+        Fiddle::TYPE_VOID,
+        [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP]
+      ) do |_self, _cmd, sender|
+        gui.activate_for_view(_self); gui.completion_picked(sender)
+      rescue => e
+        gui.log_crash(e, context: 'completionPicked')
+      end
+
       @toggle_copy_mode_closure = menu_action.call(-> {
         pane = current_tab.active_pane
         if pane.copy_mode&.active
@@ -728,6 +741,7 @@ module Echoes
         'selectNextPane:'       => ['v@:@', @select_next_pane_closure],
         'selectPreviousPane:'   => ['v@:@', @select_prev_pane_closure],
         'toggleCopyMode:'       => ['v@:@', @toggle_copy_mode_closure],
+        'completionPicked:'     => ['v@:@', @completion_picked_closure],
         # NSTextInputClient protocol methods for IME
         'insertText:replacementRange:'                      => ['v@:@{_NSRange=QQ}', @insert_text_closure],
         'insertText:'                                       => ['v@:@', @insert_text_simple_closure],
@@ -1176,6 +1190,17 @@ module Echoes
       # protocol; they have an in-Echoes line editor that submits
       # finished lines to a Rubish::REPL via direct method calls.
       if pane.embedded?
+        # Tab with multiple completion candidates: show a native NSMenu
+        # popup at the cursor cell instead of letting Pane print the
+        # candidates inline. Single-candidate completion stays inline.
+        if chars == "\t" && !pane.embedded_shell.running?
+          req = pane.completion_request
+          if req && req[:candidates].size > 1
+            show_completion_popup(pane, req)
+            ObjC::MSG_VOID_I.call(@view, ObjC.sel('setNeedsDisplay:'), 1)
+            return
+          end
+        end
         pane.handle_key(chars: chars, flags: flags)
         ObjC::MSG_VOID_I.call(@view, ObjC.sel('setNeedsDisplay:'), 1)
         return
@@ -1770,6 +1795,62 @@ module Echoes
       pb = ObjC::MSG_PTR.call(ObjC.cls('NSPasteboard'), ObjC.sel('generalPasteboard'))
       ObjC::MSG_PTR.call(pb, ObjC.sel('clearContents'))
       ObjC::MSG_PTR_2.call(pb, ObjC.sel('setString:forType:'), ObjC.nsstring(text), ObjC::NSPasteboardTypeString)
+    end
+
+    # Native macOS completion popup. Called from `key_down` when Tab
+    # is pressed in an embedded pane and there are 2+ candidates. Builds
+    # an NSMenu of items (one per candidate, tagged with the index),
+    # anchors it under the cursor cell, and presents it. Selection
+    # fires `completionPicked:` on the view, which routes to
+    # `completion_picked` below.
+    def show_completion_popup(pane, req)
+      candidates = req[:candidates]
+      menu = ObjC::MSG_PTR.call(ObjC.cls('NSMenu'), ObjC.sel('alloc'))
+      menu = ObjC::MSG_PTR_1.call(menu, ObjC.sel('initWithTitle:'), ObjC.nsstring('completion'))
+      candidates.each_with_index do |cand, i|
+        item = ObjC::MSG_PTR.call(ObjC.cls('NSMenuItem'), ObjC.sel('alloc'))
+        item = ObjC::MSG_PTR_3.call(item, ObjC.sel('initWithTitle:action:keyEquivalent:'),
+          ObjC.nsstring(cand), ObjC.sel('completionPicked:'), ObjC.nsstring(''))
+        ObjC::MSG_VOID_L.call(item, ObjC.sel('setTag:'), i)
+        ObjC::MSG_VOID_1.call(menu, ObjC.sel('addItem:'), item)
+      end
+
+      @completion_state = {pane: pane, word_start: req[:word_start], candidates: candidates}
+      x, y = completion_anchor_point(pane)
+      ObjC::MSG_VOID_1_PT_1.call(menu, ObjC.sel('popUpMenuPositioningItem:atLocation:inView:'),
+        Fiddle::Pointer.new(0), x, y, @view)
+    end
+
+    # NSPoint (in flipped view coords) of the cell *just below* the
+    # current cursor row of the active pane, so the popup appears under
+    # the cursor without occluding it. The pane's own (x,y) within the
+    # tabbed view layout is included so splits land in the right spot.
+    def completion_anchor_point(pane)
+      tab = current_tab
+      gy_off = grid_y_offset
+      pane_rects = tab.pane_tree.layout(0, 0, @cols, @rows)
+      rect = pane_rects.find { |r| r[:pane] == pane }
+      return [0.0, gy_off] unless rect
+
+      cursor = pane.screen.cursor
+      x = (rect[:x] + cursor.col) * @cell_width
+      y = gy_off + (rect[:y] + cursor.row + 1) * @cell_height
+      [x, y]
+    end
+
+    # Action callback for an NSMenuItem in the completion popup. Reads
+    # the sender's tag, looks up the chosen candidate, and asks the
+    # pane to splice it into the input buffer.
+    def completion_picked(sender)
+      state = @completion_state
+      return unless state
+      tag = ObjC::MSG_RET_L.call(sender, ObjC.sel('tag'))
+      cand = state[:candidates][tag]
+      return unless cand
+      state[:pane].apply_completion(word_start: state[:word_start], completion: cand)
+      ObjC::MSG_VOID_I.call(@view, ObjC.sel('setNeedsDisplay:'), 1)
+    ensure
+      @completion_state = nil
     end
 
     def handle_clipboard(action, text)

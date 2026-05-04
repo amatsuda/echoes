@@ -58,6 +58,9 @@ module Echoes
     # drawAtPoint:withAttributes: (NSPoint = 2 doubles + id)
     MSG_VOID_PT_1 = new_msg([P, P, D, D, P], V)
 
+    # popUpMenuPositioningItem:atLocation:inView: (id + NSPoint + id)
+    MSG_VOID_1_PT_1 = new_msg([P, P, P, D, D, P], V)
+
     # colorWithRed:green:blue:alpha: (4 doubles)
     MSG_PTR_4D = new_msg([P, P, D, D, D, D], P)
 

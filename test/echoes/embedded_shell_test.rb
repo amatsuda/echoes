@@ -294,6 +294,59 @@ class Echoes::EmbeddedPaneTest < Test::Unit::TestCase
     end
   end
 
+  # --- completion_request / apply_completion (GUI popup substrate) ---
+
+  test "completion_request returns the candidates and the word start" do
+    Dir.mktmpdir do |dir|
+      File.write(File.join(dir, "alpha.txt"), "")
+      File.write(File.join(dir, "alphabet.txt"), "")
+      "ls #{dir}/al".chars.each { |c| @pane.handle_key(chars: c) }
+      req = @pane.completion_request
+      assert_not_nil req
+      assert req[:candidates].any? { |c| c.include?("alpha.txt") }
+      assert req[:candidates].any? { |c| c.include?("alphabet.txt") }
+      # rubish returns full-path candidates, so word_start is the
+      # start of the path argument — just after "ls ".
+      assert_equal "ls ".length, req[:word_start]
+    end
+  end
+
+  test "completion_request returns nil when there are no candidates" do
+    "qqqqxxnotacommand".chars.each { |c| @pane.handle_key(chars: c) }
+    assert_nil @pane.completion_request
+  end
+
+  test "apply_completion splices a completion at word_start" do
+    "ls foo".chars.each { |c| @pane.handle_key(chars: c) }
+    @pane.apply_completion(word_start: "ls ".length, completion: "foobar.txt")
+    assert_equal "ls foobar.txt ", buf
+    assert_equal "ls foobar.txt ".length, cursor
+  end
+
+  test "apply_completion preserves a directory's trailing slash without padding a space" do
+    "ls /us".chars.each { |c| @pane.handle_key(chars: c) }
+    @pane.apply_completion(word_start: "ls /".length, completion: "usr/")
+    assert_equal "ls /usr/", buf
+    assert_equal "ls /usr/".length, cursor
+  end
+
+  test "apply_completion keeps any tail after the cursor intact" do
+    # Type "ls foo bar", cursor mid-word at "ls foo|bar" (after foo)
+    "ls foo bar".chars.each { |c| @pane.handle_key(chars: c) }
+    "bar".length.times { @pane.handle_key(chars: "\u{F702}") }  # left x3
+    "bar".length.times { @pane.handle_key(chars: "\u{F702}") }  # left x3 → cursor before " bar"
+    # Wait: above puts cursor before "bar"; we want cursor after "foo"
+    # Let me just place the cursor explicitly via cursor_home + word jumps
+    # Instead, just construct a clean scenario:
+    @pane.handle_key(chars: "c", flags: CTRL)  # clear input
+    "ls foo bar".chars.each { |c| @pane.handle_key(chars: c) }
+    # cursor at end (10). Move left 4 to land just after "foo"
+    4.times { @pane.handle_key(chars: "\u{F702}") }
+    # cursor = 6, at "ls foo|bar" — completion replaces "foo" → completion + tail
+    @pane.apply_completion(word_start: "ls ".length, completion: "foobar")
+    assert_equal "ls foobar  bar", buf
+  end
+
   test "tab completion with multiple candidates lists them and re-prompts" do
     Dir.mktmpdir do |dir|
       File.write(File.join(dir, "alpha.txt"), "")
