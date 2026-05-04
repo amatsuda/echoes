@@ -118,6 +118,23 @@ class Echoes::EmbeddedShellTest < Test::Unit::TestCase
     assert_equal before, @shell.history
   end
 
+  test "resize updates the pty winsize for a running command" do
+    # Loop that prints the column count once a tick. After we resize
+    # mid-loop, a later iteration's tput should report the new size.
+    @shell.submit_line(
+      "for i in 1 2 3 4 5 6 7 8; do tput cols; sleep 0.1; done",
+      rows: 24, cols: 80,
+    )
+    sleep 0.25
+    @shell.resize(rows: 30, cols: 132)
+    deadline = Time.now + 5
+    sleep 0.05 while @shell.running? && Time.now < deadline
+    @shell.reap_if_done
+    out = @shell.read_available_output
+    cols_seen = out.scan(/\d+/).map(&:to_i).uniq
+    assert_includes cols_seen, 132, "expected later iterations to see 132 cols, saw #{cols_seen.inspect}"
+  end
+
   test "submit_line returns immediately while the command runs" do
     # Async contract: the call site shouldn't block. We give the
     # command a short sleep so we have a window to inspect state in.

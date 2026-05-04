@@ -105,7 +105,11 @@ module Echoes
 
     def resize(rows, cols)
       @screen.resize(rows, cols)
-      @pty_read.winsize = [rows, cols] unless embedded?
+      if embedded?
+        @embedded_shell.resize(rows: rows, cols: cols)
+      else
+        @pty_read.winsize = [rows, cols]
+      end
     rescue Errno::EIO, IOError
     end
 

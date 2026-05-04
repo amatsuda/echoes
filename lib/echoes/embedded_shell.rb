@@ -112,6 +112,17 @@ module Echoes
       Reline::HISTORY.to_a
     end
 
+    # Update the running command's pty winsize. Called when Echoes'
+    # window is resized mid-command — kernel pty winsize change emits
+    # SIGWINCH to the foreground process group on the pty, so vim/less
+    # / etc. repaint at the new size. No-op when no command is in
+    # flight (the next submit_line will pick up the new dimensions).
+    def resize(rows:, cols:)
+      return unless @slave
+      @slave.winsize = [rows, cols]
+    rescue IOError, Errno::EIO
+    end
+
     def running?
       !@command_thread.nil? && @command_thread.alive?
     end
