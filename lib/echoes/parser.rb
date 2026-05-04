@@ -413,6 +413,9 @@ module Echoes
       when '52'
         dispatch_osc52(rest)
         return
+      when '133'
+        dispatch_osc133(rest)
+        return
       when '66'
         # fall through to multicell handling below
       else
@@ -495,6 +498,22 @@ module Echoes
       when 3 then val * 0x0010 + (val >> 4)
       when 4 then val
       else val
+      end
+    end
+
+    # OSC 133 — semantic prompt boundaries. The wider ecosystem
+    # (FinalTerm, iTerm2, kitty, WezTerm, VS Code) reads these to enable
+    # click-to-rerun, semantic copy, jump-by-prompt, and pipe-to-AI.
+    # Echoes records them on the Screen so future UI features (and
+    # tests, today) can navigate by command.
+    def dispatch_osc133(rest)
+      return unless @screen.respond_to?(:osc133_mark)
+      parts = rest.split(';')
+      case parts[0]
+      when 'A' then @screen.osc133_mark(:prompt_start)
+      when 'B' then @screen.osc133_mark(:prompt_end)
+      when 'C' then @screen.osc133_mark(:command_start)
+      when 'D' then @screen.osc133_mark(:command_end, exit_code: parts[1]&.to_i)
       end
     end
 

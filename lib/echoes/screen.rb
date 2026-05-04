@@ -4,7 +4,8 @@ require 'set'
 
 module Echoes
   class Screen
-    attr_reader :rows, :cols, :cursor, :grid, :scrollback, :pending_wrap, :dirty_rows
+    attr_reader :rows, :cols, :cursor, :grid, :scrollback, :pending_wrap, :dirty_rows,
+                :command_marks
     attr_accessor :cell_pixel_width, :cell_pixel_height, :title, :current_directory
 
     def self.scrollback_limit
@@ -53,6 +54,15 @@ module Echoes
       @last_char = nil
       @title_stack = []
       @dirty_rows = Set.new((0...rows).to_a)
+      # OSC 133 prompt-boundary markers: each entry is a Hash with
+      # :prompt_start / :input_start / :output_start / :output_end /
+      # :exit_code keys, where the row values are *visual* row indices —
+      # `scrollback_size + grid_row` at the moment the marker was seen.
+      # When scrollback shifts off the front, mark rows decrement so
+      # they keep pointing at the same content; marks that fall before
+      # the scrollback floor are dropped.
+      @command_marks = []
+      @current_command_mark = nil
     end
 
     DEC_SPECIAL = {
@@ -419,7 +429,10 @@ module Echoes
           row = @grid[@scroll_top]
           @scrollback << row.map { |cell| c = Cell.new; c.copy_from(cell); c.width = cell.width; c.multicell = cell.multicell; c }
           @scrollback_wrapped << @line_wrapped[@scroll_top]
-          @scrollback.shift if @scrollback.size > self.class.scrollback_limit
+          if @scrollback.size > self.class.scrollback_limit
+            @scrollback.shift
+            adjust_command_marks(-1)
+          end
           @scrollback_wrapped.shift if @scrollback_wrapped.size > self.class.scrollback_limit
         end
         @grid.delete_at(@scroll_top)
@@ -655,6 +668,57 @@ module Echoes
 
     def set_hyperlink(uri)
       @attrs.hyperlink = uri
+    end
+
+    # OSC 133 prompt boundary marker. `kind` is one of:
+    #   :prompt_start  — OSC 133 ; A — beginning of a fresh prompt block
+    #   :prompt_end    — OSC 133 ; B — end of prompt / start of input
+    #   :command_start — OSC 133 ; C — start of command output
+    #   :command_end   — OSC 133 ; D — end of command output (with optional exit code)
+    #
+    # Marks are stored as visual rows (scrollback rows + grid rows from 0).
+    # `:prompt_start` opens a new mark; subsequent kinds populate it.
+    def osc133_mark(kind, exit_code: nil)
+      row = @scrollback.size + @cursor.row
+      case kind
+      when :prompt_start
+        @current_command_mark = {
+          prompt_start: row, input_start: nil,
+          output_start: nil, output_end: nil, exit_code: nil,
+        }
+        @command_marks << @current_command_mark
+      when :prompt_end
+        @current_command_mark ||= {prompt_start: row, input_start: nil,
+                                   output_start: nil, output_end: nil, exit_code: nil}
+        @command_marks << @current_command_mark unless @command_marks.last.equal?(@current_command_mark)
+        @current_command_mark[:input_start] = row
+      when :command_start
+        return unless @current_command_mark
+        @current_command_mark[:output_start] = row
+      when :command_end
+        return unless @current_command_mark
+        @current_command_mark[:output_end] = row
+        @current_command_mark[:exit_code] = exit_code
+      end
+    end
+
+    # When scrollback shifts (oldest row dropped), every row index in
+    # @command_marks moves by `delta` (typically -1). Marks that would
+    # now point before the scrollback floor are dropped — their content
+    # is no longer reachable.
+    def adjust_command_marks(delta)
+      return if @command_marks.empty?
+      @command_marks.each do |m|
+        m.each_key do |k|
+          next if k == :exit_code
+          v = m[k]
+          m[k] = v + delta if v
+        end
+      end
+      @command_marks.reject! { |m| m[:prompt_start] && m[:prompt_start] < 0 }
+      if @current_command_mark && (@current_command_mark[:prompt_start] || 0) < 0
+        @current_command_mark = nil
+      end
     end
 
     attr_accessor :clipboard_handler, :palette_handler

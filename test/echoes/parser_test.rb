@@ -1121,4 +1121,47 @@ class Echoes::ParserTest < Test::Unit::TestCase
     @parser.feed("q")          # normal 'q' (G0 is still ASCII)
     assert_equal("\u{2500}q", row_text(0))
   end
+
+  # --- OSC 133 prompt boundaries ---
+
+  test "OSC 133 ;A opens a new command mark at the cursor row" do
+    @parser.feed("\e]133;A\e\\")
+    assert_equal 1, @screen.command_marks.size
+    assert_equal 0, @screen.command_marks.first[:prompt_start]
+  end
+
+  test "OSC 133 ;A then ;B records prompt and input boundaries" do
+    @parser.feed("\e]133;A\e\\$ \e]133;B\e\\")
+    mark = @screen.command_marks.first
+    assert_equal 0, mark[:prompt_start]
+    assert_equal 0, mark[:input_start]
+  end
+
+  test "OSC 133 ;C then ;D records output boundaries and exit code" do
+    @parser.feed("\e]133;A\e\\$ \e]133;B\e\\")
+    @parser.feed("ls\r\n")
+    @parser.feed("\e]133;C\e\\")
+    @parser.feed("file1\r\nfile2\r\n")
+    @parser.feed("\e]133;D;0\e\\")
+    mark = @screen.command_marks.first
+    assert_equal 1, mark[:output_start]
+    assert_equal 3, mark[:output_end]
+    assert_equal 0, mark[:exit_code]
+  end
+
+  test "OSC 133 ;D without an exit code stores nil" do
+    @parser.feed("\e]133;A\e\\\e]133;B\e\\\e]133;C\e\\\e]133;D\e\\")
+    assert_nil @screen.command_marks.first[:exit_code]
+  end
+
+  test "OSC 133 sequences also accept BEL terminator" do
+    @parser.feed("\e]133;A\a")
+    assert_equal 1, @screen.command_marks.size
+  end
+
+  test "OSC 133 markers are recorded but not visible in the cell grid" do
+    @parser.feed("\e]133;A\e\\$ \e]133;B\e\\")
+    assert_equal "$", row_text(0)
+    refute_includes row_text(0), "\e"
+  end
 end

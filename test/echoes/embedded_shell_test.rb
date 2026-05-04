@@ -740,6 +740,50 @@ class Echoes::EmbeddedPaneTest < Test::Unit::TestCase
     assert_equal "echo bar", buf
   end
 
+  # --- OSC 133 prompt-boundary markers ---
+
+  test "embedded pane records an OSC 133 mark at the initial prompt" do
+    marks = @pane.screen.command_marks
+    assert_operator marks.size, :>=, 1
+    assert_equal 0, marks.first[:prompt_start]
+    assert_equal 0, marks.first[:input_start]
+  end
+
+  test "submitting a command opens an output region in the current mark" do
+    "echo hi".chars.each { |c| @pane.handle_key(chars: c) }
+    @pane.handle_key(chars: "\r")
+    settle
+    marks = @pane.screen.command_marks
+    # First mark gets output bounds + exit code populated
+    first = marks.first
+    assert_not_nil first[:output_start]
+    assert_not_nil first[:output_end]
+    assert_equal 0, first[:exit_code]
+  end
+
+  test "after a command runs, a fresh prompt mark is recorded" do
+    initial_marks = @pane.screen.command_marks.dup
+    "echo hi".chars.each { |c| @pane.handle_key(chars: c) }
+    @pane.handle_key(chars: "\r")
+    settle
+    marks = @pane.screen.command_marks
+    assert_operator marks.size, :>, initial_marks.size,
+      "expected a new prompt-boundary mark after the command finished"
+    last = marks.last
+    assert_not_nil last[:prompt_start]
+    assert_not_nil last[:input_start]
+    # The new prompt mark hasn't received C/D yet
+    assert_nil last[:output_start]
+  end
+
+  test "Ctrl-C at the prompt records a fresh prompt mark" do
+    n_before = @pane.screen.command_marks.size
+    "abc".chars.each { |c| @pane.handle_key(chars: c) }
+    @pane.handle_key(chars: "c", flags: CTRL)
+    n_after = @pane.screen.command_marks.size
+    assert_operator n_after, :>, n_before
+  end
+
   test "highlighted input doesn't pollute the cell grid with escape characters" do
     "echo hello".chars.each { |c| @pane.handle_key(chars: c) }
     flat = grid_text

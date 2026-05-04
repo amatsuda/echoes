@@ -85,14 +85,18 @@ module Echoes
     # Returns "" if nothing is ready; never blocks; never raises.
     #
     # In embedded mode this is also where we detect that an async
-    # command has finished — we drain its trailing output, append a
-    # fresh prompt, and re-enable the in-pane line editor.
+    # command has finished — we drain its trailing output, emit OSC 133
+    # ;D (command end), then ;A + prompt + ;B for the next command, and
+    # re-enable the in-pane line editor.
     def read_available_output(max = 16384)
       if embedded?
         out = @embedded_shell.read_available_output
         if @embedded_running && @embedded_shell.reap_if_done
           out << @embedded_shell.read_available_output
+          out << osc133_d(@embedded_shell.last_status)
+          out << osc133_a
           out << @embedded_shell.prompt.to_s
+          out << osc133_b
           @embedded_running = false
         end
         out
@@ -227,7 +231,19 @@ module Echoes
     private
 
     def render_initial_prompt
+      process_output(osc133_a)
       process_output(@embedded_shell.prompt.to_s)
+      process_output(osc133_b)
+    end
+
+    # OSC 133 escape strings. Hosts surrounding shells in their own
+    # render layer (us) emit these to mark prompt/input/output regions.
+    # The terminal parser routes them to Screen#osc133_mark.
+    def osc133_a; "\e]133;A\e\\"; end
+    def osc133_b; "\e]133;B\e\\"; end
+    def osc133_c; "\e]133;C\e\\"; end
+    def osc133_d(code = nil)
+      code.nil? ? "\e]133;D\e\\" : "\e]133;D;#{code}\e\\"
     end
 
     # Enter pressed at the prompt. Decide whether the accumulated
@@ -257,6 +273,7 @@ module Echoes
         @history_saved = nil
         @autosuggestion = +''
         process_output("\r\n")
+        process_output(osc133_c)
         @embedded_shell.submit_line(line, rows: @screen.rows, cols: @screen.cols)
         @embedded_running = true
       end
@@ -417,7 +434,9 @@ module Echoes
         @history_index = nil
         @history_saved = nil
         @autosuggestion = +''
+        process_output(osc133_a)
         process_output(@embedded_shell.prompt.to_s)
+        process_output(osc133_b)
         true
       else
         false
