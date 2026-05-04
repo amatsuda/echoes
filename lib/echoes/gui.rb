@@ -1156,13 +1156,21 @@ module Echoes
       @selection_anchor = nil
       @selection_end = nil
 
-      pane.scroll_offset = 0
-      pane.scroll_accum = 0.0
-
       flags = ObjC::MSG_RET_L.call(event_ptr, ObjC.sel('modifierFlags'))
       chars_ns = ObjC::MSG_PTR.call(event_ptr, ObjC.sel('charactersIgnoringModifiers'))
       chars = ObjC.to_ruby_string(chars_ns)
       return if chars.empty?
+
+      # Snap-to-bottom on most key events. Exception: Cmd+Shift+Up/Down
+      # is the OSC 133 jump-to-prompt nav, which sets @scroll_offset
+      # itself — clobbering it here would defeat repeated presses.
+      is_prompt_nav = (flags & (ObjC::NSEventModifierFlagCommand | ObjC::NSEventModifierFlagShift)) ==
+                      (ObjC::NSEventModifierFlagCommand | ObjC::NSEventModifierFlagShift) &&
+                      (chars == "\u{F700}" || chars == "\u{F701}")
+      unless is_prompt_nav
+        pane.scroll_offset = 0
+        pane.scroll_accum = 0.0
+      end
 
       # Embedded-shell panes don't speak the byte-stream / escape-code
       # protocol; they have an in-Echoes line editor that submits

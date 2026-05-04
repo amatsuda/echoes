@@ -313,8 +313,10 @@ class Echoes::EmbeddedPaneTest < Test::Unit::TestCase
     assert_equal 0, cursor
   end
 
-  CTRL   = 0x40000  # NSEventModifierFlagControl
-  OPTION = 0x80000  # NSEventModifierFlagOption
+  CTRL   = 0x40000   # NSEventModifierFlagControl
+  OPTION = 0x80000   # NSEventModifierFlagOption
+  SHIFT  = 0x20000   # NSEventModifierFlagShift
+  CMD    = 0x100000  # NSEventModifierFlagCommand
 
   test "Option+Left jumps the cursor by a word" do
     "echo hello world".chars.each { |c| @pane.handle_key(chars: c) }
@@ -774,6 +776,82 @@ class Echoes::EmbeddedPaneTest < Test::Unit::TestCase
     assert_not_nil last[:input_start]
     # The new prompt mark hasn't received C/D yet
     assert_nil last[:output_start]
+  end
+
+  # --- jump_to_prompt navigation (consumer of OSC 133 marks) ---
+
+  # Seed the screen with a synthetic scrollback and OSC 133 marks at
+  # specific rows so we can drive jump_to_prompt deterministically.
+  def seed_scrollback_and_marks(scrollback_size:, mark_rows:)
+    @pane.screen.instance_variable_set(:@scrollback, Array.new(scrollback_size) { [] })
+    marks = mark_rows.map do |r|
+      {prompt_start: r, input_start: r, output_start: nil, output_end: nil, exit_code: nil}
+    end
+    @pane.screen.instance_variable_set(:@command_marks, marks)
+  end
+
+  test "jump_to_prompt :prev positions the previous prompt at top of view" do
+    seed_scrollback_and_marks(scrollback_size: 100, mark_rows: [10, 30, 60])
+    @pane.scroll_offset = 0  # at live (current_top = 100)
+    assert @pane.jump_to_prompt(direction: :prev)
+    # Most recent mark < 100 is at 60 → scroll_offset = 100 - 60 = 40
+    assert_equal 40, @pane.scroll_offset
+    # Press again — go to mark at 30
+    assert @pane.jump_to_prompt(direction: :prev)
+    assert_equal 70, @pane.scroll_offset
+    # Press again — mark at 10
+    assert @pane.jump_to_prompt(direction: :prev)
+    assert_equal 90, @pane.scroll_offset
+    # No more older marks → returns false, no change
+    refute @pane.jump_to_prompt(direction: :prev)
+    assert_equal 90, @pane.scroll_offset
+  end
+
+  test "jump_to_prompt :next walks back toward live" do
+    seed_scrollback_and_marks(scrollback_size: 100, mark_rows: [10, 30, 60])
+    @pane.scroll_offset = 95  # current_top = 5; oldest mark > 5 is 10
+    assert @pane.jump_to_prompt(direction: :next)
+    assert_equal 90, @pane.scroll_offset
+    assert @pane.jump_to_prompt(direction: :next)
+    assert_equal 70, @pane.scroll_offset
+    assert @pane.jump_to_prompt(direction: :next)
+    assert_equal 40, @pane.scroll_offset
+    refute @pane.jump_to_prompt(direction: :next)
+  end
+
+  test "jump_to_prompt is a no-op when there are no marks" do
+    seed_scrollback_and_marks(scrollback_size: 100, mark_rows: [])
+    @pane.scroll_offset = 50
+    refute @pane.jump_to_prompt(direction: :prev)
+    refute @pane.jump_to_prompt(direction: :next)
+    assert_equal 50, @pane.scroll_offset
+  end
+
+  test "jump_to_prompt :next snaps to live when the target is in the live grid" do
+    seed_scrollback_and_marks(scrollback_size: 100, mark_rows: [10, 105])
+    @pane.scroll_offset = 95  # current_top = 5
+    # First next: mark at 10 → scroll_offset = 90
+    @pane.jump_to_prompt(direction: :next)
+    assert_equal 90, @pane.scroll_offset
+    # Second next: mark at 105 (>= scrollback_size) → snap to 0
+    @pane.jump_to_prompt(direction: :next)
+    assert_equal 0, @pane.scroll_offset
+  end
+
+  test "Cmd+Shift+Up at the embedded prompt invokes jump_to_prompt" do
+    seed_scrollback_and_marks(scrollback_size: 100, mark_rows: [10, 30, 60])
+    @pane.scroll_offset = 0
+    @pane.handle_key(chars: "\u{F700}", flags: CMD | SHIFT)
+    assert_equal 40, @pane.scroll_offset
+  end
+
+  test "plain Up arrow still walks history (no scroll offset change)" do
+    "echo first".chars.each { |c| @pane.handle_key(chars: c) }
+    @pane.handle_key(chars: "\r")
+    settle
+    @pane.handle_key(chars: "\u{F700}")  # plain Up
+    assert_equal "echo first", buf
+    assert_equal 0, @pane.scroll_offset
   end
 
   test "Ctrl-C at the prompt records a fresh prompt mark" do

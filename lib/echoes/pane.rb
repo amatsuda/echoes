@@ -150,6 +150,36 @@ module Echoes
       @parser.feed(data)
     end
 
+    # Jump scroll position to the previous or next OSC 133 prompt
+    # boundary recorded on @screen. Returns true if a jump happened,
+    # false if there was no target in that direction. The Screen's
+    # `command_marks` are populated by the parser whenever the running
+    # shell emits OSC 133 (the embedded shell does this automatically;
+    # PTY-mode shells like zsh/fish emit them too when configured).
+    def jump_to_prompt(direction:)
+      marks = @screen.command_marks.select { |m| m[:prompt_start] }
+      return false if marks.empty?
+
+      scrollback_size = @screen.scrollback.size
+      current_top = scrollback_size - @scroll_offset
+
+      target =
+        case direction
+        when :prev then marks.reverse.find { |m| m[:prompt_start] < current_top }
+        when :next then marks.find       { |m| m[:prompt_start] > current_top }
+        end
+      return false unless target
+
+      row = target[:prompt_start]
+      if row >= scrollback_size
+        # Target is in the live grid — scroll to bottom.
+        @scroll_offset = 0
+      else
+        @scroll_offset = (scrollback_size - row).clamp(0, scrollback_size)
+      end
+      true
+    end
+
     # Embedded-mode keyboard handling. Returns true if the pane consumed
     # the event, false if the GUI should fall through to its own
     # PTY-style handling (which is the only mode in non-embedded panes).
@@ -185,6 +215,8 @@ module Echoes
       end
 
       option_held = (flags & NSEVENT_OPTION_FLAG) != 0
+      cmd_held    = (flags & NSEVENT_COMMAND_FLAG) != 0
+      shift_held  = (flags & NSEVENT_SHIFT_FLAG) != 0
 
       case chars
       when "\r", "\n"
@@ -212,9 +244,17 @@ module Echoes
           cursor_end
         end
       when "\u{F700}"  # NSUpArrowFunctionKey
-        history_step(-1)
+        if cmd_held && shift_held
+          jump_to_prompt(direction: :prev)
+        else
+          history_step(-1)
+        end
       when "\u{F701}"  # NSDownArrowFunctionKey
-        history_step(1)
+        if cmd_held && shift_held
+          jump_to_prompt(direction: :next)
+        else
+          history_step(1)
+        end
       when "\t"
         complete_input
       else
@@ -532,6 +572,8 @@ module Echoes
 
     NSEVENT_CONTROL_FLAG = 0x40000
     NSEVENT_OPTION_FLAG  = 0x80000
+    NSEVENT_SHIFT_FLAG   = 0x20000
+    NSEVENT_COMMAND_FLAG = 0x100000
 
     def word_left
       return if @input_cursor == 0
