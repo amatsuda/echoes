@@ -1853,7 +1853,10 @@ module Echoes
     # Action callback for an NSMenuItem in the completion popup. Reads
     # the sender's tag, looks up the chosen candidate, and asks the
     # pane to splice it into the input buffer.
-    def completion_picked(sender)
+    # Public — invoked from the @completion_picked_closure with an
+    # explicit receiver (`gui.completion_picked(sender)`); the rest of
+    # this section's helpers are private (called from inside the class).
+    public def completion_picked(sender)
       state = @completion_state
       return unless state
       tag = ObjC::MSG_RET_L.call(sender, ObjC.sel('tag'))
