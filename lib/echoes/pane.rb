@@ -373,15 +373,22 @@ module Echoes
       rwidth = rsegs.sum { |s| (s[:text] || '').length }
       return if rwidth == 0
       cols       = @screen.cols
-      cursor_col = @screen.cursor.col
+      saved_row  = @screen.cursor.row
+      saved_col  = @screen.cursor.col
       target_col = cols - rwidth
-      return if cursor_col >= target_col  # not enough room
+      return if saved_col >= target_col  # not enough room
 
-      delta = target_col - cursor_col
+      delta = target_col - saved_col
       process_output("\e[#{delta}C")
       @screen.put_styled_segments(rsegs)
-      # cursor is now at column `cols`; jump back to where it was
-      process_output("\e[#{delta + rwidth}D")
+      # When the rprompt's last cell lands at cols-1, put_char defers
+      # the wrap and leaves cursor.col=cols-1 with pending_wrap=true.
+      # ANSI `\e[D` would then back up from cols-1 not cols and we'd
+      # lose the trailing prompt cell. Restore cursor state directly
+      # instead.
+      @screen.cursor.row    = saved_row
+      @screen.cursor.col    = saved_col
+      @screen.pending_wrap  = false
     end
 
     # OSC 133 escape strings. Hosts surrounding shells in their own

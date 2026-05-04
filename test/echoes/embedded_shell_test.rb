@@ -296,6 +296,27 @@ class Echoes::EmbeddedPaneTest < Test::Unit::TestCase
     assert_equal saved_col, @pane.screen.cursor.col
   end
 
+  test "rprompt rendering doesn't clobber the main prompt's trailing cell" do
+    # When the rprompt is wide enough that its last char lands at
+    # cols-1, put_char defers the wrap (cursor at cols-1 with
+    # pending_wrap=true). A naive ANSI \e[D back-step would then
+    # land one cell short and overwrite the main prompt's last cell
+    # (e.g., the trailing space of "% "). Regression guard.
+    cols = @pane.screen.cols
+    # Place cursor at col 2 (as if the main prompt was "% ").
+    @pane.screen.cursor.col = 2
+    @pane.screen.grid[0][0].char = "%"
+    @pane.screen.grid[0][1].char = " "
+    rsegs = [{text: "x" * (cols - 2), fg: nil, bg: nil,
+              bold: false, italic: false, underline: false, inverse: false}]
+    stash_right_prompt(rsegs)
+    @pane.send(:draw_right_prompt_inline, 0)
+    # The trailing space at col 1 must be intact (not overwritten).
+    assert_equal " ", @pane.screen.grid[0][1].char
+    # Cursor is back at col 2 (where input goes).
+    assert_equal 2, @pane.screen.cursor.col
+  end
+
   test "rprompt persists when the input shrinks back from being long" do
     # Simulate a cached rprompt and a re-render after the user typed
     # a long line and then deleted some of it. After replace_input_line
