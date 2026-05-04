@@ -154,6 +154,11 @@ class Echoes::EmbeddedPaneTest < Test::Unit::TestCase
 
   def setup
     require "echoes/pane"
+    require "reline"
+    # Reline::HISTORY is class-level state shared across tests; reset
+    # it so per-test history walks aren't contaminated by prior tests'
+    # submissions.
+    Reline::HISTORY.clear
     @pane = Echoes::Pane.new(command: "/bin/sh", rows: 24, cols: 80, embedded: true)
     @original_dir = Dir.pwd
   end
@@ -886,6 +891,23 @@ class Echoes::EmbeddedPaneTest < Test::Unit::TestCase
     settle
     @pane.handle_key(chars: "O", flags: CMD | SHIFT)
     assert_match(/shortcut-test/, captured.to_s)
+  end
+
+  test "last_command_text returns the most recent submitted line" do
+    "echo first-cmd".chars.each { |c| @pane.handle_key(chars: c) }
+    @pane.handle_key(chars: "\r")
+    settle
+    assert_equal "echo first-cmd", @pane.last_command_text
+  end
+
+  test "Cmd+Shift+L at the prompt copies last command text" do
+    captured = nil
+    @pane.screen.clipboard_handler = ->(_action, text) { captured = text }
+    "echo cmd-text-test".chars.each { |c| @pane.handle_key(chars: c) }
+    @pane.handle_key(chars: "\r")
+    settle
+    @pane.handle_key(chars: "L", flags: CMD | SHIFT)
+    assert_equal "echo cmd-text-test", captured
   end
 
   test "Ctrl-C at the prompt records a fresh prompt mark" do

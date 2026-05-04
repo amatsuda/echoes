@@ -172,6 +172,24 @@ module Echoes
       true
     end
 
+    # Most recently submitted command's text (the literal line the user
+    # ran). Reads rubish's Reline::HISTORY directly, which is more
+    # reliable than scraping the cell grid (no wrapping / column-offset
+    # ambiguity from the prompt). Returns nil if no command has been
+    # submitted yet.
+    def last_command_text
+      return nil unless embedded?
+      hist = @embedded_shell.history
+      hist.last
+    end
+
+    def copy_last_command_text
+      text = last_command_text
+      return false unless text && !text.empty?
+      @screen.set_clipboard(text)
+      true
+    end
+
     # Jump scroll position to the previous or next OSC 133 prompt
     # boundary recorded on @screen. Returns true if a jump happened,
     # false if there was no target in that direction. The Screen's
@@ -247,6 +265,9 @@ module Echoes
         case chars.downcase
         when 'o'
           copy_last_command_output
+          return true
+        when 'l'
+          copy_last_command_text
           return true
         end
       end
