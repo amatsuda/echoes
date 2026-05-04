@@ -1466,10 +1466,22 @@ module Echoes
         clicked_tab = (click_x / tab_w).to_i.clamp(0, @tabs.size - 1)
         @active_tab = clicked_tab
       elsif (flags & ObjC::NSEventModifierFlagCommand) != 0 && pos
-        # Cmd+click: open hyperlink or detected URL
+        # Cmd+click: open hyperlink/URL if the cell has one; otherwise
+        # in an embedded pane, recall the command at this prompt row
+        # into the input buffer (using OSC 133 marks as the index).
         abs_row, col = pos
         url = hyperlink_at(tab, abs_row, col)
-        open_url(url) if url
+        if url
+          open_url(url)
+        else
+          pane = tab.active_pane
+          if pane.embedded?
+            mark = pane.screen.find_command_mark_at_row(abs_row)
+            if mark && mark[:command_text] && !pane.embedded_shell.running?
+              pane.recall_command(mark[:command_text])
+            end
+          end
+        end
       elsif tab.screen.mouse_tracking != :off
         row, col = pos
         send_mouse_event(tab, 0, col, row)  # button 0 = left press

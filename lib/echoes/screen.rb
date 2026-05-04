@@ -730,6 +730,28 @@ module Echoes
       @command_marks.reverse_each.find { |m| m[:output_end] }
     end
 
+    # Attach the literal command text to the most recently opened mark.
+    # The host calls this at submit time (between OSC 133 ;B and ;C)
+    # so click-to-rerun can recover the command text from a clicked
+    # prompt row long after submission.
+    def set_current_command_text(text)
+      return unless @current_command_mark
+      @current_command_mark[:command_text] = text
+    end
+
+    # Find the command mark whose prompt+input region covers `abs_row`,
+    # or nil if no mark covers that row. The region runs from
+    # :prompt_start (inclusive) up to :output_start (exclusive). If a
+    # command is still running and no :output_start has been recorded
+    # yet, the region is taken as just :prompt_start itself (one row).
+    def find_command_mark_at_row(abs_row)
+      @command_marks.reverse_each.find do |m|
+        next false unless m[:prompt_start]
+        upper = m[:output_start] || (m[:prompt_start] + 1)
+        abs_row >= m[:prompt_start] && abs_row < upper
+      end
+    end
+
     # When scrollback shifts (oldest row dropped), every row index in
     # @command_marks moves by `delta` (typically -1). Marks that would
     # now point before the scrollback floor are dropped — their content

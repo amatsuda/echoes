@@ -1010,6 +1010,49 @@ class Echoes::EmbeddedPaneTest < Test::Unit::TestCase
     assert_equal "echo cmd-text-test", captured
   end
 
+  # --- click-to-rerun via OSC 133 mark stash ---
+
+  test "submitting a command stashes the text on the current OSC 133 mark" do
+    "echo recallme".chars.each { |c| @pane.handle_key(chars: c) }
+    @pane.handle_key(chars: "\r")
+    settle
+    mark = @pane.screen.command_marks.find { |m| m[:command_text] == "echo recallme" }
+    assert_not_nil mark, "expected a mark to carry the submitted command text"
+  end
+
+  test "find_command_mark_at_row picks the mark whose region covers the row" do
+    "echo aa".chars.each { |c| @pane.handle_key(chars: c) }
+    @pane.handle_key(chars: "\r")
+    settle
+    "echo bb".chars.each { |c| @pane.handle_key(chars: c) }
+    @pane.handle_key(chars: "\r")
+    settle
+    marks_with_text = @pane.screen.command_marks.select { |m| m[:command_text] }
+    aa = marks_with_text.find { |m| m[:command_text] == "echo aa" }
+    bb = marks_with_text.find { |m| m[:command_text] == "echo bb" }
+    assert_not_nil aa
+    assert_not_nil bb
+    # The aa mark's prompt_start row should locate the aa mark
+    assert_equal aa, @pane.screen.find_command_mark_at_row(aa[:prompt_start])
+    assert_equal bb, @pane.screen.find_command_mark_at_row(bb[:prompt_start])
+  end
+
+  test "recall_command replaces the input buffer with the given text" do
+    "half typed".chars.each { |c| @pane.handle_key(chars: c) }
+    assert_equal "half typed", buf
+    @pane.recall_command("ls -la")
+    assert_equal "ls -la", buf
+    assert_equal "ls -la".length, cursor
+  end
+
+  test "recall_command no-ops on nil or empty input" do
+    "preserve this".chars.each { |c| @pane.handle_key(chars: c) }
+    @pane.recall_command(nil)
+    assert_equal "preserve this", buf
+    @pane.recall_command("")
+    assert_equal "preserve this", buf
+  end
+
   test "Ctrl-C at the prompt records a fresh prompt mark" do
     n_before = @pane.screen.command_marks.size
     "abc".chars.each { |c| @pane.handle_key(chars: c) }

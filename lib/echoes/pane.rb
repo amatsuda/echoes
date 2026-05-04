@@ -360,6 +360,9 @@ module Echoes
         @autosuggestion = +''
         process_output("\r\n")
         process_output(osc133_c)
+        # Stash the command text on the OSC 133 mark so click-to-rerun
+        # can recover it later.
+        @screen.set_current_command_text(line)
         @embedded_shell.submit_line(line, rows: @screen.rows, cols: @screen.cols)
         @embedded_running = true
       end
@@ -689,6 +692,17 @@ module Echoes
       new_input = @input_buffer[0...word_start] + completion + tail
       new_cursor = word_start + completion.length
       replace_input_line(new_input, new_cursor)
+    end
+
+    # Replace the in-progress input with `text` (e.g., a command
+    # recovered from a Cmd-clicked prompt's OSC 133 mark). Cursor lands
+    # at end. Cleared history-walk and autosuggestion state so the next
+    # ↑/↓ starts from the freshly-recalled line.
+    def recall_command(text)
+      return if text.nil? || text.empty?
+      @history_index = nil
+      @history_saved = nil
+      replace_input_buffer(text)
     end
 
     private
