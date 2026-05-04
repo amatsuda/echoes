@@ -265,6 +265,57 @@ class Echoes::EmbeddedPaneTest < Test::Unit::TestCase
     assert_match(/\$\s*$/, grid_rows.first)
   end
 
+  # --- right prompt (RPROMPT) rendering ---
+
+  # Stub the embedded shell's right_prompt_segments so we can drive
+  # the render path without depending on the user's rubishrc.
+  def with_right_prompt(segments)
+    shell = @pane.embedded_shell
+    shell.define_singleton_method(:right_prompt_segments) { segments }
+    yield
+  end
+
+  test "right_prompt is rendered at the right edge of the row" do
+    with_right_prompt([{text: "RP", fg: 1, bg: nil, bold: false, italic: false, underline: false, inverse: false}]) do
+      @pane.send(:render_right_prompt)
+      cols = @pane.screen.cols
+      assert_equal "R", @pane.screen.grid[0][cols - 2].char
+      assert_equal "P", @pane.screen.grid[0][cols - 1].char
+      assert_equal 1,   @pane.screen.grid[0][cols - 2].fg
+    end
+  end
+
+  test "right_prompt rendering restores the cursor position" do
+    # Place cursor at column 5; render should put it back there.
+    @pane.screen.cursor.col = 5
+    saved_col = 5
+    with_right_prompt([{text: "X", fg: nil, bg: nil, bold: false, italic: false, underline: false, inverse: false}]) do
+      @pane.send(:render_right_prompt)
+      assert_equal saved_col, @pane.screen.cursor.col
+    end
+  end
+
+  test "right_prompt is skipped if it would overlap the main prompt" do
+    cols = @pane.screen.cols
+    # Cursor near right edge — would overlap a multi-char rprompt.
+    @pane.screen.cursor.col = cols - 1
+    rsegs = [{text: "ABCDE", fg: nil, bg: nil, bold: false, italic: false, underline: false, inverse: false}]
+    with_right_prompt(rsegs) do
+      @pane.send(:render_right_prompt)
+      # Cursor untouched; right edge cell stays blank
+      assert_equal cols - 1, @pane.screen.cursor.col
+      assert_equal " ", @pane.screen.grid[0][cols - 1].char
+    end
+  end
+
+  test "right_prompt is a no-op when the helper returns no segments" do
+    saved_col = @pane.screen.cursor.col
+    with_right_prompt([]) do
+      @pane.send(:render_right_prompt)
+      assert_equal saved_col, @pane.screen.cursor.col
+    end
+  end
+
   test "the initial prompt is rendered natively (no SGR escapes in cells)" do
     flat = @pane.screen.grid.map { |row| row.map { |c| c.char || ' ' }.join }.join
     refute_includes flat, "\e", "raw escape characters should never land in cells"

@@ -206,6 +206,12 @@ module Echoes
       (rpc_sync('prompt_segments') || []).map { |s| symbolize_segment(s) }
     end
 
+    # Right-aligned prompt (rubish's RPROMPT). Returns an Array of
+    # segments — possibly empty — same shape as `prompt_segments`.
+    def right_prompt_segments
+      (rpc_sync('right_prompt_segments') || []).map { |s| symbolize_segment(s) }
+    end
+
     def continuation_prompt
       rpc_sync('continuation_prompt') || '> '
     end

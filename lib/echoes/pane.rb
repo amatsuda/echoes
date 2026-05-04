@@ -333,6 +333,12 @@ module Echoes
     # back to the legacy ANSI string path if segments aren't
     # available (defensive — empty array can mean an unhelpful
     # default-styled prompt with no text).
+    #
+    # If rubish also exposes a right-prompt (RPROMPT-style), it's
+    # rendered on the same row aligned to the right margin, then the
+    # cursor is restored to the input position so typing lands in the
+    # right place. The rprompt is skipped when it would overlap the
+    # main prompt or the user's input area.
     def render_prompt_natively
       segments = @embedded_shell.prompt_segments
       if segments && !segments.empty?
@@ -340,6 +346,30 @@ module Echoes
       else
         process_output(@embedded_shell.prompt.to_s)
       end
+      render_right_prompt
+    end
+
+    # Right-aligned prompt rendering. No-op when rubish has nothing
+    # configured. Saves the cursor position (which is at the end of
+    # the main prompt = where input goes), draws the rprompt at the
+    # right edge, and restores.
+    def render_right_prompt
+      rsegs = @embedded_shell.right_prompt_segments
+      return if rsegs.nil? || rsegs.empty?
+      width = rsegs.sum { |s| (s[:text] || '').length }
+      return if width == 0
+
+      saved_row = @screen.cursor.row
+      saved_col = @screen.cursor.col
+      cols     = @screen.cols
+      target_col = cols - width
+      # Skip when the rprompt would overlap the main prompt (no room).
+      return if target_col <= saved_col
+
+      @screen.cursor.col = target_col
+      @screen.put_styled_segments(rsegs)
+      @screen.cursor.row = saved_row
+      @screen.cursor.col = saved_col
     end
 
     # OSC 133 escape strings. Hosts surrounding shells in their own

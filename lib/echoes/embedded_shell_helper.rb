@@ -97,6 +97,7 @@ module Echoes
       when 'complete'          then reply(msg, @repl.complete_at(line: msg['line'], point: msg['point']))
       when 'prompt'            then reply(msg, @repl.prompt)
       when 'prompt_segments'   then reply(msg, segments_to_array(@repl.prompt_segments))
+      when 'right_prompt_segments' then reply(msg, segments_to_array(@repl.right_prompt_segments))
       when 'continuation_prompt' then reply(msg, @repl.send(:continuation_prompt))
       when 'try_parse'         then reply(msg, @repl.try_parse(msg['line']).to_s)
       when 'tokenize'          then reply(msg, tokens_for(msg['line']))
