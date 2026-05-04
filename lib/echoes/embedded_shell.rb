@@ -18,6 +18,14 @@ module Echoes
       require 'rubish'
       @repl = Rubish::REPL.new(no_rc: true)
       @output_buffer = +''
+      # Phase 1 doesn't forward keystrokes to running programs, so anything
+      # that auto-launches a pager (`git log`, `git diff`, `man`, …) would
+      # hang waiting for navigation keys we never deliver. Default the
+      # pager-related env vars to `cat` so those tools just dump their
+      # output. The user can override by setting their own value before
+      # launching Echoes.
+      ENV['GIT_PAGER'] ||= 'cat'
+      ENV['PAGER'] ||= 'cat'
     end
 
     # Submit a command line for execution. Stdout/stderr produced by
@@ -99,13 +107,20 @@ module Echoes
 
       saved_stdout = STDOUT.dup
       saved_stderr = STDERR.dup
+      saved_stdin  = STDIN.dup
       saved_stdout_glob = $stdout
       saved_stderr_glob = $stderr
+      saved_stdin_glob  = $stdin
 
       STDOUT.reopen(slave)
       STDERR.reopen(slave)
+      # Phase 1 has no way to forward user keystrokes to a running command,
+      # so wire stdin to /dev/null. Programs that try to read see EOF
+      # immediately rather than blocking on input that will never arrive.
+      STDIN.reopen('/dev/null', 'r')
       $stdout = STDOUT
       $stderr = STDERR
+      $stdin  = STDIN
 
       begin
         yield
@@ -114,10 +129,13 @@ module Echoes
       ensure
         STDOUT.reopen(saved_stdout)
         STDERR.reopen(saved_stderr)
+        STDIN.reopen(saved_stdin)
         saved_stdout.close
         saved_stderr.close
+        saved_stdin.close
         $stdout = saved_stdout_glob
         $stderr = saved_stderr_glob
+        $stdin  = saved_stdin_glob
         slave.close
       end
 
