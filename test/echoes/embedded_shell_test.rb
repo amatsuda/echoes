@@ -253,6 +253,77 @@ class Echoes::EmbeddedPaneTest < Test::Unit::TestCase
     end
   end
 
+  # Direct accessors for assertions about the editing state. The buffer
+  # and cursor are private-ish implementation details, but tests need to
+  # see them.
+  def buf;     @pane.instance_variable_get(:@input_buffer); end
+  def cursor;  @pane.instance_variable_get(:@input_cursor); end
+
+  test "left arrow moves the cursor back one position" do
+    "abc".chars.each { |c| @pane.handle_key(chars: c) }
+    assert_equal 3, cursor
+    @pane.handle_key(chars: "\u{F702}")
+    assert_equal 2, cursor
+    @pane.handle_key(chars: "\u{F702}")
+    @pane.handle_key(chars: "\u{F702}")
+    @pane.handle_key(chars: "\u{F702}")  # past start, stays
+    assert_equal 0, cursor
+  end
+
+  test "right arrow moves the cursor forward, capped at length" do
+    "abc".chars.each { |c| @pane.handle_key(chars: c) }
+    @pane.handle_key(chars: "\u{F702}")  # cursor = 2
+    @pane.handle_key(chars: "\u{F703}")  # back to 3
+    assert_equal 3, cursor
+    @pane.handle_key(chars: "\u{F703}")  # past end, stays
+    assert_equal 3, cursor
+  end
+
+  test "home and end jump the cursor" do
+    "hello".chars.each { |c| @pane.handle_key(chars: c) }
+    @pane.handle_key(chars: "\u{F729}")  # Home
+    assert_equal 0, cursor
+    @pane.handle_key(chars: "\u{F72B}")  # End
+    assert_equal 5, cursor
+  end
+
+  test "inserting a char in the middle splices it in correctly" do
+    "abce".chars.each { |c| @pane.handle_key(chars: c) }
+    @pane.handle_key(chars: "\u{F702}")  # cursor = 3 (before e)
+    @pane.handle_key(chars: "d")
+    assert_equal "abcde", buf
+    assert_equal 4, cursor
+  end
+
+  test "backspace mid-line removes the char before the cursor" do
+    "abxcd".chars.each { |c| @pane.handle_key(chars: c) }
+    @pane.handle_key(chars: "\u{F702}")  # before d
+    @pane.handle_key(chars: "\u{F702}")  # before c
+    @pane.handle_key(chars: "\u{F702}")  # before x; cursor = 2
+    @pane.handle_key(chars: "\u{7F}")    # backspace deletes "b"
+    assert_equal "axcd", buf
+    assert_equal 1, cursor
+  end
+
+  test "forward delete removes the char at the cursor" do
+    "abcd".chars.each { |c| @pane.handle_key(chars: c) }
+    @pane.handle_key(chars: "\u{F729}")  # home; cursor = 0
+    @pane.handle_key(chars: "\u{F728}")  # forward delete removes 'a'
+    assert_equal "bcd", buf
+    assert_equal 0, cursor
+  end
+
+  test "Enter submits the buffer regardless of cursor position" do
+    "echo mid-cursor".chars.each { |c| @pane.handle_key(chars: c) }
+    5.times { @pane.handle_key(chars: "\u{F702}") }  # cursor != end
+    @pane.handle_key(chars: "\r")
+    settle
+    assert_equal "", buf
+    assert_equal 0, cursor
+    flat = grid_text
+    assert_match(/mid-cursor/, flat)
+  end
+
   test "backspace pops the input buffer and erases the last cell" do
     "echo abc".chars.each { |c| @pane.handle_key(chars: c) }
     3.times { @pane.handle_key(chars: "\u{7F}") }  # erase "abc"

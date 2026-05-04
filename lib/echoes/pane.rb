@@ -24,6 +24,7 @@ module Echoes
         @parser = Parser.new(@screen, writer: ->(_s) { })
         @title = 'rubish'
         @input_buffer = +''
+        @input_cursor = 0     # offset within @input_buffer (0..length)
         @embedded_running = false
         @history_index = nil  # nil = not browsing; integer = browsing
         @history_saved = nil  # input held aside while browsing
@@ -141,15 +142,11 @@ module Echoes
       return true if chars.nil? || chars.empty?
 
       if @embedded_shell.running?
-        # Ctrl-C → ETX on the pty's master, kernel turns it into SIGINT
-        # delivered to the foreground process group on the pty.
-        if (flags & 0x40000) != 0 && chars.length == 1 && chars.ord >= 0x20
-          # Cocoa ControlKeyMask = 0x40000; chars is the literal pressed
-          # key (e.g. "c"); 0x1F mask gives the control byte.
-          @embedded_shell.forward_input((chars.ord & 0x1F).chr)
-        else
-          @embedded_shell.forward_input(chars)
-        end
+        # Translate macOS special-key code points to the ANSI escape
+        # sequences a real terminal would have produced — that's what
+        # programs reading from the pty (vim, less, etc.) expect.
+        translated = translate_for_pty(chars, flags)
+        @embedded_shell.forward_input(translated)
         return true
       end
 
@@ -157,16 +154,24 @@ module Echoes
       when "\r", "\n"
         line = @input_buffer
         @input_buffer = +''
+        @input_cursor = 0
         @history_index = nil
         @history_saved = nil
         process_output("\r\n")
         @embedded_shell.submit_line(line, rows: @screen.rows, cols: @screen.cols)
         @embedded_running = true
       when "\u{7F}", "\b"
-        unless @input_buffer.empty?
-          @input_buffer.chop!
-          process_output("\b \b")
-        end
+        delete_before_cursor
+      when "\u{F728}"  # NSDeleteFunctionKey (forward delete)
+        delete_at_cursor
+      when "\u{F702}"  # NSLeftArrowFunctionKey
+        cursor_left
+      when "\u{F703}"  # NSRightArrowFunctionKey
+        cursor_right
+      when "\u{F729}"  # NSHomeFunctionKey
+        cursor_home
+      when "\u{F72B}"  # NSEndFunctionKey
+        cursor_end
       when "\u{F700}"  # NSUpArrowFunctionKey
         history_step(-1)
       when "\u{F701}"  # NSDownArrowFunctionKey
@@ -178,8 +183,7 @@ module Echoes
         if first && first >= 0x20
           @history_index = nil  # editing ends history-walk mode
           @history_saved = nil
-          @input_buffer << chars
-          process_output(chars)
+          insert_at_cursor(chars)
         end
       end
       true
@@ -217,11 +221,110 @@ module Echoes
     end
 
     # Erase the currently-displayed input line and replace it with
-    # `new_line`, both in the buffer and on the screen.
+    # `new_line`. After the call the screen cursor is at the end of
+    # new_line. Used by history navigation, which always wants the
+    # cursor at the end after a swap.
     def replace_input_buffer(new_line)
+      replace_input_line(new_line, new_line.length)
+    end
+
+    # Lower-level variant: replace the input line with `new_line` and
+    # position the cursor at `new_cursor` within it. Handles the
+    # erase-old / draw-new / position-cursor dance with the parser.
+    def replace_input_line(new_line, new_cursor)
+      tail_len = @input_buffer.length - @input_cursor
+      process_output("\e[#{tail_len}C") if tail_len > 0
       process_output("\b \b" * @input_buffer.length)
       @input_buffer = +new_line
+      @input_cursor = new_cursor
       process_output(new_line)
+      back = new_line.length - new_cursor
+      process_output("\e[#{back}D") if back > 0
+    end
+
+    # ---- Mid-line editing primitives. All operate on @input_buffer
+    # and @input_cursor and emit just enough on the screen to keep the
+    # cell-grid view in sync.
+
+    def insert_at_cursor(chars)
+      @input_buffer.insert(@input_cursor, chars)
+      tail = @input_buffer[(@input_cursor + chars.length)..] || ''
+      @input_cursor += chars.length
+      # Echo the new chars + the tail that shifted right; then move
+      # the cursor back to its logical position.
+      process_output(chars + tail)
+      process_output("\e[#{tail.length}D") unless tail.empty?
+    end
+
+    def delete_before_cursor
+      return if @input_cursor == 0
+      @input_buffer.slice!(@input_cursor - 1)
+      @input_cursor -= 1
+      tail = @input_buffer[@input_cursor..] || ''
+      # \b moves left over the doomed cell; rewrite tail; pad with
+      # space to clobber the leftover char at the end; move back.
+      process_output("\b" + tail + ' ')
+      process_output("\e[#{tail.length + 1}D")
+    end
+
+    def delete_at_cursor
+      return if @input_cursor >= @input_buffer.length
+      @input_buffer.slice!(@input_cursor)
+      tail = @input_buffer[@input_cursor..] || ''
+      process_output(tail + ' ')
+      process_output("\e[#{tail.length + 1}D")
+    end
+
+    def cursor_left
+      return if @input_cursor == 0
+      @input_cursor -= 1
+      process_output("\e[D")
+    end
+
+    def cursor_right
+      return if @input_cursor >= @input_buffer.length
+      @input_cursor += 1
+      process_output("\e[C")
+    end
+
+    def cursor_home
+      return if @input_cursor == 0
+      process_output("\e[#{@input_cursor}D")
+      @input_cursor = 0
+    end
+
+    def cursor_end
+      n = @input_buffer.length - @input_cursor
+      return if n == 0
+      process_output("\e[#{n}C")
+      @input_cursor = @input_buffer.length
+    end
+
+    # Translate a macOS NSEvent character (which uses U+F70x for
+    # special keys) to the ANSI escape sequence a unix program reading
+    # from a pty would expect. Plain printable input passes through;
+    # Ctrl+letter gets masked to its control byte (so Ctrl-C → ETX).
+    SPECIAL_KEY_TO_ANSI = {
+      "\u{F700}" => "\e[A",  # Up
+      "\u{F701}" => "\e[B",  # Down
+      "\u{F703}" => "\e[C",  # Right
+      "\u{F702}" => "\e[D",  # Left
+      "\u{F728}" => "\e[3~", # Delete (forward)
+      "\u{F729}" => "\e[H",  # Home
+      "\u{F72B}" => "\e[F",  # End
+      "\u{F72C}" => "\e[5~", # PageUp
+      "\u{F72D}" => "\e[6~", # PageDown
+    }.freeze
+
+    NSEVENT_CONTROL_FLAG = 0x40000
+
+    def translate_for_pty(chars, flags)
+      mapped = SPECIAL_KEY_TO_ANSI[chars]
+      return mapped if mapped
+      if (flags & NSEVENT_CONTROL_FLAG) != 0 && chars.length == 1 && chars.ord >= 0x20
+        return (chars.ord & 0x1F).chr
+      end
+      chars
     end
 
     # Tab completion. If exactly one candidate matches the word at
@@ -231,18 +334,19 @@ module Echoes
     WORD_BREAK_CHARS = " \t\n\"'><=;|&{("
 
     def complete_input
-      candidates = @embedded_shell.complete_at(
-        line: @input_buffer, point: @input_buffer.length,
-      )
+      point = @input_cursor
+      candidates = @embedded_shell.complete_at(line: @input_buffer, point: point)
       return if candidates.empty?
 
       if candidates.size == 1
-        word_start = @input_buffer.length
+        word_start = point
         word_start -= 1 while word_start > 0 && !WORD_BREAK_CHARS.include?(@input_buffer[word_start - 1])
         completion = candidates.first
         completion = "#{completion} " unless completion.end_with?('/')
-        new_input = @input_buffer[0...word_start] + completion
-        replace_input_buffer(new_input)
+        tail = @input_buffer[point..] || ''
+        new_input = @input_buffer[0...word_start] + completion + tail
+        new_cursor = word_start + completion.length
+        replace_input_line(new_input, new_cursor)
       else
         process_output("\r\n")
         per_row = 4
@@ -253,6 +357,8 @@ module Echoes
         process_output("\r\n") unless candidates.size % per_row == 0
         process_output(@embedded_shell.prompt.to_s)
         process_output(@input_buffer)
+        # Cursor on screen is at end after the redraw; sync state.
+        @input_cursor = @input_buffer.length
       end
     end
   end
