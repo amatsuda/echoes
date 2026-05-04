@@ -801,6 +801,19 @@ module Echoes
       end
     end
 
+    # Find the command mark whose *output* region covers `abs_row` and
+    # return [start_row, end_row] (both inclusive) so callers like the
+    # GUI's triple-click can highlight or copy that whole region. nil
+    # if no completed mark covers the row.
+    def output_region_for_row(abs_row)
+      mark = @command_marks.reverse_each.find do |m|
+        next false unless m[:output_start] && m[:output_end]
+        abs_row >= m[:output_start] && abs_row < m[:output_end]
+      end
+      return nil unless mark
+      [mark[:output_start], mark[:output_end] - 1]
+    end
+
     # When scrollback shifts (oldest row dropped), every row index in
     # @command_marks moves by `delta` (typically -1). Marks that would
     # now point before the scrollback floor are dropped — their content

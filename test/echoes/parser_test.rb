@@ -1159,6 +1159,33 @@ class Echoes::ParserTest < Test::Unit::TestCase
     assert_equal 1, @screen.command_marks.size
   end
 
+  test "output_region_for_row covers any row in [output_start, output_end)" do
+    @parser.feed("\e]133;A\e\\$ \e]133;B\e\\")
+    @parser.feed("ls\r\n")
+    @parser.feed("\e]133;C\e\\")
+    @parser.feed("file1\r\nfile2\r\nfile3\r\n")
+    @parser.feed("\e]133;D;0\e\\")
+    mark = @screen.command_marks.first
+    output_start = mark[:output_start]
+    output_end   = mark[:output_end]
+    # Any row inside the region returns the same [start, end-1] pair
+    region = @screen.output_region_for_row(output_start)
+    assert_equal [output_start, output_end - 1], region
+    region = @screen.output_region_for_row(output_end - 1)
+    assert_equal [output_start, output_end - 1], region
+    # Rows outside the region (the prompt row, or the row just past
+    # the end) return nil.
+    assert_nil @screen.output_region_for_row(0)
+    assert_nil @screen.output_region_for_row(output_end)
+  end
+
+  test "output_region_for_row returns nil for an unfinished command" do
+    @parser.feed("\e]133;A\e\\$ \e]133;B\e\\")
+    @parser.feed("sleep 5\r\n")
+    @parser.feed("\e]133;C\e\\")  # no ;D yet
+    assert_nil @screen.output_region_for_row(@screen.command_marks.first[:output_start])
+  end
+
   test "OSC 133 markers are recorded but not visible in the cell grid" do
     @parser.feed("\e]133;A\e\\$ \e]133;B\e\\")
     assert_equal "$", row_text(0)

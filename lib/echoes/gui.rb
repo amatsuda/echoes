@@ -1486,10 +1486,19 @@ module Echoes
         row, col = pos
         send_mouse_event(tab, 0, col, row)  # button 0 = left press
       elsif click_count >= 3
-        # Triple-click: select entire line
+        # Triple-click: if the clicked row falls inside a command's
+        # OSC 133 output region, select the whole region (semantic
+        # copy). Otherwise fall back to selecting just this one line.
         abs_row, = pos
-        @selection_anchor = [abs_row, 0]
-        @selection_end = [abs_row, @cols - 1]
+        region = tab.active_pane&.screen&.output_region_for_row(abs_row)
+        if region
+          start_row, end_row = region
+          @selection_anchor = [start_row, 0]
+          @selection_end    = [end_row, @cols - 1]
+        else
+          @selection_anchor = [abs_row, 0]
+          @selection_end    = [abs_row, @cols - 1]
+        end
       elsif click_count == 2
         # Double-click: select word
         abs_row, col = pos
