@@ -167,6 +167,8 @@ module Echoes
         history_step(-1)
       when "\u{F701}"  # NSDownArrowFunctionKey
         history_step(1)
+      when "\t"
+        complete_input
       else
         first = chars.bytes.first
         if first && first >= 0x20
@@ -216,6 +218,38 @@ module Echoes
       process_output("\b \b" * @input_buffer.length)
       @input_buffer = +new_line
       process_output(new_line)
+    end
+
+    # Tab completion. If exactly one candidate matches the word at
+    # cursor, splice it in and add a trailing space (or `/` for dirs).
+    # Multiple candidates → print them inline below the prompt and
+    # redraw the input. Zero → no-op (silent).
+    WORD_BREAK_CHARS = " \t\n\"'><=;|&{("
+
+    def complete_input
+      candidates = @embedded_shell.complete_at(
+        line: @input_buffer, point: @input_buffer.length,
+      )
+      return if candidates.empty?
+
+      if candidates.size == 1
+        word_start = @input_buffer.length
+        word_start -= 1 while word_start > 0 && !WORD_BREAK_CHARS.include?(@input_buffer[word_start - 1])
+        completion = candidates.first
+        completion = "#{completion} " unless completion.end_with?('/')
+        new_input = @input_buffer[0...word_start] + completion
+        replace_input_buffer(new_input)
+      else
+        process_output("\r\n")
+        per_row = 4
+        candidates.each_with_index do |c, i|
+          process_output(c.ljust(20))
+          process_output("\r\n") if i % per_row == per_row - 1
+        end
+        process_output("\r\n") unless candidates.size % per_row == 0
+        process_output(@embedded_shell.prompt.to_s)
+        process_output(@input_buffer)
+      end
     end
   end
 end

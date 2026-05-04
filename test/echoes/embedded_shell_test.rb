@@ -210,6 +210,32 @@ class Echoes::EmbeddedPaneTest < Test::Unit::TestCase
     assert_match(/in-progress\z/, rows.last)
   end
 
+  # Long file paths cause the input line to wrap across multiple rows
+  # in the cell grid; join with no separator to reconstruct it.
+  def grid_text
+    @pane.screen.grid.map { |row| row.map { |c| c.char || ' ' }.join.rstrip }.join
+  end
+
+  test "tab completion with a unique candidate inserts the full word" do
+    Dir.mktmpdir do |dir|
+      File.write(File.join(dir, "uniquefilename.txt"), "")
+      "ls #{dir}/u".chars.each { |c| @pane.handle_key(chars: c) }
+      @pane.handle_key(chars: "\t")
+      assert_match(/uniquefilename\.txt/, grid_text)
+    end
+  end
+
+  test "tab completion with multiple candidates lists them and re-prompts" do
+    Dir.mktmpdir do |dir|
+      File.write(File.join(dir, "alpha.txt"), "")
+      File.write(File.join(dir, "alphabet.txt"), "")
+      "ls #{dir}/al".chars.each { |c| @pane.handle_key(chars: c) }
+      @pane.handle_key(chars: "\t")
+      assert_match(/alpha\.txt/, grid_text)
+      assert_match(/alphabet\.txt/, grid_text)
+    end
+  end
+
   test "backspace pops the input buffer and erases the last cell" do
     "echo abc".chars.each { |c| @pane.handle_key(chars: c) }
     3.times { @pane.handle_key(chars: "\u{7F}") }  # erase "abc"
