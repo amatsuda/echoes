@@ -17,18 +17,27 @@ class Echoes::EmbeddedShellTest < Test::Unit::TestCase
     @shell.shutdown rescue nil
   end
 
+  # The pty stream now also carries OSC 7 (cwd announcement) and the
+  # OSC 7771 done-sentinel after each command, so raw `read_available_output`
+  # contains escape metadata in addition to the visible bytes. Strip it
+  # for the tests that care about visible output only.
+  def visible_output
+    out = @shell.read_available_output
+    out.gsub(/\e\][0-9;]*[^\a\e]*(?:\a|\e\\)/, '')
+  end
+
   test "captures stdout from a builtin" do
     # Capture is via a pty, so the kernel's ONLCR converts "\n" to "\r\n"
     # — the same shape a real terminal would see from the same builtin.
     @shell.submit_and_wait("echo hello")
-    assert_equal "hello\r\n", @shell.read_available_output
+    assert_equal "hello\r\n", visible_output
   end
 
   test "read_available_output drains the buffer" do
     @shell.submit_and_wait("echo a")
     @shell.read_available_output
     @shell.submit_and_wait("echo b")
-    assert_equal "b\r\n", @shell.read_available_output
+    assert_equal "b\r\n", visible_output
   end
 
   test "cd changes the embedded shell's cwd" do
@@ -69,7 +78,7 @@ class Echoes::EmbeddedShellTest < Test::Unit::TestCase
     # /bin/echo is a real fork+exec; the StringIO trick wouldn't catch
     # this. The pty-redirect path must.
     @shell.submit_and_wait("/bin/echo external hello")
-    assert_equal "external hello\r\n", @shell.read_available_output
+    assert_equal "external hello\r\n", visible_output
   end
 
   test "captures stdout from an external command in a pipeline" do
@@ -89,14 +98,14 @@ class Echoes::EmbeddedShellTest < Test::Unit::TestCase
     # With the pty-based capture, FD 1 is a pty slave (a real tty
     # device), so isatty returns true.
     @shell.submit_and_wait("test -t 1 && echo TTY || echo NO_TTY")
-    assert_equal "TTY\r\n", @shell.read_available_output
+    assert_equal "TTY\r\n", visible_output
   end
 
   test "captures larger external output (exceeds pty buffer if not drained)" do
     # seq writes to FD 1 quickly; the reader thread must drain
     # concurrently or the child blocks at the kernel pty buffer.
     @shell.submit_and_wait("seq 5000")
-    out = @shell.read_available_output
+    out = visible_output
     lines = out.split("\r\n")
     assert_equal 5000, lines.size
     assert_equal "1", lines.first
@@ -105,8 +114,7 @@ class Echoes::EmbeddedShellTest < Test::Unit::TestCase
 
   test "submit_and_wait sets the pty winsize so programs see the right dimensions" do
     @shell.submit_and_wait("/usr/bin/tput cols", rows: 30, cols: 132)
-    out = @shell.read_available_output.strip
-    assert_equal "132", out
+    assert_equal "132", visible_output.strip
   end
 
   test "submit_line appends the line to history" do
@@ -137,6 +145,23 @@ class Echoes::EmbeddedShellTest < Test::Unit::TestCase
     out = @shell.read_available_output
     cols_seen = out.scan(/\d+/).map(&:to_i).uniq
     assert_includes cols_seen, 132, "expected later iterations to see 132 cols, saw #{cols_seen.inspect}"
+  end
+
+  test "helper emits OSC 7 after a cd so the host learns the new cwd" do
+    require "echoes/screen"
+    require "echoes/parser"
+    @shell.read_available_output  # drain startup output
+    Dir.mktmpdir do |dir|
+      @shell.submit_and_wait("cd #{dir}")
+      out = @shell.read_available_output
+      screen = Echoes::Screen.new(rows: 5, cols: 80)
+      Echoes::Parser.new(screen).feed(out)
+      uri = screen.current_directory.to_s
+      assert_match(%r{\Afile://}, uri, "expected an OSC 7 URI to land on screen")
+      # macOS /tmp is a symlink to /private/tmp; the helper reports
+      # the resolved Dir.pwd. Match by basename so either resolution wins.
+      assert_match(/#{Regexp.escape(File.basename(dir))}\z/, uri)
+    end
   end
 
   test "submit_line returns immediately while the command runs" do

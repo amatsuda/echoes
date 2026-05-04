@@ -72,6 +72,12 @@ module Echoes
       @control_out.sync = true
       @write_lock = Mutex.new
       @command_thread = nil
+      # OSC 7 announces the working directory to the host so things
+      # like new-tab-inherits-cwd and the window title pick it up via
+      # the standard `screen.current_directory` path. Emit once at
+      # startup; thereafter handle_execute re-emits after each command
+      # in case it changed cwd (cd, pushd/popd, …).
+      emit_osc7(Dir.pwd)
     end
 
     def run
@@ -129,8 +135,13 @@ module Echoes
           STDERR.puts "rubish: #{e.class}: #{e.message}"
         end
         status = @repl.instance_variable_get(:@last_status) || (interrupted ? 130 : 0)
-        # Sentinel first (must be in pty kernel buffer before host
-        # observes command_done), then the structured event.
+        # Re-announce cwd so the host's pane.screen.current_directory
+        # reflects any cd/pushd/popd this command performed. Emit
+        # *before* the sentinel so the host has it processed by the
+        # time it reacts to command_done.
+        emit_osc7(Dir.pwd)
+        # Sentinel must be in the pty kernel buffer before host
+        # observes command_done; the structured event comes last.
         STDOUT.write DONE_SENTINEL rescue nil
         STDOUT.flush rescue nil
         emit_event('command_done', exit_status: status, cwd: Dir.pwd)
@@ -156,6 +167,21 @@ module Echoes
 
     def emit_event(event, **payload)
       send_json('event' => event, **payload)
+    end
+
+    # Write an OSC 7 sequence (cwd announcement) to the pty. Format:
+    # `\e]7;file://localhost/<percent-encoded-path>\e\\`. The host's
+    # parser sets `screen.current_directory` from this; gui.rb's
+    # `pane_local_cwd` then converts it back to a real path for
+    # things like new-tab-inherits-cwd.
+    def emit_osc7(path)
+      # Percent-encode every byte that isn't an RFC 3986 unreserved
+      # char or path separator, so spaces and unicode survive the
+      # round-trip.
+      encoded = path.b.gsub(/[^A-Za-z0-9\-._~\/]/n) { |c| '%' + c.unpack1('H*').upcase }
+      STDOUT.write "\e]7;file://localhost#{encoded}\e\\"
+      STDOUT.flush
+    rescue IOError, Errno::EPIPE
     end
 
     def send_json(obj)
