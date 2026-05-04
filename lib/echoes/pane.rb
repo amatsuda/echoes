@@ -31,6 +31,12 @@ module Echoes
         @continuation_lines = []  # collected lines while waiting for a complete command
         @kill_ring = +''      # last killed text (for Ctrl-Y yank)
         @autosuggestion = +''  # fish-style: tail of the most recent matching history entry
+        @input_mode = :prompt  # :prompt | :search (running uses @embedded_shell.running?)
+        @search_query = +''    # Ctrl-R substring being typed
+        @search_index = nil    # index into history of the current match (nil = no match)
+        @search_saved_buffer = nil
+        @search_saved_cursor = nil
+        @search_saved_autosuggestion = nil
       else
         start_dir = (cwd && Dir.exist?(cwd)) ? cwd : Dir.home
         Dir.chdir(start_dir) do
@@ -164,6 +170,8 @@ module Echoes
         @embedded_shell.forward_input(translated)
         return true
       end
+
+      return handle_search_key(chars, flags) if @input_mode == :search
 
       # Emacs/readline-style bindings on Ctrl+letter at the prompt.
       # macOS gives us `chars` as the plain letter (Cocoa's
@@ -399,6 +407,7 @@ module Echoes
       when 'u' then kill_to_start;        true
       when 'w' then kill_word_left;       true
       when 'l' then redraw_screen;        true
+      when 'r' then enter_search;         true
       when 'c'
         # Ctrl-C at the prompt: discard the in-progress line, drop
         # the user on a fresh prompt below. Like bash.
@@ -688,6 +697,149 @@ module Echoes
       i += 1 while i < s.length && s[i] == ' '
       i += 1 while i < s.length && s[i] != ' '
       insert_at_cursor(s[0, i])
+    end
+
+    # ---- Ctrl-R reverse-incremental history search.
+    #
+    # While in :search mode, the current line on screen is replaced with
+    #   (reverse-i-search)`query': matched-history-line
+    # Typed chars narrow the query; Ctrl-R jumps to the next older match;
+    # Enter accepts the match and submits it; Esc / Ctrl-G cancels and
+    # restores the original input. Other keys (arrows, etc.) cancel the
+    # search and re-process the keystroke in :prompt mode — so e.g. ↑
+    # exits search and walks the regular history.
+
+    def enter_search
+      @input_mode = :search
+      @search_query = +''
+      @search_index = nil
+      @search_saved_buffer = @input_buffer.dup
+      @search_saved_cursor = @input_cursor
+      @search_saved_autosuggestion = @autosuggestion.dup
+      render_search
+    end
+
+    def handle_search_key(chars, flags)
+      ctrl = (flags & NSEVENT_CONTROL_FLAG) != 0
+      if ctrl && chars.length == 1 && chars.ord >= 0x20
+        case chars.downcase
+        when 'r' then search_step_back; return true
+        when 'g' then exit_search(:cancel); return true
+        when 'h' then search_backspace;   return true
+        end
+      end
+
+      case chars
+      when "\e"
+        exit_search(:cancel)
+      when "\r", "\n"
+        exit_search(:accept_and_submit)
+      when "\u{7F}", "\b"
+        search_backspace
+      else
+        ord = chars.length == 1 ? chars.ord : nil
+        # Accept printable input: ASCII printable plus normal Unicode.
+        # Exclude the macOS NSEvent special-key range (U+F700–F7FF) —
+        # those are arrows / Home / End / Delete and should fall through
+        # to the cancel-and-reprocess path so the user lands back in
+        # prompt mode and the keystroke runs there.
+        if !ctrl && ord && ord >= 0x20 && (ord < 0xF700 || ord > 0xF7FF)
+          @search_query << chars
+          restart_search_from_end
+          render_search
+        else
+          exit_search(:cancel)
+          return handle_key(chars: chars, flags: flags)
+        end
+      end
+      true
+    end
+
+    def search_backspace
+      return if @search_query.empty?
+      @search_query.chop!
+      restart_search_from_end
+      render_search
+    end
+
+    # After the query changes, find the newest history entry that
+    # contains the new query. nil index means no match.
+    def restart_search_from_end
+      hist = @embedded_shell.history
+      @search_index = nil
+      return if @search_query.empty?
+      (hist.size - 1).downto(0) do |i|
+        entry = hist[i]
+        next if entry.nil? || entry.include?("\n")
+        if entry.include?(@search_query)
+          @search_index = i
+          return
+        end
+      end
+    end
+
+    # Ctrl-R while already in search: jump to the next older match for
+    # the current query. If none, leave the index alone.
+    def search_step_back
+      hist = @embedded_shell.history
+      return if @search_query.empty?
+      start_idx = (@search_index || hist.size) - 1
+      start_idx.downto(0) do |i|
+        entry = hist[i]
+        next if entry.nil? || entry.include?("\n")
+        if entry.include?(@search_query)
+          @search_index = i
+          render_search
+          return
+        end
+      end
+    end
+
+    def render_search
+      hist = @embedded_shell.history
+      matched = (@search_index ? hist[@search_index] : nil) || ''
+      display = "(reverse-i-search)`#{@search_query}': #{matched}"
+      process_output("\r\e[K")
+      process_output(display)
+    end
+
+    def exit_search(action)
+      hist = @embedded_shell.history
+      matched = @search_index ? hist[@search_index] : nil
+
+      case action
+      when :accept_and_submit
+        accepted = matched || @search_saved_buffer || ''
+        @input_buffer = +accepted
+        @input_cursor = @input_buffer.length
+        @autosuggestion = +''
+        @input_mode = :prompt
+        @search_query = +''
+        @search_index = nil
+        @search_saved_buffer = nil
+        @search_saved_cursor = nil
+        @search_saved_autosuggestion = nil
+        process_output("\r\e[K")
+        process_output(@embedded_shell.prompt.to_s)
+        process_output(colorize_input(@input_buffer))
+        submit_or_continue
+      else  # :cancel
+        @input_buffer = @search_saved_buffer || +''
+        @input_cursor = @search_saved_cursor || 0
+        @autosuggestion = @search_saved_autosuggestion || +''
+        @input_mode = :prompt
+        @search_query = +''
+        @search_index = nil
+        @search_saved_buffer = nil
+        @search_saved_cursor = nil
+        @search_saved_autosuggestion = nil
+        process_output("\r\e[K")
+        process_output(@embedded_shell.prompt.to_s)
+        process_output(colorize_input(@input_buffer))
+        process_output("\e[2m" + @autosuggestion + "\e[0m") unless @autosuggestion.empty?
+        back = @input_buffer.length + @autosuggestion.length - @input_cursor
+        process_output("\e[#{back}D") if back > 0
+      end
     end
 
     def sgr_for_token(tok, command_position)

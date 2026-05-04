@@ -642,6 +642,104 @@ class Echoes::EmbeddedPaneTest < Test::Unit::TestCase
     assert_equal "", autosuggestion
   end
 
+  # Direct accessors for the search-mode state.
+  def input_mode;   @pane.instance_variable_get(:@input_mode);   end
+  def search_query; @pane.instance_variable_get(:@search_query); end
+  def search_index; @pane.instance_variable_get(:@search_index); end
+
+  test "Ctrl-R enters reverse-i-search mode and renders the search prompt" do
+    "echo hello".chars.each { |c| @pane.handle_key(chars: c) }
+    @pane.handle_key(chars: "\r")
+    settle
+    @pane.handle_key(chars: "r", flags: CTRL)
+    assert_equal :search, input_mode
+    assert_match(/\(reverse-i-search\)/, grid_text)
+  end
+
+  test "typing inside reverse-i-search narrows to the newest matching entry" do
+    "echo first".chars.each { |c| @pane.handle_key(chars: c) }
+    @pane.handle_key(chars: "\r")
+    settle
+    "echo second".chars.each { |c| @pane.handle_key(chars: c) }
+    @pane.handle_key(chars: "\r")
+    settle
+    @pane.handle_key(chars: "r", flags: CTRL)
+    "se".chars.each { |c| @pane.handle_key(chars: c) }
+    assert_equal "se", search_query
+    assert_match(/echo second/, grid_text)
+  end
+
+  test "Ctrl-R inside search jumps to the next older match" do
+    "echo first".chars.each { |c| @pane.handle_key(chars: c) }
+    @pane.handle_key(chars: "\r")
+    settle
+    "echo second".chars.each { |c| @pane.handle_key(chars: c) }
+    @pane.handle_key(chars: "\r")
+    settle
+    @pane.handle_key(chars: "r", flags: CTRL)
+    "echo".chars.each { |c| @pane.handle_key(chars: c) }
+    # newest match first ("echo second")
+    hist = @pane.embedded_shell.history
+    assert_equal hist.index("echo second"), search_index
+    @pane.handle_key(chars: "r", flags: CTRL)  # next older
+    assert_equal hist.index("echo first"), search_index
+  end
+
+  test "Backspace inside search pops a query char and re-searches" do
+    "echo banana".chars.each { |c| @pane.handle_key(chars: c) }
+    @pane.handle_key(chars: "\r")
+    settle
+    @pane.handle_key(chars: "r", flags: CTRL)
+    "ban".chars.each { |c| @pane.handle_key(chars: c) }
+    @pane.handle_key(chars: "\u{7F}")
+    assert_equal "ba", search_query
+  end
+
+  test "Esc cancels search and restores the in-progress input" do
+    "echo".chars.each { |c| @pane.handle_key(chars: c) }
+    "echo hello".chars.each { |c| @pane.handle_key(chars: c) }  # not relevant
+    # actually start fresh: type partial input, enter search, cancel
+    @pane.handle_key(chars: "c", flags: CTRL)  # clear
+    "abc".chars.each { |c| @pane.handle_key(chars: c) }
+    saved = buf
+    @pane.handle_key(chars: "r", flags: CTRL)
+    assert_equal :search, input_mode
+    @pane.handle_key(chars: "\e")  # Esc
+    assert_equal :prompt, input_mode
+    assert_equal saved, buf
+  end
+
+  test "Ctrl-G cancels search like Esc" do
+    "abc".chars.each { |c| @pane.handle_key(chars: c) }
+    @pane.handle_key(chars: "r", flags: CTRL)
+    @pane.handle_key(chars: "g", flags: CTRL)
+    assert_equal :prompt, input_mode
+  end
+
+  test "Enter inside search accepts the matched line and submits it" do
+    "echo banana".chars.each { |c| @pane.handle_key(chars: c) }
+    @pane.handle_key(chars: "\r")
+    settle
+    @pane.handle_key(chars: "r", flags: CTRL)
+    "ban".chars.each { |c| @pane.handle_key(chars: c) }
+    @pane.handle_key(chars: "\r")
+    settle
+    assert_equal :prompt, input_mode
+    # the submitted command produced output
+    assert_match(/banana/, grid_text)
+  end
+
+  test "Other keys (e.g. up arrow) cancel search and re-process in prompt mode" do
+    "echo bar".chars.each { |c| @pane.handle_key(chars: c) }
+    @pane.handle_key(chars: "\r")
+    settle
+    @pane.handle_key(chars: "r", flags: CTRL)
+    @pane.handle_key(chars: "\u{F700}")  # Up arrow
+    assert_equal :prompt, input_mode
+    # Up arrow walked history → buffer holds the most recent entry
+    assert_equal "echo bar", buf
+  end
+
   test "highlighted input doesn't pollute the cell grid with escape characters" do
     "echo hello".chars.each { |c| @pane.handle_key(chars: c) }
     flat = grid_text
