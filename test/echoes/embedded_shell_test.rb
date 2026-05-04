@@ -380,6 +380,13 @@ class Echoes::EmbeddedPaneTest < Test::Unit::TestCase
     assert_equal "echo  ", buf
   end
 
+  test "Ctrl-H deletes the char before the cursor (alias for Backspace)" do
+    "abc".chars.each { |c| @pane.handle_key(chars: c) }
+    @pane.handle_key(chars: "h", flags: CTRL)
+    assert_equal "ab", buf
+    assert_equal 2, cursor
+  end
+
   test "Ctrl-C at prompt clears the input and drops a fresh prompt" do
     "half typed".chars.each { |c| @pane.handle_key(chars: c) }
     @pane.handle_key(chars: "c", flags: CTRL)

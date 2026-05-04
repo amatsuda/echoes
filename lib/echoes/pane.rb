@@ -355,6 +355,7 @@ module Echoes
       when 'e' then cursor_end;         true
       when 'b' then cursor_left;        true
       when 'f' then cursor_right;       true
+      when 'h' then delete_before_cursor; true   # ASCII 0x08 (BS)
       when 'd'
         # Bash convention: Ctrl-D on an empty line is "EOF / exit"; on
         # a non-empty line it's forward-delete. We don't have an exit
