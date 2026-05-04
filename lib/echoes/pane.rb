@@ -30,6 +30,7 @@ module Echoes
         @history_saved = nil  # input held aside while browsing
         @continuation_lines = []  # collected lines while waiting for a complete command
         @kill_ring = +''      # last killed text (for Ctrl-Y yank)
+        @autosuggestion = +''  # fish-style: tail of the most recent matching history entry
       else
         start_dir = (cwd && Dir.exist?(cwd)) ? cwd : Dir.home
         Dir.chdir(start_dir) do
@@ -183,11 +184,21 @@ module Echoes
       when "\u{F702}"  # NSLeftArrowFunctionKey
         option_held ? word_left : cursor_left
       when "\u{F703}"  # NSRightArrowFunctionKey
-        option_held ? word_right : cursor_right
+        if option_held
+          word_right
+        elsif at_end_with_suggestion?
+          accept_full_autosuggestion
+        else
+          cursor_right
+        end
       when "\u{F729}"  # NSHomeFunctionKey
         cursor_home
       when "\u{F72B}"  # NSEndFunctionKey
-        cursor_end
+        if at_end_with_suggestion?
+          accept_full_autosuggestion
+        else
+          cursor_end
+        end
       when "\u{F700}"  # NSUpArrowFunctionKey
         history_step(-1)
       when "\u{F701}"  # NSDownArrowFunctionKey
@@ -224,6 +235,7 @@ module Echoes
         @continuation_lines << this_line
         @input_buffer = +''
         @input_cursor = 0
+        @autosuggestion = +''
         process_output("\r\n")
         process_output(@embedded_shell.continuation_prompt)
       else
@@ -235,6 +247,7 @@ module Echoes
         @continuation_lines = []
         @history_index = nil
         @history_saved = nil
+        @autosuggestion = +''
         process_output("\r\n")
         @embedded_shell.submit_line(line, rows: @screen.rows, cols: @screen.cols)
         @embedded_running = true
@@ -279,15 +292,19 @@ module Echoes
     # erase-old / draw-new / position-cursor dance with the parser.
     # The drawn content is colorized via `colorize_input`; SGR escapes
     # don't advance the cell cursor, so the count-based math here still
-    # holds.
+    # holds. After redrawing the input, the dim autosuggestion (if any)
+    # is appended and the cursor is moved back to the logical position.
     def replace_input_line(new_line, new_cursor)
-      tail_len = @input_buffer.length - @input_cursor
+      prev_visible = @input_buffer.length + @autosuggestion.length
+      tail_len = prev_visible - @input_cursor
       process_output("\e[#{tail_len}C") if tail_len > 0
-      process_output("\b \b" * @input_buffer.length)
+      process_output("\b \b" * prev_visible)
       @input_buffer = +new_line
       @input_cursor = new_cursor
+      @autosuggestion = compute_autosuggestion
       process_output(colorize_input(new_line))
-      back = new_line.length - new_cursor
+      process_output("\e[2m" + @autosuggestion + "\e[0m") unless @autosuggestion.empty?
+      back = new_line.length + @autosuggestion.length - new_cursor
       process_output("\e[#{back}D") if back > 0
     end
 
@@ -344,9 +361,25 @@ module Echoes
     def handle_ctrl_letter(letter)
       case letter
       when 'a' then cursor_home;          true
-      when 'e' then cursor_end;           true
+      when 'e'
+        # Ctrl-E: jump to end. If already at end and a suggestion is
+        # showing, accept it (fish-style).
+        if at_end_with_suggestion?
+          accept_full_autosuggestion
+        else
+          cursor_end
+        end
+        true
       when 'b' then cursor_left;          true
-      when 'f' then cursor_right;         true
+      when 'f'
+        # Ctrl-F: forward one char. At end-of-input with a suggestion,
+        # accept just one word of it (fish's accept-autosuggestion-word).
+        if at_end_with_suggestion?
+          accept_word_of_autosuggestion
+        else
+          cursor_right
+        end
+        true
       when 'h' then delete_before_cursor; true   # ASCII 0x08 (BS)
       when 'i' then complete_input;       true   # ASCII 0x09 (Tab)
       when 'j' then submit_or_continue;   true   # ASCII 0x0A (LF / Enter)
@@ -374,6 +407,7 @@ module Echoes
         @input_cursor = 0
         @history_index = nil
         @history_saved = nil
+        @autosuggestion = +''
         process_output(@embedded_shell.prompt.to_s)
         true
       else
@@ -447,7 +481,8 @@ module Echoes
       process_output("\e[2J\e[H")
       process_output(@embedded_shell.prompt.to_s)
       process_output(colorize_input(@input_buffer))
-      back = @input_buffer.length - @input_cursor
+      process_output("\e[2m" + @autosuggestion + "\e[0m") unless @autosuggestion.empty?
+      back = @input_buffer.length + @autosuggestion.length - @input_cursor
       process_output("\e[#{back}D") if back > 0
     end
 
@@ -533,6 +568,11 @@ module Echoes
         process_output(colorize_input(@input_buffer))
         # Cursor on screen is at end after the redraw; sync state.
         @input_cursor = @input_buffer.length
+        @autosuggestion = compute_autosuggestion
+        unless @autosuggestion.empty?
+          process_output("\e[2m" + @autosuggestion + "\e[0m")
+          process_output("\e[#{@autosuggestion.length}D")
+        end
       end
     end
 
@@ -601,6 +641,53 @@ module Echoes
       out
     rescue
       line
+    end
+
+    # Find the most recent history entry that has @input_buffer as a
+    # strict prefix; the suffix is what we render as a dim ghost-text
+    # autosuggestion. Empty input → no suggestion. Empty during
+    # multi-line continuation: history stores commands as one entry
+    # each, so a partial second-line buffer wouldn't match meaningfully.
+    def compute_autosuggestion
+      return '' if @input_buffer.empty?
+      return '' unless @continuation_lines.empty?
+      hist = @embedded_shell.history
+      return '' if hist.empty?
+      hist.reverse_each do |entry|
+        # Multi-line history entries (saved from continuation submissions
+        # as one big string with embedded "\n") can't render as inline
+        # ghost text — skip them.
+        next if entry.include?("\n")
+        if entry.start_with?(@input_buffer) && entry.length > @input_buffer.length
+          return entry[@input_buffer.length..]
+        end
+      end
+      ''
+    rescue
+      ''
+    end
+
+    def at_end_with_suggestion?
+      @input_cursor >= @input_buffer.length && !@autosuggestion.empty?
+    end
+
+    # Accept the entire pending suggestion: splice it in at the cursor.
+    # `insert_at_cursor` routes through `replace_input_line`, which
+    # recomputes the now-empty suggestion against the new buffer.
+    def accept_full_autosuggestion
+      return if @autosuggestion.empty?
+      insert_at_cursor(@autosuggestion)
+    end
+
+    # Accept just the next word (run of whitespace + run of non-whitespace)
+    # from the pending suggestion. Mirrors fish's accept-autosuggestion-word.
+    def accept_word_of_autosuggestion
+      return if @autosuggestion.empty?
+      s = @autosuggestion
+      i = 0
+      i += 1 while i < s.length && s[i] == ' '
+      i += 1 while i < s.length && s[i] != ' '
+      insert_at_cursor(s[0, i])
     end
 
     def sgr_for_token(tok, command_position)

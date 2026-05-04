@@ -557,6 +557,91 @@ class Echoes::EmbeddedPaneTest < Test::Unit::TestCase
     assert_equal "", colorize("")
   end
 
+  # Direct accessor for the autosuggestion ghost-text state.
+  def autosuggestion; @pane.instance_variable_get(:@autosuggestion); end
+
+  test "autosuggestion shows the tail of the most recent matching history entry" do
+    "echo hello".chars.each { |c| @pane.handle_key(chars: c) }
+    @pane.handle_key(chars: "\r")
+    settle
+    "ec".chars.each { |c| @pane.handle_key(chars: c) }
+    assert_equal "ho hello", autosuggestion
+  end
+
+  test "autosuggestion is empty when no history entry matches the prefix" do
+    "echo hello".chars.each { |c| @pane.handle_key(chars: c) }
+    @pane.handle_key(chars: "\r")
+    settle
+    "xyz".chars.each { |c| @pane.handle_key(chars: c) }
+    assert_equal "", autosuggestion
+  end
+
+  test "autosuggestion is empty when buffer is empty" do
+    "echo hello".chars.each { |c| @pane.handle_key(chars: c) }
+    @pane.handle_key(chars: "\r")
+    settle
+    assert_equal "", autosuggestion
+  end
+
+  test "Right arrow at end-of-input accepts the full autosuggestion" do
+    "echo hello world".chars.each { |c| @pane.handle_key(chars: c) }
+    @pane.handle_key(chars: "\r")
+    settle
+    "echo".chars.each { |c| @pane.handle_key(chars: c) }
+    assert_equal " hello world", autosuggestion
+    @pane.handle_key(chars: "\u{F703}")  # Right
+    assert_equal "echo hello world", buf
+    assert_equal "", autosuggestion
+  end
+
+  test "Ctrl-E at end-of-input accepts the full autosuggestion" do
+    "echo hello world".chars.each { |c| @pane.handle_key(chars: c) }
+    @pane.handle_key(chars: "\r")
+    settle
+    "echo".chars.each { |c| @pane.handle_key(chars: c) }
+    @pane.handle_key(chars: "e", flags: CTRL)
+    assert_equal "echo hello world", buf
+  end
+
+  test "End at end-of-input accepts the full autosuggestion" do
+    "echo hello world".chars.each { |c| @pane.handle_key(chars: c) }
+    @pane.handle_key(chars: "\r")
+    settle
+    "echo".chars.each { |c| @pane.handle_key(chars: c) }
+    @pane.handle_key(chars: "\u{F72B}")  # End
+    assert_equal "echo hello world", buf
+  end
+
+  test "Ctrl-F at end-of-input accepts only the next word of the autosuggestion" do
+    "echo hello world".chars.each { |c| @pane.handle_key(chars: c) }
+    @pane.handle_key(chars: "\r")
+    settle
+    "echo".chars.each { |c| @pane.handle_key(chars: c) }
+    @pane.handle_key(chars: "f", flags: CTRL)
+    assert_equal "echo hello", buf
+    @pane.handle_key(chars: "f", flags: CTRL)
+    assert_equal "echo hello world", buf
+  end
+
+  test "autosuggestion cleared after submitting" do
+    "echo hello".chars.each { |c| @pane.handle_key(chars: c) }
+    @pane.handle_key(chars: "\r")
+    settle
+    assert_equal "", autosuggestion
+  end
+
+  test "autosuggestion suppressed during multi-line continuation" do
+    "echo hello".chars.each { |c| @pane.handle_key(chars: c) }
+    @pane.handle_key(chars: "\r")
+    settle
+    "if true; then".chars.each { |c| @pane.handle_key(chars: c) }
+    @pane.handle_key(chars: "\r")  # incomplete → continuation prompt
+    "ec".chars.each { |c| @pane.handle_key(chars: c) }
+    # Even though "echo hello" is in history, no suggestion shows
+    # while inside a continuation.
+    assert_equal "", autosuggestion
+  end
+
   test "highlighted input doesn't pollute the cell grid with escape characters" do
     "echo hello".chars.each { |c| @pane.handle_key(chars: c) }
     flat = grid_text
