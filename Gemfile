@@ -9,3 +9,7 @@ gem "irb"
 gem "rake", "~> 13.0"
 
 gem "test-unit", "~> 3.0"
+
+# In-process shell embedding (phase 1 of the integration). Optional —
+# only required when an EmbeddedShell pane is created.
+gem "rubish-gem", path: "../rubish"
