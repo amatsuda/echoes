@@ -217,6 +217,19 @@ module Echoes
       @repl.complete_at(line: line, point: point)
     end
 
+    # Classify a candidate command line. :ok / :incomplete / :error.
+    # See Rubish::REPL#try_parse.
+    def try_parse(line)
+      @repl.try_parse(line)
+    end
+
+    # Continuation prompt (PS2). Used when the user's input is
+    # incomplete (e.g., they typed `if true; then` and pressed Enter
+    # without a closing `fi`).
+    def continuation_prompt
+      @repl.send(:continuation_prompt)
+    end
+
     # Last command's exit status (0 on success).
     def last_status
       @repl.instance_variable_get(:@last_status) || 0

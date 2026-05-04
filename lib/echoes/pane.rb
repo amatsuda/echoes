@@ -28,6 +28,7 @@ module Echoes
         @embedded_running = false
         @history_index = nil  # nil = not browsing; integer = browsing
         @history_saved = nil  # input held aside while browsing
+        @continuation_lines = []  # collected lines while waiting for a complete command
       else
         start_dir = (cwd && Dir.exist?(cwd)) ? cwd : Dir.home
         Dir.chdir(start_dir) do
@@ -173,14 +174,7 @@ module Echoes
 
       case chars
       when "\r", "\n"
-        line = @input_buffer
-        @input_buffer = +''
-        @input_cursor = 0
-        @history_index = nil
-        @history_saved = nil
-        process_output("\r\n")
-        @embedded_shell.submit_line(line, rows: @screen.rows, cols: @screen.cols)
-        @embedded_running = true
+        submit_or_continue
       when "\u{7F}", "\b"
         delete_before_cursor
       when "\u{F728}"  # NSDeleteFunctionKey (forward delete)
@@ -214,6 +208,36 @@ module Echoes
 
     def render_initial_prompt
       process_output(@embedded_shell.prompt.to_s)
+    end
+
+    # Enter pressed at the prompt. Decide whether the accumulated
+    # input forms a complete command — if so, submit it; if not,
+    # keep collecting continuation lines under PS2.
+    def submit_or_continue
+      this_line = @input_buffer
+      candidate = (@continuation_lines + [this_line]).join("\n")
+
+      case @embedded_shell.try_parse(candidate)
+      when :incomplete
+        # Accumulate and prompt for more.
+        @continuation_lines << this_line
+        @input_buffer = +''
+        @input_cursor = 0
+        process_output("\r\n")
+        process_output(@embedded_shell.continuation_prompt)
+      else
+        # :ok or :error — let rubish run it; rubish reports syntax
+        # errors itself. Either way, this line completes the input.
+        line = candidate
+        @input_buffer = +''
+        @input_cursor = 0
+        @continuation_lines = []
+        @history_index = nil
+        @history_saved = nil
+        process_output("\r\n")
+        @embedded_shell.submit_line(line, rows: @screen.rows, cols: @screen.cols)
+        @embedded_running = true
+      end
     end
 
     # ↑/↓ history navigation. step is -1 (older) or +1 (newer).

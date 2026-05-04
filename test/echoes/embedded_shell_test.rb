@@ -387,6 +387,29 @@ class Echoes::EmbeddedPaneTest < Test::Unit::TestCase
     assert_equal 0, cursor
   end
 
+  test "incomplete input shows a continuation prompt instead of submitting" do
+    "if true; then".chars.each { |c| @pane.handle_key(chars: c) }
+    @pane.handle_key(chars: "\r")
+    cont = @pane.instance_variable_get(:@continuation_lines)
+    assert_equal ["if true; then"], cont
+    assert_equal false, @pane.instance_variable_get(:@embedded_running)
+    rows = grid_rows
+    # PS2 prompt should appear on the new line. Default rubish PS2 is "> ".
+    assert_match(/\A>\s*$/, rows.last)
+  end
+
+  test "completing a multi-line block submits the whole thing" do
+    ["if true; then", "  echo hello world", "fi"].each do |line|
+      line.chars.each { |c| @pane.handle_key(chars: c) }
+      @pane.handle_key(chars: "\r")
+    end
+    settle
+    flat = grid_text
+    assert_match(/hello world/, flat)
+    # @continuation_lines should be reset after submission.
+    assert_equal [], @pane.instance_variable_get(:@continuation_lines)
+  end
+
   test "Enter submits the buffer regardless of cursor position" do
     "echo mid-cursor".chars.each { |c| @pane.handle_key(chars: c) }
     5.times { @pane.handle_key(chars: "\u{F702}") }  # cursor != end
