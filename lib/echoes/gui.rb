@@ -23,10 +23,12 @@ module Echoes
     rescue # log_crash itself must never raise
     end
 
-    def initialize(command: Echoes.config.shell, rows: Echoes.config.rows, cols: Echoes.config.cols, font_size: Echoes.config.font_size)
+    def initialize(command: Echoes.config.shell, rows: Echoes.config.rows, cols: Echoes.config.cols, font_size: nil)
       @rows = rows
       @cols = cols
-      @font_size = font_size
+      # Persisted font size wins over the config default; both wrappers
+      # gracefully fall through if NSUserDefaults isn't reachable.
+      @font_size = font_size || Preferences.fetch_double(:font_size, default: Echoes.config.font_size)
       @command = command
       @tabs = []
       @active_tab = 0
@@ -593,7 +595,10 @@ module Echoes
       @select_all_closure = menu_action.call(-> { select_all })
       @increase_font_closure = menu_action.call(-> { update_font(@font_size + 1.0) })
       @decrease_font_closure = menu_action.call(-> { update_font(@font_size - 1.0) if @font_size > 4.0 })
-      @reset_font_closure = menu_action.call(-> { update_font(Echoes.config.font_size) })
+      @reset_font_closure = menu_action.call(-> {
+        Preferences.delete(:font_size)
+        update_font(Echoes.config.font_size, persist: false)
+      })
       @toggle_find_closure = menu_action.call(-> {
         toggle_search
         ObjC::MSG_VOID_I.call(@view, ObjC.sel('setNeedsDisplay:'), 1)
@@ -1652,8 +1657,9 @@ module Echoes
       pane.write_input(seq)
     end
 
-    def update_font(new_size)
+    def update_font(new_size, persist: true)
       @font_size = new_size
+      Preferences.set_double(:font_size, new_size) if persist
       old_font = @font
       old_bold = @bold_font
       @font = ObjC.retain(create_nsfont(@font_size))
@@ -1763,6 +1769,11 @@ module Echoes
       ObjC::MSG_VOID_1.call(new_window, ObjC.sel('makeFirstResponder:'), new_view)
       ObjC::MSG_VOID_I.call(@app, ObjC.sel('activateIgnoringOtherApps:'), 1)
       ObjC::MSG_VOID.call(new_window, ObjC.sel('center'))
+      # Cocoa-managed cross-launch frame persistence: if a saved frame
+      # exists for this name, AppKit moves the window to it (overriding
+      # the `center` we just did) and auto-saves on later resize/move.
+      ObjC::MSG_VOID_1.call(new_window, ObjC.sel('setFrameAutosaveName:'),
+                            ObjC.nsstring('echoes.main'))
 
       # Focus notification observers (target the new view + new window)
       nc = ObjC::MSG_PTR.call(ObjC.cls('NSNotificationCenter'), ObjC.sel('defaultCenter'))

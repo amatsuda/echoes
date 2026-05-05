@@ -13,6 +13,7 @@ require_relative "echoes/tab"
 require_relative "echoes/sixel_decoder"
 require_relative "echoes/terminal"
 require_relative "echoes/objc"
+require_relative "echoes/preferences"
 require_relative "echoes/gui"
 
 module Echoes
