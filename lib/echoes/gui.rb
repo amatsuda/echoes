@@ -71,10 +71,11 @@ module Echoes
       start_app
     end
 
-    def create_tab
+    def create_tab(viewer_file: nil)
       cwd = self.class.pane_local_cwd(current_tab&.active_pane)
-      tab = Tab.new(command: @command, rows: @rows, cols: @cols, cwd: cwd, embedded: embedded_mode?)
-      tab.title = "Tab #{@tabs.size + 1}"
+      tab = Tab.new(command: @command, rows: @rows, cols: @cols, cwd: cwd,
+                    embedded: embedded_mode?, viewer_file: viewer_file)
+      tab.title = viewer_file ? File.basename(viewer_file) : "Tab #{@tabs.size + 1}"
       tab.panes.each do |pane|
         if @cell_width && @cell_height
           pane.screen.cell_pixel_width = @cell_width
@@ -289,6 +290,9 @@ module Echoes
       add_menu_item(shell_menu, "New Window", 'newWindow:', 'n')
       add_menu_item(shell_menu, "New Tab", 'newTab:', 't')
       add_menu_item(shell_menu, "Close Tab", 'closeTab:', 'w')
+      add_separator(shell_menu)
+      add_menu_item(shell_menu, "View File…", 'viewFile:', 'e',
+                    modifiers: ObjC::NSEventModifierFlagCommand | ObjC::NSEventModifierFlagShift)
       add_separator(shell_menu)
       add_menu_item(shell_menu, "Split Right", 'splitRight:', 'd')
       add_menu_item(shell_menu, "Split Down", 'splitDown:', 'd',
@@ -586,6 +590,13 @@ module Echoes
         create_tab
         ObjC::MSG_VOID_I.call(@view, ObjC.sel('setNeedsDisplay:'), 1)
       })
+      @view_file_closure = menu_action.call(-> {
+        path = prompt_for_file_to_view
+        if path
+          create_tab(viewer_file: path)
+          ObjC::MSG_VOID_I.call(@view, ObjC.sel('setNeedsDisplay:'), 1)
+        end
+      })
       @close_tab_closure = menu_action.call(-> {
         close_tab(@active_tab)
         ObjC::MSG_VOID_I.call(@view, ObjC.sel('setNeedsDisplay:'), 1)
@@ -728,6 +739,7 @@ module Echoes
         'windowDidResignKey:'   => ['v@:@', @focus_lost_closure],
         'newWindow:'             => ['v@:@', @new_window_closure],
         'newTab:'               => ['v@:@', @new_tab_closure],
+        'viewFile:'             => ['v@:@', @view_file_closure],
         'closeTab:'             => ['v@:@', @close_tab_closure],
         'copy:'                 => ['v@:@', @copy_closure],
         'paste:'                => ['v@:@', @paste_closure],
@@ -1886,6 +1898,23 @@ module Echoes
       ObjC::MSG_VOID_I.call(@view, ObjC.sel('setNeedsDisplay:'), 1)
     ensure
       @completion_state = nil
+    end
+
+    # Show an NSOpenPanel for the user to pick a file to load into a
+    # FileViewer pane. Returns the chosen path as a String, or nil if
+    # the user canceled. Only single-file selection; directories not
+    # accepted.
+    def prompt_for_file_to_view
+      panel = ObjC::MSG_PTR.call(ObjC.cls('NSOpenPanel'), ObjC.sel('openPanel'))
+      ObjC::MSG_VOID_I.call(panel, ObjC.sel('setCanChooseFiles:'), 1)
+      ObjC::MSG_VOID_I.call(panel, ObjC.sel('setCanChooseDirectories:'), 0)
+      ObjC::MSG_VOID_I.call(panel, ObjC.sel('setAllowsMultipleSelection:'), 0)
+      result = ObjC::MSG_RET_L.call(panel, ObjC.sel('runModal'))
+      return nil unless result == 1  # NSModalResponseOK
+      url = ObjC::MSG_PTR.call(panel, ObjC.sel('URL'))
+      return nil if url.null?
+      path_ns = ObjC::MSG_PTR.call(url, ObjC.sel('path'))
+      ObjC.to_ruby_string(path_ns)
     end
 
     def handle_clipboard(action, text)

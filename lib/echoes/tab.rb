@@ -5,12 +5,13 @@ module Echoes
     attr_reader :pane_tree
     attr_accessor :title
 
-    def initialize(command:, rows:, cols:, cwd: nil, embedded: false)
+    def initialize(command:, rows:, cols:, cwd: nil, embedded: false, viewer_file: nil)
       @command = command
       @rows = rows
       @cols = cols
       @embedded = embedded
-      pane = Pane.new(command: command, rows: rows, cols: cols, cwd: cwd, embedded: embedded)
+      pane = Pane.new(command: command, rows: rows, cols: cols, cwd: cwd,
+                      embedded: embedded, viewer_file: viewer_file)
       @pane_tree = PaneTree.new(pane)
       @title = pane.title
     end
