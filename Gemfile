@@ -13,3 +13,7 @@ gem "test-unit", "~> 3.0"
 # In-process shell embedding (phase 1 of the integration). Optional —
 # only required when an EmbeddedShell pane is created.
 gem "rubish-gem", path: "../rubish"
+
+# In-process editor (read-only viewer pane phase 1). Optional —
+# only required when a FileViewer pane is created.
+gem "rvim", path: "../rvim"

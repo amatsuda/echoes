@@ -17,9 +17,14 @@ module Echoes
                   :scroll_offset, :scroll_accum, :title, :copy_mode
     attr_reader :embedded_shell
 
-    def initialize(command:, rows:, cols:, cwd: nil, embedded: false, no_rc: false)
+    def initialize(command:, rows:, cols:, cwd: nil, embedded: false, no_rc: false, viewer_file: nil)
       @screen = Screen.new(rows: rows, cols: cols)
-      if embedded
+      if viewer_file
+        require_relative 'file_viewer'
+        @file_viewer = FileViewer.new(file: viewer_file, rows: rows, cols: cols)
+        @parser = Parser.new(@screen, writer: ->(_s) { })
+        @title = File.basename(viewer_file)
+      elsif embedded
         require_relative 'embedded_shell'
         @embedded_shell = EmbeddedShell.new(no_rc: no_rc)
         @parser = Parser.new(@screen, writer: ->(_s) { })
@@ -55,11 +60,18 @@ module Echoes
       @scroll_accum = 0.0
       @copy_mode = nil
       render_initial_prompt if embedded
+      render_viewer if viewer?
     end
 
     def embedded?
       !@embedded_shell.nil?
     end
+
+    def viewer?
+      !@file_viewer.nil?
+    end
+
+    attr_reader :file_viewer
 
     # Send raw bytes to the shell. In PTY mode these go through pty_write
     # to the child process. In embedded mode there is no per-keystroke
@@ -91,6 +103,7 @@ module Echoes
     # ;D (command end), then ;A + prompt + ;B for the next command, and
     # re-enable the in-pane line editor.
     def read_available_output(max = 16384)
+      return '' if viewer?
       if embedded?
         out = @embedded_shell.read_available_output
         if @embedded_running && @embedded_shell.reap_if_done
@@ -116,6 +129,7 @@ module Echoes
     end
 
     def alive?
+      return true if viewer?
       if embedded?
         true
       else
@@ -127,7 +141,10 @@ module Echoes
 
     def resize(rows, cols)
       @screen.resize(rows, cols)
-      if embedded?
+      if viewer?
+        @file_viewer.resize(rows: rows, cols: cols)
+        render_viewer
+      elsif embedded?
         @embedded_shell.resize(rows: rows, cols: cols)
       else
         @pty_read.winsize = [rows, cols]
@@ -136,6 +153,7 @@ module Echoes
     end
 
     def close
+      return if viewer?
       if embedded?
         @embedded_shell.shutdown
         return
@@ -232,6 +250,20 @@ module Echoes
     #     forwarded to the command's stdin via the pty master, so the
     #     user can type into vim, scroll less, etc. Ctrl-C interrupts.
     def handle_key(chars:, flags: 0)
+      if viewer?
+        return true if chars.nil? || chars.empty?
+        # Map Ctrl+letter to the corresponding control byte that
+        # rvim's keymap expects (e.g. Ctrl-D → 0x04). Other special
+        # keys are translated by FileViewer#feed_key directly.
+        ch = if (flags & NSEVENT_CONTROL_FLAG) != 0 && chars.length == 1 && chars.ord >= 0x20
+               (chars.ord & 0x1F).chr
+             else
+               chars
+             end
+        @file_viewer.feed_key(ch)
+        render_viewer
+        return true
+      end
       return false unless embedded?
       return true if chars.nil? || chars.empty?
 
@@ -322,6 +354,26 @@ module Echoes
     end
 
     private
+
+    # Re-render the file-viewer's visible window into the screen
+    # cells. Called on construction, after every key event, and
+    # after resize.
+    def render_viewer
+      return unless @file_viewer
+      process_output("\e[2J\e[H")
+      segs_per_row = @file_viewer.visible_segments
+      segs_per_row.each_with_index do |segs, idx|
+        break if idx >= @screen.rows
+        @screen.cursor.row = idx
+        @screen.cursor.col = 0
+        @screen.put_styled_segments(segs)
+      end
+      row, col = @file_viewer.cursor_position
+      @screen.cursor.row = row.clamp(0, @screen.rows - 1)
+      @screen.cursor.col = col.clamp(0, @screen.cols - 1)
+      @screen.pending_wrap = false
+      @screen.mark_all_dirty
+    end
 
     def render_initial_prompt
       process_output(osc133_a)
