@@ -259,6 +259,9 @@ module Echoes
       add_menu_item(view_menu, "Find Next", 'findNext:', 'g')
       add_menu_item(view_menu, "Find Previous", 'findPrevious:', 'g',
                     modifiers: ObjC::NSEventModifierFlagCommand | ObjC::NSEventModifierFlagShift)
+      add_separator(view_menu)
+      add_menu_item(view_menu, "Hide Mouse Pointer", 'togglePointer:', 'p',
+                    modifiers: ObjC::NSEventModifierFlagCommand | ObjC::NSEventModifierFlagShift)
       add_submenu(main_menu, view_menu, 'View')
 
       # Window menu
@@ -698,6 +701,20 @@ module Echoes
         gui.log_crash(e, context: 'completionPicked')
       end
 
+      @toggle_pointer_closure = menu_action.call(-> {
+        # NSCursor's hide/unhide are reference-counted; track state so
+        # repeated invocations toggle cleanly. We don't use
+        # `setHiddenUntilMouseMoves:` because the user wants explicit
+        # control (mouse-move shouldn't undo a deliberate hide).
+        if @pointer_hidden
+          ObjC::MSG_VOID.call(ObjC.cls('NSCursor'), ObjC.sel('unhide'))
+          @pointer_hidden = false
+        else
+          ObjC::MSG_VOID.call(ObjC.cls('NSCursor'), ObjC.sel('hide'))
+          @pointer_hidden = true
+        end
+      })
+
       @toggle_copy_mode_closure = menu_action.call(-> {
         pane = current_tab.active_pane
         if pane.copy_mode&.active
@@ -777,6 +794,7 @@ module Echoes
         'selectNextPane:'       => ['v@:@', @select_next_pane_closure],
         'selectPreviousPane:'   => ['v@:@', @select_prev_pane_closure],
         'toggleCopyMode:'       => ['v@:@', @toggle_copy_mode_closure],
+        'togglePointer:'        => ['v@:@', @toggle_pointer_closure],
         'completionPicked:'     => ['v@:@', @completion_picked_closure],
         # NSTextInputClient protocol methods for IME
         'insertText:replacementRange:'                      => ['v@:@{_NSRange=QQ}', @insert_text_closure],
