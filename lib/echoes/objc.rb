@@ -52,6 +52,8 @@ module Echoes
     MSG_PTR_RECT  = new_msg([P, P, D, D, D, D], P)  # initWithFrame:
     MSG_VOID_RECT = new_msg([P, P, D, D, D, D], V)  # NSRectFill equivalent
     MSG_VOID_RECT_1 = new_msg([P, P, D, D, D, D, P], V)  # addCursorRect:cursor:
+    # NSGradient drawInRect:angle: (4 doubles for rect + 1 double for angle)
+    MSG_VOID_RECT_D = new_msg([P, P, D, D, D, D, D], V)
 
     # initWithContentRect:styleMask:backing:defer:
     MSG_PTR_RECT_L_L_I = new_msg([P, P, D, D, D, D, L, L, I], P)

@@ -416,6 +416,9 @@ module Echoes
       when '133'
         dispatch_osc133(rest)
         return
+      when '7772'
+        dispatch_osc7772(rest)
+        return
       when '66'
         # fall through to multicell handling below
       else
@@ -506,6 +509,67 @@ module Echoes
     # click-to-rerun, semantic copy, jump-by-prompt, and pipe-to-AI.
     # Echoes records them on the Screen so future UI features (and
     # tests, today) can navigate by command.
+    # Echoes-private OSC namespace. Format:
+    #   \e]7772;<command>;<args>\a
+    # Other terminals ignore the unknown OSC code, so emitters degrade
+    # gracefully. Supported commands:
+    #   bg-gradient ; type=linear:angle=N:colors=#rrggbb,#rrggbb[,...]
+    #   bg-clear
+    def dispatch_osc7772(rest)
+      command, args = rest.split(';', 2)
+      case command
+      when 'bg-gradient'
+        spec = parse_bg_gradient_args(args || '')
+        if spec
+          @screen.background = spec
+          @screen.mark_all_dirty if @screen.respond_to?(:mark_all_dirty)
+        end
+      when 'bg-clear'
+        @screen.background = nil
+        @screen.mark_all_dirty if @screen.respond_to?(:mark_all_dirty)
+      end
+    end
+
+    def parse_bg_gradient_args(args)
+      params = {type: :linear, angle: 0.0, colors: []}
+      args.split(':').each do |pair|
+        k, v = pair.split('=', 2)
+        next unless v
+        case k
+        when 'type'
+          params[:type] = v.to_sym
+        when 'angle'
+          params[:angle] = v.to_f
+        when 'colors'
+          params[:colors] = v.split(',').map { |hex| parse_hex_color(hex) }.compact
+        end
+      end
+      return nil if params[:colors].size < 2
+      params
+    end
+
+    # Accepts "#rrggbb", "#rgb", or "#rrggbbaa". Returns [r, g, b, a]
+    # in 0.0..1.0, or nil on parse failure.
+    def parse_hex_color(hex)
+      str = hex.delete_prefix('#')
+      case str.length
+      when 3
+        r, g, b = str.chars.map { |c| (c * 2).to_i(16) / 255.0 }
+        [r, g, b, 1.0]
+      when 6
+        r = str[0, 2].to_i(16) / 255.0
+        g = str[2, 2].to_i(16) / 255.0
+        b = str[4, 2].to_i(16) / 255.0
+        [r, g, b, 1.0]
+      when 8
+        r = str[0, 2].to_i(16) / 255.0
+        g = str[2, 2].to_i(16) / 255.0
+        b = str[4, 2].to_i(16) / 255.0
+        a = str[6, 2].to_i(16) / 255.0
+        [r, g, b, a]
+      end
+    end
+
     def dispatch_osc133(rest)
       return unless @screen.respond_to?(:osc133_mark)
       parts = rest.split(';')

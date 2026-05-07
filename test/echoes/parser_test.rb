@@ -1191,4 +1191,46 @@ class Echoes::ParserTest < Test::Unit::TestCase
     assert_equal "$", row_text(0)
     refute_includes row_text(0), "\e"
   end
+
+  # --- OSC 7772 (Echoes-private commands) ---
+
+  test "OSC 7772 bg-gradient sets a linear gradient on the screen" do
+    @parser.feed("\e]7772;bg-gradient;type=linear:angle=90:colors=#1a1a2e,#16213e\a")
+    bg = @screen.background
+    assert_not_nil bg
+    assert_equal :linear, bg[:type]
+    assert_in_delta 90.0, bg[:angle], 0.001
+    assert_equal 2, bg[:colors].size
+    r, g, b, a = bg[:colors][0]
+    assert_in_delta 0x1a / 255.0, r, 0.001
+    assert_in_delta 0x1a / 255.0, g, 0.001
+    assert_in_delta 0x2e / 255.0, b, 0.001
+    assert_in_delta 1.0, a, 0.001
+  end
+
+  test "OSC 7772 bg-gradient with #rgb short form" do
+    @parser.feed("\e]7772;bg-gradient;type=linear:angle=0:colors=#f00,#00f\a")
+    r, g, b, _ = @screen.background[:colors][0]
+    assert_in_delta 1.0, r, 0.001
+    assert_in_delta 0.0, g, 0.001
+    assert_in_delta 0.0, b, 0.001
+  end
+
+  test "OSC 7772 bg-gradient with #rrggbbaa includes alpha" do
+    @parser.feed("\e]7772;bg-gradient;type=linear:angle=0:colors=#11223344,#55667788\a")
+    _, _, _, a1 = @screen.background[:colors][0]
+    assert_in_delta 0x44 / 255.0, a1, 0.001
+  end
+
+  test "OSC 7772 bg-clear drops the gradient" do
+    @parser.feed("\e]7772;bg-gradient;type=linear:angle=0:colors=#000,#fff\a")
+    assert_not_nil @screen.background
+    @parser.feed("\e]7772;bg-clear\a")
+    assert_nil @screen.background
+  end
+
+  test "OSC 7772 bg-gradient with fewer than 2 colors is ignored" do
+    @parser.feed("\e]7772;bg-gradient;type=linear:angle=0:colors=#abc\a")
+    assert_nil @screen.background
+  end
 end

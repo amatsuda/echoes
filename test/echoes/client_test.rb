@@ -1,0 +1,53 @@
+# frozen_string_literal: true
+
+require "test_helper"
+require "stringio"
+require "echoes/client"
+
+class Echoes::ClientTest < Test::Unit::TestCase
+  def setup
+    @io = StringIO.new
+  end
+
+  test "bg_gradient writes a well-formed OSC 7772 sequence" do
+    Echoes::Client.bg_gradient(from: '#1a1a2e', to: '#16213e', angle: 90, io: @io)
+    assert_equal "\e]7772;bg-gradient;type=linear:angle=90:colors=#1a1a2e,#16213e\a",
+                 @io.string
+  end
+
+  test "bg_gradient accepts a colors: array" do
+    Echoes::Client.bg_gradient(colors: ['#000000', '#ffffff'], angle: 45, io: @io)
+    assert_equal "\e]7772;bg-gradient;type=linear:angle=45:colors=#000000,#ffffff\a",
+                 @io.string
+  end
+
+  test "bg_gradient roundtrips through the parser" do
+    Echoes::Client.bg_gradient(from: '#102030', to: '#405060', angle: 135, io: @io)
+    screen = Echoes::Screen.new(rows: 5, cols: 10)
+    parser = Echoes::Parser.new(screen)
+    parser.feed(@io.string)
+    assert_equal :linear, screen.background[:type]
+    assert_in_delta 135.0, screen.background[:angle], 0.001
+    assert_equal 2, screen.background[:colors].size
+  end
+
+  test "bg_gradient raises when given fewer than 2 colors" do
+    assert_raises(ArgumentError) do
+      Echoes::Client.bg_gradient(colors: ['#abc'], io: @io)
+    end
+  end
+
+  test "bg_clear emits the bg-clear command" do
+    Echoes::Client.bg_clear(io: @io)
+    assert_equal "\e]7772;bg-clear\a", @io.string
+  end
+
+  test "bg_clear roundtrips through the parser" do
+    screen = Echoes::Screen.new(rows: 5, cols: 10)
+    screen.background = {type: :linear, angle: 0.0, colors: [[0, 0, 0, 1.0], [1.0, 1.0, 1.0, 1.0]]}
+    parser = Echoes::Parser.new(screen)
+    Echoes::Client.bg_clear(io: @io)
+    parser.feed(@io.string)
+    assert_nil screen.background
+  end
+end

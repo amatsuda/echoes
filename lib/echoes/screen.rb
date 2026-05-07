@@ -7,7 +7,7 @@ module Echoes
     attr_reader :rows, :cols, :cursor, :grid, :scrollback, :dirty_rows,
                 :command_marks
     attr_accessor :cell_pixel_width, :cell_pixel_height, :title, :current_directory,
-                  :pending_wrap
+                  :pending_wrap, :background
 
     def self.scrollback_limit
       Echoes.config.scrollback_limit

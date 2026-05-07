@@ -916,6 +916,10 @@ module Echoes
 
       copy_mode = pane.copy_mode
 
+      # Per-pane gradient background (set via OSC 7772 ;bg-gradient).
+      # Drawn before any cells so cell-level bg colors paint on top.
+      draw_pane_gradient(screen.background, px, py, pane_cols, pane_rows) if screen.background
+
       pane_rows.times do |r|
         y = py + r * @cell_height
         next if y + @cell_height < dirty_min_y || y > dirty_max_y
@@ -2578,6 +2582,39 @@ module Echoes
         ObjC.cls('NSColor'), ObjC.sel('colorWithRed:green:blue:alpha:'),
         r, g, b, a
       ))
+    end
+
+    # Paint an NSGradient over the pane's rect. `spec` is the hash set
+    # by the OSC 7772 parser: {type: :linear, angle: Float,
+    # colors: [[r,g,b,a], ...]}. Two-color form uses the dedicated
+    # `initWithStartingColor:endingColor:`; three or more colors go
+    # through `initWithColors:` (NSArray of NSColor). Anything else
+    # (e.g., type == :radial — not implemented yet) is a no-op.
+    def draw_pane_gradient(spec, px, py, pane_cols, pane_rows)
+      return unless spec[:type] == :linear
+      colors = spec[:colors]
+      return if !colors || colors.size < 2
+
+      # First cut supports two endpoint colors. If the spec carries
+      # more, treat first/last as the endpoints — N-color NSArray
+      # construction through Fiddle is awkward and isn't required for
+      # the keynote-style two-color use case that motivated this.
+      start_rgba = colors.first
+      end_rgba   = colors.last
+      ns_start = make_color(*start_rgba)
+      ns_end   = make_color(*end_rgba)
+      alloc = ObjC::MSG_PTR.call(ObjC.cls('NSGradient'), ObjC.sel('alloc'))
+      gradient = ObjC::MSG_PTR_2.call(alloc, ObjC.sel('initWithStartingColor:endingColor:'),
+                                      ns_start, ns_end)
+
+      w = pane_cols * @cell_width
+      h = pane_rows * @cell_height
+      ObjC::MSG_VOID_RECT_D.call(gradient, ObjC.sel('drawInRect:angle:'),
+                                 px, py, w, h, spec[:angle].to_f)
+
+      ObjC.release(gradient)
+      ObjC.release(ns_start)
+      ObjC.release(ns_end)
     end
   end
 end
