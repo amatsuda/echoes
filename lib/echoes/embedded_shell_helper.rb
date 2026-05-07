@@ -59,7 +59,13 @@ module Echoes
       Signal.trap('INT')  { @command_thread&.raise(Interrupt) rescue nil }
       Signal.trap('QUIT') { @command_thread&.raise(Interrupt) rescue nil }
       no_rc = ENV['ECHOES_HELPER_NO_RC'] == '1'
-      @repl = Rubish::REPL.new(no_rc: no_rc)
+      # login_shell: true so rubish sources /etc/profile (which runs
+      # path_helper, populating PATH from /etc/paths and /etc/paths.d
+      # — including /usr/local/bin and the macOS cryptex paths). The
+      # embedded rubish IS the only shell in the pane, so treating it
+      # as a login shell is correct, and matches how Ghostty (and any
+      # other terminal) launches the user's $SHELL.
+      @repl = Rubish::REPL.new(no_rc: no_rc, login_shell: true)
       # Rubish normally calls these from its `run` loop, which we
       # bypass — the line editor and prompt rendering live in echoes.
       # Drive them explicitly so ~/.rubishrc et al take effect,
