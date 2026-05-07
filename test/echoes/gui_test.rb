@@ -158,3 +158,62 @@ class Echoes::GUICwdFromOsc7UriTest < Test::Unit::TestCase
     assert_nil(Echoes::GUI.cwd_from_osc7_uri("file://[bad"))
   end
 end
+
+class Echoes::GUISelectedTextTest < Test::Unit::TestCase
+  # Regression: copying a region that contained an OSC 66 multicell
+  # character (or a wide CJK / emoji glyph) used to include a literal
+  # space for each continuation cell. Selecting "Text" rendered via
+  # OSC 66 produced "T e x t" in the clipboard. Continuation cells
+  # have either width == 0 (CJK second-half) or multicell == :cont
+  # (OSC 66 follow-up cells); both must be skipped during extraction.
+  #
+  # Bypass GUI.new (AppKit setup is unstable when multiple GUIs exist
+  # in the same process); set up just the state selected_text_from_buffer
+  # actually reads — current_tab.screen and @cols.
+
+  StubTab = Struct.new(:screen)
+
+  def make_gui_with_screen(rows: 5, cols: 30)
+    screen = Echoes::Screen.new(rows: rows, cols: cols)
+    gui = Echoes::GUI.allocate
+    gui.instance_variable_set(:@cols, cols)
+    gui.instance_variable_set(:@rows, rows)
+    gui.instance_variable_set(:@active_tab, 0)
+    gui.instance_variable_set(:@tabs, [StubTab.new(screen)])
+    [gui, screen]
+  end
+
+  def write(screen, row, col, char, **attrs)
+    cell = screen.grid[row][col]
+    cell.char = char
+    attrs.each { |k, v| cell.send("#{k}=", v) }
+  end
+
+  test "skips OSC 66 continuation cells (multicell == :cont)" do
+    gui, screen = make_gui_with_screen
+    write(screen, 0, 0, 'T', multicell: {cols: 2, rows: 1})
+    write(screen, 0, 1, ' ', multicell: :cont)
+    write(screen, 0, 2, 'e', multicell: {cols: 2, rows: 1})
+    write(screen, 0, 3, ' ', multicell: :cont)
+    write(screen, 0, 4, 'x', multicell: {cols: 2, rows: 1})
+    write(screen, 0, 5, ' ', multicell: :cont)
+    write(screen, 0, 6, 't', multicell: {cols: 2, rows: 1})
+    write(screen, 0, 7, ' ', multicell: :cont)
+    assert_equal "Text", gui.send(:selected_text_from_buffer, 0, 0, 0, 7)
+  end
+
+  test "skips wide-char continuation cells (width == 0)" do
+    gui, screen = make_gui_with_screen
+    write(screen, 0, 0, '漢', width: 2)
+    write(screen, 0, 1, ' ', width: 0)
+    write(screen, 0, 2, '字', width: 2)
+    write(screen, 0, 3, ' ', width: 0)
+    assert_equal "漢字", gui.send(:selected_text_from_buffer, 0, 0, 0, 3)
+  end
+
+  test "regular single-cell text still extracts unchanged" do
+    gui, screen = make_gui_with_screen
+    "hello".chars.each_with_index { |c, i| write(screen, 0, i, c) }
+    assert_equal "hello", gui.send(:selected_text_from_buffer, 0, 0, 0, 4)
+  end
+end

@@ -2242,7 +2242,13 @@ module Echoes
 
         from = (abs_row == sr) ? sc : 0
         to = (abs_row == er) ? ec : @cols - 1
-        lines << row[from..to].map(&:char).join.rstrip
+        # Skip cells that are placeholders for a multi-cell character —
+        # the second half of a wide CJK/emoji glyph (width == 0) and
+        # OSC 66 continuation cells (multicell == :cont). Their `char`
+        # is a leftover space from the cell reset; including it
+        # produces "T e x t" instead of "Text" for scaled output.
+        chars = row[from..to].reject { |c| c.width == 0 || c.multicell == :cont }.map(&:char)
+        lines << chars.join.rstrip
       end
       lines.join("\n")
     end
