@@ -70,9 +70,11 @@ module Echoes
       # bypass — the line editor and prompt rendering live in echoes.
       # Drive them explicitly so ~/.rubishrc et al take effect,
       # default aliases land in the env, and history is restored.
-      @repl.send(:setup_default_aliases) rescue nil
-      @repl.send(:load_config) rescue nil
-      @repl.send(:load_history) rescue nil unless no_rc
+      # Errors land on stderr (= the pty, visible in the pane) so
+      # silent failures during startup don't disappear into the void.
+      run_init_step(:setup_default_aliases)
+      run_init_step(:load_config)
+      run_init_step(:load_history) unless no_rc
       @control_in  = IO.for_fd(3, 'r')
       @control_out = IO.for_fd(4, 'w')
       @control_out.sync = true
@@ -174,6 +176,20 @@ module Echoes
 
     def emit_event(event, **payload)
       send_json('event' => event, **payload)
+    end
+
+    # Drive a private startup step on the REPL with visible error
+    # reporting. The previous `rescue nil` swallowed silent failures
+    # — most notably ensure_system_path failing to populate PATH from
+    # /usr/libexec/path_helper, which left embedded shells without
+    # /usr/local/bin and friends. STDERR is wired to the pty so any
+    # exception lands in the pane where the user can act on it.
+    def run_init_step(method)
+      @repl.send(method)
+    rescue Exception => e
+      STDERR.puts "echoes helper: #{method} failed: #{e.class}: #{e.message}"
+      STDERR.puts e.backtrace.first(8).join("\n") if e.backtrace
+      STDERR.flush
     end
 
     # Write an OSC 7 sequence (cwd announcement) to the pty. Format:
