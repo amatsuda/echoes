@@ -124,16 +124,32 @@ module Echoes
     # reader scans for this sequence and strips it.
     DONE_SENTINEL = "\e]7771\a"
 
+    # Sentinel for the catch(:exit) wrapper around `@repl.execute`.
+    # Distinguishes "rubish's exit builtin asked us to terminate" from
+    # "command finished normally". A unique frozen symbol is enough —
+    # the exit builtin only throws integer status codes.
+    NO_EXIT_THROWN = :__rubish_helper_no_exit__
+
     def handle_execute(msg)
       line = msg['line'].to_s
       Reline::HISTORY << line unless line.empty? || line.strip.empty?
 
       @command_thread = Thread.new do
         interrupted = false
+        exit_code = nil
         begin
-          @repl.send(:execute, line)
-          STDOUT.flush rescue nil
-          STDERR.flush rescue nil
+          # Rubish's `exit` builtin signals shutdown via `throw :exit,
+          # code`. The normal `Rubish::REPL#run` loop catches that, but
+          # we bypass `run` here, so we have to catch it ourselves —
+          # otherwise the throw escapes as UncaughtThrowError, gets
+          # logged as a rubish error, and the helper keeps prompting.
+          result = catch(:exit) do
+            @repl.send(:execute, line)
+            STDOUT.flush rescue nil
+            STDERR.flush rescue nil
+            NO_EXIT_THROWN
+          end
+          exit_code = result.to_i unless result == NO_EXIT_THROWN
         rescue Interrupt
           interrupted = true
           # SIGINT propagated by the trap; let the rest of the
@@ -143,7 +159,7 @@ module Echoes
         rescue => e
           STDERR.puts "rubish: #{e.class}: #{e.message}"
         end
-        status = @repl.instance_variable_get(:@last_status) || (interrupted ? 130 : 0)
+        status = exit_code || @repl.instance_variable_get(:@last_status) || (interrupted ? 130 : 0)
         # Re-announce cwd so the host's pane.screen.current_directory
         # reflects any cd/pushd/popd this command performed. Emit
         # *before* the sentinel so the host has it processed by the
@@ -154,6 +170,14 @@ module Echoes
         STDOUT.write DONE_SENTINEL rescue nil
         STDOUT.flush rescue nil
         emit_event('command_done', exit_status: status, cwd: Dir.pwd)
+        if exit_code
+          # Give the host a beat to drain the control pipe + pty
+          # before we tear them down. After exit, the host's
+          # waitpid(WNOHANG) flips the pane's alive? to false and
+          # the dead-pane reaper closes the pane (or window).
+          sleep 0.05
+          exit(exit_code)
+        end
       end
       reply(msg, 'started')
     end

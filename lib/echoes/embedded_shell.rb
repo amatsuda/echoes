@@ -147,6 +147,24 @@ module Echoes
       @running
     end
 
+    # True until the helper subprocess has terminated (e.g. user typed
+    # `exit`). Reaps with WNOHANG so the call is non-blocking; once we
+    # observe the death we cache it so subsequent calls don't ECHILD on
+    # an already-reaped pid.
+    def alive?
+      return false if @helper_dead
+      return true unless @helper_pid
+      pid, _ = Process.waitpid2(@helper_pid, Process::WNOHANG)
+      if pid
+        @helper_dead = true
+        return false
+      end
+      true
+    rescue Errno::ECHILD
+      @helper_dead = true
+      false
+    end
+
     # Drain any output bytes the pty reader has buffered. Empty String
     # if none. Never blocks.
     def read_available_output

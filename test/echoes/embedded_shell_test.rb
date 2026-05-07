@@ -237,6 +237,29 @@ class Echoes::EmbeddedShellTest < Test::Unit::TestCase
     assert_includes out, "iter 2"
     assert_includes out, "iter 3"
   end
+
+  test "alive? returns true while the helper is running" do
+    assert @shell.alive?
+  end
+
+  test "typing exit terminates the helper subprocess" do
+    # Rubish's `exit` builtin signals shutdown via `throw :exit, code`.
+    # The host bypasses Rubish::REPL#run, so the helper has to catch
+    # that throw itself and exit — otherwise the throw escapes as
+    # UncaughtThrowError, gets logged, and the helper keeps prompting.
+    @shell.submit_and_wait("exit", timeout: 5)
+    deadline = Time.now + 3
+    sleep 0.05 while @shell.alive? && Time.now < deadline
+    refute @shell.alive?, "helper should have exited after `exit`"
+  end
+
+  test "exit with a status code surfaces in last_status" do
+    @shell.submit_and_wait("exit 7", timeout: 5)
+    deadline = Time.now + 3
+    sleep 0.05 while @shell.alive? && Time.now < deadline
+    refute @shell.alive?
+    assert_equal 7, @shell.last_status
+  end
 end
 
 class Echoes::EmbeddedPaneTest < Test::Unit::TestCase
@@ -1195,5 +1218,24 @@ class Echoes::EmbeddedPaneTest < Test::Unit::TestCase
     rows = grid_rows
     assert rows.any? { |r| r.include?("echo x") }, "expected 'echo x' line in #{rows.inspect}"
     assert_includes rows, "x"
+  end
+
+  test "Ctrl-D on an empty line submits exit and shuts the shell down" do
+    # Bash convention: Ctrl-D on an empty prompt = EOF/exit. The pane
+    # synthesizes typing "exit" + Enter so the helper can catch
+    # rubish's `throw :exit` and terminate.
+    @pane.handle_key(chars: "d", flags: Echoes::Pane::NSEVENT_CONTROL_FLAG)
+    settle
+    deadline = Time.now + 3
+    sleep 0.05 while @pane.alive? && Time.now < deadline
+    refute @pane.alive?, "pane should be dead after Ctrl-D on empty line"
+  end
+
+  test "Ctrl-D mid-line is forward-delete, not exit" do
+    "abxcd".chars.each { |c| @pane.handle_key(chars: c) }
+    3.times { @pane.handle_key(chars: "\u{F702}") }  # cursor before x
+    @pane.handle_key(chars: "d", flags: Echoes::Pane::NSEVENT_CONTROL_FLAG)
+    assert_equal "abcd", buf
+    assert @pane.alive?, "pane should still be alive after forward-delete"
   end
 end

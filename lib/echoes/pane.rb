@@ -131,7 +131,7 @@ module Echoes
     def alive?
       return true if viewer?
       if embedded?
-        true
+        @embedded_shell.alive?
       else
         Process.waitpid(@pty_pid, Process::WNOHANG).nil?
       end
@@ -620,10 +620,17 @@ module Echoes
       when 'y' then yank_kill_ring;       true
       when 'd'
         # Bash convention: Ctrl-D on an empty line is "EOF / exit"; on
-        # a non-empty line it's forward-delete. We don't have an exit
-        # path yet for the embedded REPL — for now just no-op when
-        # empty.
-        delete_at_cursor unless @input_buffer.empty?
+        # a non-empty line it's forward-delete. Synthesize a typed
+        # `exit` so it goes through the same submit path as the user
+        # typing it manually — the helper catches rubish's `throw
+        # :exit` and shuts down.
+        if @input_buffer.empty?
+          @input_buffer = +'exit'
+          @input_cursor = @input_buffer.length
+          submit_or_continue
+        else
+          delete_at_cursor
+        end
         true
       when 'k' then kill_to_end;          true
       when 'u' then kill_to_start;        true
