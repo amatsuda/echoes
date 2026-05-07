@@ -38,5 +38,28 @@ module Echoes
       io.flush if io.respond_to?(:flush)
       nil
     end
+
+    # Emit text via OSC 66 (multicell), with optional cell-scale,
+    # sub-cell fraction, vertical/horizontal alignment, and font
+    # family. `family:` is an Echoes-specific extension other
+    # terminals ignore. On unknown families, Echoes falls back to the
+    # monospaced system font.
+    #
+    # Examples:
+    #   Echoes::Client.styled_text("Title",   scale: 3, family: "Helvetica Neue")
+    #   Echoes::Client.styled_text("• item",  scale: 1, family: "Menlo")
+    def styled_text(text, scale: 1, width: nil, frac_n: nil, frac_d: nil,
+                    valign: nil, halign: nil, family: nil, io: $stdout)
+      meta = +"s=#{scale}"
+      meta << ":w=#{width}"   if width
+      meta << ":n=#{frac_n}"  if frac_n
+      meta << ":d=#{frac_d}"  if frac_d
+      meta << ":v=#{valign}"  if valign
+      meta << ":h=#{halign}"  if halign
+      meta << ":f=#{family}"  if family
+      io.write("\e]66;#{meta};#{text}\a")
+      io.flush if io.respond_to?(:flush)
+      nil
+    end
   end
 end

@@ -50,4 +50,24 @@ class Echoes::ClientTest < Test::Unit::TestCase
     parser.feed(@io.string)
     assert_nil screen.background
   end
+
+  test "styled_text emits OSC 66 with scale only" do
+    Echoes::Client.styled_text("Hi", scale: 2, io: @io)
+    assert_equal "\e]66;s=2;Hi\a", @io.string
+  end
+
+  test "styled_text includes family when given" do
+    Echoes::Client.styled_text("Title", scale: 3, family: "Helvetica Neue", io: @io)
+    assert_equal "\e]66;s=3:f=Helvetica Neue;Title\a", @io.string
+  end
+
+  test "styled_text roundtrips through the parser carrying family" do
+    Echoes::Client.styled_text("X", scale: 2, family: "Menlo", io: @io)
+    screen = Echoes::Screen.new(rows: 5, cols: 10)
+    parser = Echoes::Parser.new(screen)
+    parser.feed(@io.string)
+    mc = screen.grid[0][0].multicell
+    assert_equal "Menlo", mc[:family]
+    assert_equal 2, mc[:scale]
+  end
 end

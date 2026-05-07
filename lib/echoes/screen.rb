@@ -162,18 +162,18 @@ module Echoes
       n.times { put_char(@last_char) }
     end
 
-    def put_multicell(text, scale:, width:, frac_n:, frac_d:, valign:, halign:)
+    def put_multicell(text, scale:, width:, frac_n:, frac_d:, valign:, halign:, family: nil)
       mc_rows = scale
 
       if width > 0
         # Explicit width: entire text in one block of scale*width cols × scale rows
-        place_multicell_block(text, scale * width, mc_rows, scale, frac_n, frac_d, valign, halign)
+        place_multicell_block(text, scale * width, mc_rows, scale, frac_n, frac_d, valign, halign, family)
       else
         # Auto width: each grapheme gets its own block
         text.each_grapheme_cluster do |grapheme|
           cw = char_width(grapheme)
           mc_cols = scale * cw
-          place_multicell_block(grapheme, mc_cols, mc_rows, scale, frac_n, frac_d, valign, halign)
+          place_multicell_block(grapheme, mc_cols, mc_rows, scale, frac_n, frac_d, valign, halign, family)
         end
       end
     end
@@ -1231,7 +1231,7 @@ module Echoes
       end
     end
 
-    def place_multicell_block(text, mc_cols, mc_rows, scale, frac_n, frac_d, valign, halign)
+    def place_multicell_block(text, mc_cols, mc_rows, scale, frac_n, frac_d, valign, halign, family = nil)
       # Discard if block is larger than screen
       return if mc_cols > @cols || mc_rows > @rows
 
@@ -1264,7 +1264,8 @@ module Echoes
       anchor.width = 1
       anchor.multicell = {
         cols: mc_cols, rows: mc_rows, scale: scale,
-        frac_n: frac_n, frac_d: frac_d, valign: valign, halign: halign
+        frac_n: frac_n, frac_d: frac_d, valign: valign, halign: halign,
+        family: family
       }
 
       # Mark continuation cells

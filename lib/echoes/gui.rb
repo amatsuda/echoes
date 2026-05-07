@@ -1006,7 +1006,7 @@ module Echoes
             if mc[:frac_d] > 0 && mc[:frac_n] > 0
               effective_scale *= mc[:frac_n].to_f / mc[:frac_d]
             end
-            scaled_font = ObjC.retain(create_nsfont(@font_size * effective_scale))
+            scaled_font = ObjC.retain(create_nsfont(@font_size * effective_scale, family: mc[:family]))
             if cell.bold
               regular = scaled_font
               scaled_font = ObjC.retain(create_bold_nsfont(regular))
@@ -2335,18 +2335,22 @@ module Echoes
       ObjC::MSG_PTR_1L.call(fm, ObjC.sel('convertFont:toHaveTrait:'), font, 0x1)  # NSItalicFontMask
     end
 
-    def create_nsfont(size)
-      if (family = Echoes.config.font_family)
-        ObjC::MSG_PTR_1D.call(
+    def create_nsfont(size, family: nil)
+      family ||= Echoes.config.font_family
+      if family
+        font = ObjC::MSG_PTR_1D.call(
           ObjC.cls('NSFont'), ObjC.sel('fontWithName:size:'),
           ObjC.nsstring(family), size
         )
-      else
-        ObjC::MSG_PTR_2D.call(
-          ObjC.cls('NSFont'), ObjC.sel('monospacedSystemFontOfSize:weight:'),
-          size, 0.0
-        )
+        # NSFont returns nil if the family isn't installed; fall back
+        # to the monospaced system font so a bad OSC 66 `f=` doesn't
+        # leave the cell unrendered.
+        return font if font && font.to_i != 0
       end
+      ObjC::MSG_PTR_2D.call(
+        ObjC.cls('NSFont'), ObjC.sel('monospacedSystemFontOfSize:weight:'),
+        size, 0.0
+      )
     end
 
     def update_cell_metrics

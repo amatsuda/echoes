@@ -428,18 +428,22 @@ module Echoes
       return unless text
 
       text.force_encoding('UTF-8')
-      params = {scale: 1, width: 0, frac_n: 0, frac_d: 0, valign: 0, halign: 0}
+      # `f=` is an Echoes extension that other terminals ignore.
+      # Family names containing `:` aren't representable here because
+      # `:` is the meta-field separator — use `,` or omit the colon
+      # in the family name (e.g. "Helvetica Neue", not "Foo:Italic").
+      params = {scale: 1, width: 0, frac_n: 0, frac_d: 0, valign: 0, halign: 0, family: nil}
       meta_str.split(':').each do |pair|
         k, v = pair.split('=', 2)
         next unless v
-        val = v.to_i
         case k
-        when 's' then params[:scale] = val.clamp(1, 7)
-        when 'w' then params[:width] = val.clamp(0, 7)
-        when 'n' then params[:frac_n] = val.clamp(0, 15)
-        when 'd' then params[:frac_d] = val.clamp(0, 15)
-        when 'v' then params[:valign] = val.clamp(0, 2)
-        when 'h' then params[:halign] = val.clamp(0, 2)
+        when 's' then params[:scale]  = v.to_i.clamp(1, 7)
+        when 'w' then params[:width]  = v.to_i.clamp(0, 7)
+        when 'n' then params[:frac_n] = v.to_i.clamp(0, 15)
+        when 'd' then params[:frac_d] = v.to_i.clamp(0, 15)
+        when 'v' then params[:valign] = v.to_i.clamp(0, 2)
+        when 'h' then params[:halign] = v.to_i.clamp(0, 2)
+        when 'f' then params[:family] = v unless v.empty?
         end
       end
 

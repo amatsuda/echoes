@@ -196,7 +196,7 @@ class Echoes::ParserTest < Test::Unit::TestCase
     @parser.feed("\e]66;s=2;A\x07")
     cell = @screen.grid[0][0]
     assert_equal("A", cell.char)
-    assert_equal({cols: 2, rows: 2, scale: 2, frac_n: 0, frac_d: 0, valign: 0, halign: 0}, cell.multicell)
+    assert_equal({cols: 2, rows: 2, scale: 2, frac_n: 0, frac_d: 0, valign: 0, halign: 0, family: nil}, cell.multicell)
     # Continuation cells
     assert_equal(:cont, @screen.grid[0][1].multicell)
     assert_equal(:cont, @screen.grid[1][0].multicell)
@@ -246,6 +246,25 @@ class Echoes::ParserTest < Test::Unit::TestCase
     mc = @screen.grid[0][0].multicell
     assert_equal(1, mc[:frac_n])
     assert_equal(4, mc[:frac_d])
+  end
+
+  test "OSC 66 with f=family records the family on the multicell" do
+    @parser.feed("\e]66;s=2:f=Helvetica Neue;Title\x07")
+    mc = @screen.grid[0][0].multicell
+    assert_equal("Helvetica Neue", mc[:family])
+    assert_equal(2, mc[:scale])
+  end
+
+  test "OSC 66 without f= leaves family nil" do
+    @parser.feed("\e]66;s=2;X\x07")
+    mc = @screen.grid[0][0].multicell
+    assert_nil(mc[:family])
+  end
+
+  test "OSC 66 f= empty value is ignored" do
+    @parser.feed("\e]66;s=2:f=;X\x07")
+    mc = @screen.grid[0][0].multicell
+    assert_nil(mc[:family])
   end
 
   test "DCS sixel sequence creates multicell with sixel data" do
