@@ -381,6 +381,24 @@ module Echoes
         [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP]
       ) { |_self, _cmd| 1 }
 
+      # AppKit calls this when it (re)builds cursor rects for the
+      # view — on key-window changes, view-resize, and explicit
+      # `[window invalidateCursorRectsForView:view]` calls. Register
+      # an I-beam over the entire content area so the mouse cursor
+      # turns into a text-selection bar when hovering over the grid.
+      @reset_cursor_rects_closure = Fiddle::Closure::BlockCaller.new(
+        Fiddle::TYPE_VOID,
+        [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP]
+      ) do |_self, _cmd|
+        ibeam = ObjC::MSG_PTR.call(ObjC.cls('NSCursor'), ObjC.sel('IBeamCursor'))
+        w = (@cell_width || 8.0)  * ((@cols || 80) + 1)
+        h = (@cell_height || 16.0) * ((@rows || 24) + 1) + tab_bar_height
+        ObjC::MSG_VOID_RECT_1.call(_self, ObjC.sel('addCursorRect:cursor:'),
+                                   0.0, 0.0, w, h, ibeam)
+      rescue => e
+        gui.log_crash(e, context: 'resetCursorRects')
+      end
+
       @scroll_wheel_closure = Fiddle::Closure::BlockCaller.new(
         Fiddle::TYPE_VOID,
         [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP]
@@ -723,6 +741,7 @@ module Echoes
         'acceptsFirstResponder' => ['c@:', @accepts_fr_closure],
         'timerFired:'           => ['v@:@', @timer_fired_closure],
         'isFlipped'             => ['c@:', @is_flipped_closure],
+        'resetCursorRects'      => ['v@:', @reset_cursor_rects_closure],
         'scrollWheel:'          => ['v@:@', @scroll_wheel_closure],
         'mouseDown:'            => ['v@:@', @mouse_down_closure],
         'mouseDragged:'         => ['v@:@', @mouse_dragged_closure],

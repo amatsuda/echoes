@@ -51,6 +51,7 @@ module Echoes
     # CGRect as 4 doubles
     MSG_PTR_RECT  = new_msg([P, P, D, D, D, D], P)  # initWithFrame:
     MSG_VOID_RECT = new_msg([P, P, D, D, D, D], V)  # NSRectFill equivalent
+    MSG_VOID_RECT_1 = new_msg([P, P, D, D, D, D, P], V)  # addCursorRect:cursor:
 
     # initWithContentRect:styleMask:backing:defer:
     MSG_PTR_RECT_L_L_I = new_msg([P, P, D, D, D, D, L, L, I], P)
