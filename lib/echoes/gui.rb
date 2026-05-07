@@ -992,9 +992,15 @@ module Echoes
 
             next if cell.char == " " && !has_bg
 
+            # Per OSC 66 spec, n=/d= define a fraction *of* the scale.
+            # Effective glyph size is `s × n/d`. The reserved block
+            # stays at the full s×s*width — n=/d= shrink (or grow) the
+            # glyph within that block, paired with v=/h= for placement.
+            # Example: `s=2:n=1:d=2:v=2;●` reserves 2×2 cells and draws
+            # a 1-cell ● centered vertically inside it.
             effective_scale = mc[:scale].to_f
-            if mc[:frac_d] > 0 && mc[:frac_d] > mc[:frac_n]
-              effective_scale *= (1.0 + mc[:frac_n].to_f / mc[:frac_d])
+            if mc[:frac_d] > 0 && mc[:frac_n] > 0
+              effective_scale *= mc[:frac_n].to_f / mc[:frac_d]
             end
             scaled_font = ObjC.retain(create_nsfont(@font_size * effective_scale))
             if cell.bold
