@@ -3,19 +3,14 @@
 # come up running rubish in-process via the per-pane helper instead
 # of the legacy PTY-spawn-a-shell mode. See Echoes.app's launcher for
 # why we force native arch on Apple Silicon.
-#
-# Routes through `bundle exec` so the path-pinned gems in the
-# Gemfile (rubish, rvim) shadow any older versions installed via
-# `gem install`. Without this, `require 'rubish'` loads whatever
-# Rubygems' default activation picks, which can lag the path source
-# and lack methods echoes calls (e.g. prompt_segments).
-BUNDLE=/Users/a_matsuda/.rbenv/versions/ruby-dev/bin/bundle
-ECHOES_DIR=/Users/a_matsuda/src/github.com/amatsuda/echoes
+RUBY=/Users/a_matsuda/.rbenv/versions/ruby-dev/bin/ruby
+ECHOES_LIB=/Users/a_matsuda/src/github.com/amatsuda/echoes/lib
+ECHOES_BIN=/Users/a_matsuda/src/github.com/amatsuda/echoes/exe/echoes
+
 export ECHOES_EMBED=1
-export BUNDLE_GEMFILE="$ECHOES_DIR/Gemfile"
 
 if [ "$(/usr/sbin/sysctl -in hw.optional.arm64)" = "1" ]; then
-  exec /usr/bin/arch -arm64 "$BUNDLE" exec "$ECHOES_DIR/exe/echoes"
+  exec /usr/bin/arch -arm64 "$RUBY" -I"$ECHOES_LIB" "$ECHOES_BIN"
 else
-  exec "$BUNDLE" exec "$ECHOES_DIR/exe/echoes"
+  exec "$RUBY" -I"$ECHOES_LIB" "$ECHOES_BIN"
 fi

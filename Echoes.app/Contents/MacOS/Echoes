@@ -6,18 +6,12 @@
 # child rubish forks downstream — including brew — inherits the
 # translated arch and may bail with "Cannot install under Rosetta 2".
 # Force native arch on Apple Silicon to break that inheritance.
-#
-# Routes through `bundle exec` so the path-pinned gems in the
-# Gemfile (rubish, rvim) shadow any older versions installed via
-# `gem install`. Without this, `require 'rubish'` (or 'rvim' for
-# viewer panes) loads whatever Rubygems' default activation picks,
-# which can lag the path source and lack methods echoes calls.
-BUNDLE=/Users/a_matsuda/.rbenv/versions/ruby-dev/bin/bundle
-ECHOES_DIR=/Users/a_matsuda/src/github.com/amatsuda/echoes
-export BUNDLE_GEMFILE="$ECHOES_DIR/Gemfile"
+RUBY=/Users/a_matsuda/.rbenv/versions/ruby-dev/bin/ruby
+ECHOES_LIB=/Users/a_matsuda/src/github.com/amatsuda/echoes/lib
+ECHOES_BIN=/Users/a_matsuda/src/github.com/amatsuda/echoes/exe/echoes
 
 if [ "$(/usr/sbin/sysctl -in hw.optional.arm64)" = "1" ]; then
-  exec /usr/bin/arch -arm64 "$BUNDLE" exec "$ECHOES_DIR/exe/echoes"
+  exec /usr/bin/arch -arm64 "$RUBY" -I"$ECHOES_LIB" "$ECHOES_BIN"
 else
-  exec "$BUNDLE" exec "$ECHOES_DIR/exe/echoes"
+  exec "$RUBY" -I"$ECHOES_LIB" "$ECHOES_BIN"
 fi
