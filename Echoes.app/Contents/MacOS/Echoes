@@ -1,2 +1,17 @@
 #!/bin/bash
-exec "/Users/a_matsuda/.rbenv/versions/ruby-dev/bin/ruby" -I"/Users/a_matsuda/src/github.com/amatsuda/echoes/lib" "/Users/a_matsuda/src/github.com/amatsuda/echoes/exe/echoes"
+# LaunchServices may pick the x86_64 slice of /bin/bash when launching
+# this script-based .app bundle (script-based bundles don't get the
+# Get Info "Open using Rosetta" toggle, but they're not necessarily
+# launched native either). If bash runs translated, Ruby and every
+# child rubish forks downstream — including brew — inherits the
+# translated arch and may bail with "Cannot install under Rosetta 2".
+# Force native arch on Apple Silicon to break that inheritance.
+RUBY=/Users/a_matsuda/.rbenv/versions/ruby-dev/bin/ruby
+ECHOES_LIB=/Users/a_matsuda/src/github.com/amatsuda/echoes/lib
+ECHOES_BIN=/Users/a_matsuda/src/github.com/amatsuda/echoes/exe/echoes
+
+if [ "$(/usr/sbin/sysctl -in hw.optional.arm64)" = "1" ]; then
+  exec /usr/bin/arch -arm64 "$RUBY" -I"$ECHOES_LIB" "$ECHOES_BIN"
+else
+  exec "$RUBY" -I"$ECHOES_LIB" "$ECHOES_BIN"
+fi
