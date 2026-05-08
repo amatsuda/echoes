@@ -2001,6 +2001,18 @@ module Echoes
       ObjC::MSG_VOID_I.call(panel, ObjC.sel('setCanChooseFiles:'), 1)
       ObjC::MSG_VOID_I.call(panel, ObjC.sel('setCanChooseDirectories:'), 0)
       ObjC::MSG_VOID_I.call(panel, ObjC.sel('setAllowsMultipleSelection:'), 0)
+
+      # Open the dialog at the active pane's pwd (from OSC 7) so the
+      # user lands at the directory they're shelling in. Fall back to
+      # Echoes' own pwd when the pane hasn't announced a cwd or it
+      # doesn't resolve locally.
+      start_dir = self.class.pane_local_cwd(current_tab&.active_pane) || Dir.pwd
+      if start_dir
+        url = ObjC::MSG_PTR_1.call(ObjC.cls('NSURL'), ObjC.sel('fileURLWithPath:'),
+                                   ObjC.nsstring(start_dir))
+        ObjC::MSG_VOID_1.call(panel, ObjC.sel('setDirectoryURL:'), url)
+      end
+
       result = ObjC::MSG_RET_L.call(panel, ObjC.sel('runModal'))
       return nil unless result == 1  # NSModalResponseOK
       url = ObjC::MSG_PTR.call(panel, ObjC.sel('URL'))
