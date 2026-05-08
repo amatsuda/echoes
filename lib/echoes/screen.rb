@@ -169,8 +169,21 @@ module Echoes
       if width > 0
         # Explicit width: entire text in one block of scale*width cols × scale rows
         place_multicell_block(text, scale * width, mc_rows, scale, frac_n, frac_d, valign, halign, family)
+      elsif family && @glyph_measurer && @cell_pixel_width && @cell_pixel_width > 0
+        # Proportional fonts have variable glyph widths, so reserving
+        # `char_width(grapheme) * scale` cells per grapheme leaves big
+        # letters (Noto Serif "H" at 2×) overflowing into the next
+        # cell and small letters ("l") under-filling theirs. Ask the
+        # host to measure the whole text in the requested font and
+        # reserve enough cells for the entire block, drawn as one
+        # unit by the renderer's existing string-draw path.
+        measured_px = @glyph_measurer.call(text, family, scale, frac_n, frac_d).to_f
+        mc_cols = (measured_px / @cell_pixel_width).ceil
+        mc_cols = [mc_cols, 1].max
+        place_multicell_block(text, mc_cols, mc_rows, scale, frac_n, frac_d, valign, halign, family)
       else
-        # Auto width: each grapheme gets its own block
+        # Auto width: each grapheme gets its own block (monospace
+        # assumption — fine for the configured terminal font).
         text.each_grapheme_cluster do |grapheme|
           cw = char_width(grapheme)
           mc_cols = scale * cw
@@ -835,7 +848,7 @@ module Echoes
       end
     end
 
-    attr_accessor :clipboard_handler, :palette_handler
+    attr_accessor :clipboard_handler, :palette_handler, :glyph_measurer
 
     def set_clipboard(text)
       @clipboard_handler&.call(:set, text)

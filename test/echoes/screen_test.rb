@@ -384,6 +384,36 @@ class Echoes::ScreenTest < Test::Unit::TestCase
     assert_equal(4, @screen.cursor.col)
   end
 
+  test "put_multicell with family + glyph_measurer renders one block of measured width" do
+    # Stub measurer: 12px per character (regardless of scale/family).
+    # Cell width on this screen is the default 8.0px, so "Hello"
+    # should measure 60px → ceil(60/8) = 8 cells.
+    @screen.cell_pixel_width = 8.0
+    @screen.glyph_measurer = ->(text, _family, _scale, _frac_n, _frac_d) { text.length * 12.0 }
+
+    @screen.put_multicell("Hello", scale: 2, width: 0, frac_n: 0, frac_d: 0,
+                          valign: 0, halign: 0, family: "Noto Serif")
+
+    anchor = @screen.grid[0][0]
+    assert_equal("Hello", anchor.char, "anchor stores the whole string, not per-grapheme")
+    assert_equal(8, anchor.multicell[:cols])
+    assert_equal(2, anchor.multicell[:rows])
+    assert_equal("Noto Serif", anchor.multicell[:family])
+    assert_equal(:cont, @screen.grid[0][1].multicell)
+    assert_equal(:cont, @screen.grid[0][7].multicell)
+    assert_equal(8, @screen.cursor.col)
+  end
+
+  test "put_multicell with family but no glyph_measurer falls back to per-grapheme" do
+    # Without a measurer, the proportional path can't run; we keep
+    # the legacy monospace cell-reservation per grapheme.
+    @screen.put_multicell("AB", scale: 2, width: 0, frac_n: 0, frac_d: 0,
+                          valign: 0, halign: 0, family: "Noto Serif")
+    assert_equal("A", @screen.grid[0][0].char)
+    assert_equal("B", @screen.grid[0][2].char)
+    assert_equal(4, @screen.cursor.col)
+  end
+
   # --- to_text ---
 
   test "to_text on empty screen" do

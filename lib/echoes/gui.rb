@@ -76,13 +76,7 @@ module Echoes
       tab = Tab.new(command: @command, rows: @rows, cols: @cols, cwd: cwd,
                     embedded: embedded_mode?, editor_file: editor_file)
       tab.title = editor_file ? File.basename(editor_file) : "Tab #{@tabs.size + 1}"
-      tab.panes.each do |pane|
-        if @cell_width && @cell_height
-          pane.screen.cell_pixel_width = @cell_width
-          pane.screen.cell_pixel_height = @cell_height
-        end
-        pane.screen.clipboard_handler = method(:handle_clipboard)
-      end
+      tab.panes.each { |pane| wire_screen_handlers(pane.screen) }
       @tabs << tab
       @active_tab = @tabs.size - 1
     end
@@ -668,17 +662,13 @@ module Echoes
       @split_right_closure = menu_action.call(-> {
         tab = current_tab
         new_pane = tab.split_vertical
-        new_pane.screen.clipboard_handler = method(:handle_clipboard)
-        new_pane.screen.cell_pixel_width = @cell_width if @cell_width
-        new_pane.screen.cell_pixel_height = @cell_height if @cell_height
+        wire_screen_handlers(new_pane.screen)
         ObjC::MSG_VOID_I.call(@view, ObjC.sel('setNeedsDisplay:'), 1)
       })
       @split_down_closure = menu_action.call(-> {
         tab = current_tab
         new_pane = tab.split_horizontal
-        new_pane.screen.clipboard_handler = method(:handle_clipboard)
-        new_pane.screen.cell_pixel_width = @cell_width if @cell_width
-        new_pane.screen.cell_pixel_height = @cell_height if @cell_height
+        wire_screen_handlers(new_pane.screen)
         ObjC::MSG_VOID_I.call(@view, ObjC.sel('setNeedsDisplay:'), 1)
       })
       @close_pane_closure = menu_action.call(-> {
@@ -1825,13 +1815,7 @@ module Echoes
       # Create tab
       tab = Tab.new(command: @command, rows: @rows, cols: @cols, embedded: embedded_mode?)
       tab.title = "Shell"
-      tab.panes.each do |pane|
-        if @cell_width && @cell_height
-          pane.screen.cell_pixel_width = @cell_width
-          pane.screen.cell_pixel_height = @cell_height
-        end
-        pane.screen.clipboard_handler = method(:handle_clipboard)
-      end
+      tab.panes.each { |pane| wire_screen_handlers(pane.screen) }
 
       # Build window and view in locals — DO NOT touch @window / @view yet.
       # makeKeyAndOrderFront: below fires NSWindowDidResignKeyNotification on
@@ -2451,6 +2435,36 @@ module Echoes
       ObjC::MSG_PTR_1L.call(fm, ObjC.sel('convertFont:toHaveTrait:'), font, 0x1)  # NSItalicFontMask
     end
 
+    # Used by Screen#put_multicell when an OSC 66 cell carries a
+    # proportional font family (`f=`) without an explicit `w=`.
+    # Returns the AppKit-measured pixel width of `text` in `family`
+    # at the effective rendered size — Screen rounds up to whole
+    # cells from there.
+    def measure_glyph(text, family, scale, frac_n, frac_d)
+      effective_scale = scale.to_f
+      if frac_d > 0 && frac_n > 0
+        effective_scale *= frac_n.to_f / frac_d.to_f
+      end
+      font = ObjC.retain(create_nsfont(@font_size * effective_scale, family: family))
+      ns = ObjC.nsstring(text)
+      attrs = ObjC.nsdict(ObjC::NSFontAttributeName => font)
+      width = ObjC::MSG_RET_D_1.call(ns, ObjC.sel('sizeWithAttributes:'), attrs)
+      ObjC.release(font)
+      width
+    end
+
+    # Single point that wires every host-callback a Screen needs
+    # (clipboard, palette, glyph measurement, cell metrics). Called
+    # everywhere a new Screen comes into existence — initial setup,
+    # create_tab, split_horizontal/vertical, and the post-config
+    # update path.
+    def wire_screen_handlers(screen)
+      screen.clipboard_handler = method(:handle_clipboard)
+      screen.glyph_measurer    = method(:measure_glyph)
+      screen.cell_pixel_width  = @cell_width  if @cell_width
+      screen.cell_pixel_height = @cell_height if @cell_height
+    end
+
     def create_nsfont(size, family: nil)
       family ||= Echoes.config.font_family
       if family
@@ -2484,13 +2498,12 @@ module Echoes
       @font_default_line_height = ObjC::MSG_RET_D.call(@font, ObjC.sel('defaultLineHeightForFont'))
       @font_y_offset_cache = {}
 
-      # Propagate cell metrics to all pane screens for sixel sizing
+      # Propagate cell metrics to all pane screens (sixel sizing,
+      # OSC 66 proportional-glyph layout). Handler refs are
+      # idempotent so re-wiring on every font change is fine.
       @window_states.each do |ws|
         ws[:tabs]&.each do |tab|
-          tab.panes.each do |pane|
-            pane.screen.cell_pixel_width = @cell_width
-            pane.screen.cell_pixel_height = @cell_height
-          end
+          tab.panes.each { |pane| wire_screen_handlers(pane.screen) }
         end
       end
     end
