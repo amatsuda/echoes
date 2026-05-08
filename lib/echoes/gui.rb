@@ -232,7 +232,7 @@ module Echoes
 
       # Application menu
       app_menu = create_menu('Echoes')
-      add_menu_item(app_menu, "About Echoes", 'orderFrontStandardAboutPanel:', '')
+      add_menu_item(app_menu, "About Echoes", 'showAbout:', '')
       add_separator(app_menu)
       add_menu_item(app_menu, "Hide Echoes", 'hide:', 'h')
       add_menu_item(app_menu, "Hide Others", 'hideOtherApplications:', '')
@@ -606,6 +606,7 @@ module Echoes
         end
       }
 
+      @show_about_closure = menu_action.call(-> { show_about_panel })
       @new_window_closure = menu_action.call(-> { open_new_window })
       @new_tab_closure = menu_action.call(-> {
         create_tab
@@ -773,6 +774,7 @@ module Echoes
         'setFrameSize:'         => ['v@:{CGSize=dd}', @set_frame_size_closure],
         'windowDidBecomeKey:'   => ['v@:@', @focus_gained_closure],
         'windowDidResignKey:'   => ['v@:@', @focus_lost_closure],
+        'showAbout:'             => ['v@:@', @show_about_closure],
         'newWindow:'             => ['v@:@', @new_window_closure],
         'newTab:'               => ['v@:@', @new_tab_closure],
         'editFile:'             => ['v@:@', @edit_file_closure],
@@ -1972,6 +1974,56 @@ module Echoes
       return nil if url.null?
       path_ns = ObjC::MSG_PTR.call(url, ObjC.sel('path'))
       ObjC.to_ruby_string(path_ns)
+    end
+
+    # Curated allowlist of env vars to surface in the About panel —
+    # locale, paths, and Echoes/Ruby-runtime knobs. Deliberately
+    # NOT a full `ENV` dump: that would leak API keys, tokens,
+    # AWS creds, etc. into anything the user screenshots.
+    ABOUT_PANEL_ENV_KEYS = %w[
+      LANG LC_ALL LC_CTYPE
+      TERM SHELL HOME USER PWD
+      PATH
+      RBENV_VERSION RBENV_ROOT
+      BUNDLE_GEMFILE GEM_HOME GEM_PATH
+      ECHOES_EMBED ECHOES_HELPER_NO_RC
+    ].freeze
+
+    # Custom About panel: Cocoa's standard panel pulls name/version/icon
+    # from Info.plist; we extend it with a Credits string showing the
+    # Ruby runtime info (version, executable, platform), the
+    # bundled-sibling versions (Echoes / rubish / rvim), and a
+    # curated set of env vars (see ABOUT_PANEL_ENV_KEYS) so a user
+    # can tell at a glance which interpreter and which environment
+    # the running .app is wired to.
+    def show_about_panel
+      lines = [
+        "Ruby #{RUBY_VERSION}p#{RUBY_PATCHLEVEL} (#{RUBY_PLATFORM})",
+        RbConfig.ruby,
+        '',
+        "Echoes #{Echoes::VERSION}",
+      ]
+      lines << "rubish #{Rubish::VERSION}" if defined?(Rubish::VERSION)
+      lines << "rvim #{Rvim::VERSION}"     if defined?(Rvim::VERSION)
+
+      env_lines = ABOUT_PANEL_ENV_KEYS.filter_map do |k|
+        v = ENV[k]
+        v && !v.empty? ? "#{k}=#{v}" : nil
+      end
+      unless env_lines.empty?
+        lines << ''
+        lines << 'Environment:'
+        lines.concat(env_lines)
+      end
+
+      credits_str = lines.join("\n")
+
+      ns_credits = ObjC.nsstring(credits_str)
+      attr_alloc = ObjC::MSG_PTR.call(ObjC.cls('NSAttributedString'), ObjC.sel('alloc'))
+      attr_str   = ObjC::MSG_PTR_1.call(attr_alloc, ObjC.sel('initWithString:'), ns_credits)
+
+      options = ObjC.nsdict(ObjC.nsstring('Credits') => attr_str)
+      ObjC::MSG_VOID_1.call(@app, ObjC.sel('orderFrontStandardAboutPanelWithOptions:'), options)
     end
 
     def handle_clipboard(action, text)
