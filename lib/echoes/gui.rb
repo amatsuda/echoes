@@ -43,6 +43,7 @@ module Echoes
       @search_current_color = make_color(0.8, 0.6, 0.0)
       @selection_anchor = nil
       @selection_end = nil
+      @selection_word_anchor = nil
       @font_cache = {}
       @rgb_color_cache = {}
       @nsstring_cache = {}
@@ -1247,6 +1248,7 @@ module Echoes
 
       @selection_anchor = nil
       @selection_end = nil
+      @selection_word_anchor = nil
 
       flags = ObjC::MSG_RET_L.call(event_ptr, ObjC.sel('modifierFlags'))
       chars_ns = ObjC::MSG_PTR.call(event_ptr, ObjC.sel('charactersIgnoringModifiers'))
@@ -1587,8 +1589,12 @@ module Echoes
           @selection_anchor = [abs_row, 0]
           @selection_end    = [abs_row, @cols - 1]
         end
+        @selection_word_anchor = nil
       elsif click_count == 2
-        # Double-click: select word
+        # Double-click: select word, and remember the word's bounds so
+        # a subsequent drag extends from those bounds (keeping the
+        # double-clicked word fully selected) instead of collapsing
+        # to character-level from the click point.
         abs_row, col = pos
         row_data = row_at(tab, abs_row)
         if row_data
@@ -1596,12 +1602,14 @@ module Echoes
           if bounds
             @selection_anchor = [abs_row, bounds[0]]
             @selection_end = [abs_row, bounds[1]]
+            @selection_word_anchor = [abs_row, bounds[0], bounds[1]]
           end
         end
       else
         # Single click: start drag selection
         @selection_anchor = pos
         @selection_end = nil
+        @selection_word_anchor = nil
       end
 
       ObjC::MSG_VOID_I.call(@view, ObjC.sel('setNeedsDisplay:'), 1)
@@ -1616,10 +1624,44 @@ module Echoes
       if tab.screen.mouse_tracking == :button_event || tab.screen.mouse_tracking == :any_event
         row, col = pos
         send_mouse_event(tab, 32, col, row)  # 32 = left drag (button 0 + 32)
+      elsif @selection_word_anchor
+        extend_word_drag_selection(tab, pos)
       else
         @selection_end = pos
       end
       ObjC::MSG_VOID_I.call(@view, ObjC.sel('setNeedsDisplay:'), 1)
+    end
+
+    # When dragging after a double-click, snap each end of the
+    # selection to whole-word boundaries — and never let it shrink
+    # below the originally double-clicked word. Selection start is
+    # min((anchor_word_start), (pointer's word_start)); end is
+    # max((anchor_word_end), (pointer's word_end)). If the pointer
+    # is sitting on whitespace the "word" at the pointer is just
+    # that single cell, so the leading edge extends one char at a
+    # time across gaps.
+    def extend_word_drag_selection(tab, pointer_pos)
+      a_row, a_start, a_end = @selection_word_anchor
+      p_row, p_col = pointer_pos
+      p_row_data = row_at(tab, p_row)
+      p_bounds = p_row_data && word_boundaries_in_row(p_row_data, p_col)
+      p_start = p_bounds ? p_bounds[0] : p_col
+      p_end   = p_bounds ? p_bounds[1] : p_col
+
+      sel_start =
+        if p_row < a_row || (p_row == a_row && p_start < a_start)
+          [p_row, p_start]
+        else
+          [a_row, a_start]
+        end
+      sel_end =
+        if p_row > a_row || (p_row == a_row && p_end > a_end)
+          [p_row, p_end]
+        else
+          [a_row, a_end]
+        end
+      @selection_anchor = sel_start
+      @selection_end    = sel_end
     end
 
     def mouse_up(event_ptr)
