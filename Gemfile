@@ -16,4 +16,11 @@ gem "rubish-gem", path: "../rubish"
 
 # In-process vim-equivalent editor backing Echoes::Editor panes.
 # Lazily loaded: only required when an editor pane is created.
-gem "rvim", path: "../rvim"
+# Path-pinned for local dev so edits in the sibling rvim checkout
+# pick up immediately; falls back to GitHub master on CI (which
+# clones echoes only).
+if File.directory?(File.expand_path("../rvim", __dir__))
+  gem "rvim", path: "../rvim"
+else
+  gem "rvim", git: "https://github.com/amatsuda/rvim", branch: "master"
+end
