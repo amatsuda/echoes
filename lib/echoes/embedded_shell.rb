@@ -40,6 +40,11 @@ module Echoes
     def initialize(no_rc: false)
       ENV['GIT_PAGER'] ||= 'cat'
       ENV['PAGER']     ||= 'cat'
+      # Default $TERM so terminfo-aware tools (tput, less, vim, …)
+      # have a profile to look up. CI runners launch the rake task
+      # without TERM set; programs that read it bail with
+      # "No value for $TERM and no -T specified".
+      ENV['TERM']      ||= Echoes.config.term
 
       helper_env = {'ECHOES_HELPER_NO_RC' => no_rc ? '1' : nil}
       @master, slave = PTY.open
