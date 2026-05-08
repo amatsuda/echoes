@@ -429,6 +429,15 @@ module Echoes
         gui.log_crash(e, context: 'mouse_dragged')
       end
 
+      @mouse_moved_closure = Fiddle::Closure::BlockCaller.new(
+        Fiddle::TYPE_VOID,
+        [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP]
+      ) do |_self, _cmd, event|
+        gui.activate_for_view(_self); gui.mouse_moved(event)
+      rescue => e
+        gui.log_crash(e, context: 'mouse_moved')
+      end
+
       @mouse_up_closure = Fiddle::Closure::BlockCaller.new(
         Fiddle::TYPE_VOID,
         [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP]
@@ -763,6 +772,7 @@ module Echoes
         'scrollWheel:'          => ['v@:@', @scroll_wheel_closure],
         'mouseDown:'            => ['v@:@', @mouse_down_closure],
         'mouseDragged:'         => ['v@:@', @mouse_dragged_closure],
+        'mouseMoved:'           => ['v@:@', @mouse_moved_closure],
         'mouseUp:'              => ['v@:@', @mouse_up_closure],
         'rightMouseDown:'       => ['v@:@', @right_mouse_down_closure],
         'rightMouseDragged:'    => ['v@:@', @right_mouse_dragged_closure],
@@ -1621,6 +1631,25 @@ module Echoes
       send_mouse_event(tab, 3, col, row, release: true)  # 3 = release
     end
 
+    # Pointer-was-hidden + user-shakes-the-mouse path: when the user
+    # has hidden the cursor (Cmd+Shift+P) and then can't find it, the
+    # OS's own "shake to locate" feature briefly enlarges the system
+    # cursor — but ours is hidden, so there's nothing to enlarge. We
+    # detect the shake ourselves and unhide so the user gets a
+    # cursor to look at. After this fires, @pointer_hidden is reset
+    # so re-hiding requires another deliberate Cmd+Shift+P.
+    def mouse_moved(event_ptr)
+      return unless @pointer_hidden
+      @shake_detector ||= ShakeDetector.new
+      x, y = event_location(event_ptr)
+      t = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+      if @shake_detector.observe(t, x, y)
+        ObjC::MSG_VOID.call(ObjC.cls('NSCursor'), ObjC.sel('unhide'))
+        @pointer_hidden = false
+        @shake_detector.reset
+      end
+    end
+
     def right_mouse_down(event_ptr)
       tab = current_tab
       return unless tab
@@ -1821,6 +1850,10 @@ module Echoes
       )
       ObjC::MSG_VOID_1.call(new_window, ObjC.sel('setTitle:'), ObjC.nsstring(Echoes.config.window_title))
       ObjC::MSG_VOID_L.call(new_window, ObjC.sel('setCollectionBehavior:'), 1 << 7)
+      # Required for mouseMoved: to fire on the content view. Used by
+      # the shake-to-find-pointer detector (see #mouse_moved); without
+      # this, AppKit only delivers move events while a button is held.
+      ObjC::MSG_VOID_I.call(new_window, ObjC.sel('setAcceptsMouseMovedEvents:'), 1)
 
       new_view = ObjC::MSG_PTR.call(@view_class, ObjC.sel('alloc'))
       new_view = ObjC::MSG_PTR_RECT.call(
@@ -2689,6 +2722,62 @@ module Echoes
       ObjC.release(gradient)
       ObjC.release(ns_start)
       ObjC.release(ns_end)
+    end
+  end
+
+  # Detect a "shake to find pointer" gesture from a stream of mouse
+  # samples. Looks at the trailing WINDOW seconds of motion: a shake
+  # is several quick direction reversals over a meaningful distance.
+  # Tuned for casual wrist-shakes; not a substitute for the OS's own
+  # accessibility feature, which kicks in for the visible system
+  # cursor regardless of what apps are doing.
+  class ShakeDetector
+    WINDOW   = 0.5    # seconds of history to consider
+    MIN_REVS = 3      # direction reversals required
+    MIN_PATH = 150.0  # cumulative pixels of motion required
+
+    def initialize
+      @samples = []
+    end
+
+    # Add a (time, x, y) sample. Returns true on the call where a
+    # shake first crosses the threshold; callers should treat this
+    # as edge-triggered and follow up with #reset.
+    def observe(t, x, y)
+      @samples << [t, x, y]
+      cutoff = t - WINDOW
+      @samples.shift while @samples.first && @samples.first[0] < cutoff
+      return false if @samples.size < 4
+      detect
+    end
+
+    def reset
+      @samples.clear
+    end
+
+    private
+
+    def detect
+      reversals = 0
+      path = 0.0
+      prev_dx = nil
+      prev_dy = nil
+      (1...@samples.size).each do |i|
+        _, x0, y0 = @samples[i - 1]
+        _, x1, y1 = @samples[i]
+        dx = x1 - x0
+        dy = y1 - y0
+        next if dx.zero? && dy.zero?
+        path += Math.sqrt(dx * dx + dy * dy)
+        if prev_dx
+          if (prev_dx * dx < 0) || (prev_dy * dy < 0)
+            reversals += 1
+          end
+        end
+        prev_dx = dx
+        prev_dy = dy
+      end
+      reversals >= MIN_REVS && path >= MIN_PATH
     end
   end
 end
