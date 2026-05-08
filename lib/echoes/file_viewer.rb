@@ -3,15 +3,14 @@
 require 'reline'
 
 module Echoes
-  # Read-only file viewer that wraps `Rvim::Editor` for vim-style
-  # navigation (hjkl, gg/G, w/b/e, 0/$, Ctrl-D/Ctrl-U/Ctrl-B/Ctrl-F,
-  # /search, n/N, …) of arbitrary files. The visible window's lines
-  # are exposed as styled-segment hashes (same shape as the prompt
-  # ones) so the host can render them via `Screen#put_styled_segments`
-  # — no ANSI roundtrip.
-  #
-  # Phase 1: read-only; no `:w`, no `:q` (host closes the pane). No
-  # split layouts. Future phases can expose more of rvim's surface.
+  # Vim-equivalent editor pane backed by `Rvim::Editor`. Editing,
+  # `:w` (write), `:q` (quit), search, visual mode, undo/redo and
+  # the rest of rvim's surface all work — this class is the
+  # rendering shim that turns rvim's editor state into the styled
+  # segments echoes' Screen wants. The bottom row is reserved for
+  # the statusline (mode / filename / modified marker / line:col)
+  # or, when in command/search mode, for the cmdline (`:`, `/`,
+  # or `?` prompt with the typed text and cursor).
   class FileViewer
     # rvim's syntax highlighter labels each token with a vim-style
     # color symbol (`:Comment`, `:String`, …). Map to ANSI palette
@@ -85,31 +84,126 @@ module Echoes
 
     # Visible window's lines as Arrays of styled-segment Hashes
     # (`{text:, fg:, bg:, bold:, italic:, underline:, inverse:}`),
-    # one Array per visible row. Slices the buffer to the current
-    # scroll position and pads with empty rows so the viewer fills
-    # the pane.
+    # one Array per visible row. The last row is the statusline (or
+    # cmdline, in `:`/`/`/`?` modes); the rows above are buffer text
+    # padded with vim-style `~` markers when shorter than the pane.
     def visible_segments
       win = @editor.current_window
       lines = @editor.current_buffer&.lines || []
       top = win&.scroll_top || 0
-      slice = lines[top, @rows] || []
+      body_rows = [@rows - 1, 1].max  # reserve last row for status/cmdline
+      slice = lines[top, body_rows] || []
       out = slice.map { |line| line_to_segments(line) }
-      while out.size < @rows
-        out << [DEFAULT_SEGMENT.merge(text: '')]
+      while out.size < body_rows
+        out << [DEFAULT_SEGMENT.merge(text: '~', fg: 4)]
       end
+      out << bottom_row_segments
       out
     end
 
-    # (row, col) of the cursor within the viewport.
+    # (row, col) of the cursor within the viewport. In cmdline modes
+    # (:ex / :search_*) the cursor sits on the bottom row at the end
+    # of the cmdline text; otherwise it tracks the editor cursor in
+    # the buffer body.
     def cursor_position
-      win = @editor.current_window
-      top = win&.scroll_top || 0
-      row = (@editor.line_index || 0) - top
-      col = @editor.byte_pointer || 0
-      [row.clamp(0, @rows - 1), col.clamp(0, @cols - 1)]
+      if cmdline_mode?
+        text = cmdline_text
+        [@rows - 1, text.length.clamp(0, @cols - 1)]
+      else
+        win = @editor.current_window
+        top = win&.scroll_top || 0
+        row = (@editor.line_index || 0) - top
+        col = @editor.byte_pointer || 0
+        body_max = [@rows - 2, 0].max
+        [row.clamp(0, body_max), col.clamp(0, @cols - 1)]
+      end
+    end
+
+    # rvim sets `quit` after `:q` / `:q!` / `:wq`. The host polls this
+    # via `Pane#alive?` and reaps the pane like it would a dead shell.
+    def closed?
+      @editor.quit?
+    end
+
+    # Short label for the current vim mode (used in the statusline
+    # and exposed for window-title / future status-bar plumbing).
+    def mode_label
+      return :cmdline if cmdline_mode?
+      return :visual  if @editor.visual_mode
+      return :insert  if @editor.send(:editing_mode_label) == :vi_insert
+      :normal
+    end
+
+    # Filename for the window title; appends `[+]` while the buffer
+    # has unsaved changes (vim convention). Returns `'[No Name]'` for
+    # buffers opened with no path (e.g. `:enew`).
+    def display_filename
+      base = @file && !@file.empty? ? File.basename(@file) : '[No Name]'
+      @editor.modified ? "#{base} [+]" : base
     end
 
     private
+
+    def cmdline_mode?
+      [:ex, :search_forward, :search_backward].include?(@editor.prompt_mode)
+    end
+
+    # The text the user sees on the bottom row when in cmdline mode:
+    # the leader char (`:`, `/`, `?`) followed by what they've typed.
+    def cmdline_text
+      leader =
+        case @editor.prompt_mode
+        when :search_forward  then '/'
+        when :search_backward then '?'
+        else                       ':'
+        end
+      "#{leader}#{@editor.prompt_buffer}"
+    end
+
+    # One row of segments for the bottom of the pane. Either the
+    # cmdline (in :ex/search mode) or the inverse-video statusline.
+    def bottom_row_segments
+      if cmdline_mode?
+        text = cmdline_text
+        [DEFAULT_SEGMENT.merge(text: text.byteslice(0, @cols).to_s)]
+      else
+        statusline_segments
+      end
+    end
+
+    # Inverse-video statusline: "MODE  filename [+]   <padding>   line:col".
+    # `status_message` (if rvim has one — e.g. ':"…" written') wins
+    # over the mode label so saves and errors are visible.
+    def statusline_segments
+      status = @editor.status_message
+      left =
+        if status && !status.empty?
+          status.to_s
+        else
+          mode = mode_label_text
+          fname = display_filename
+          mode.empty? ? fname : "#{mode}  #{fname}"
+        end
+      lineno = (@editor.line_index || 0) + 1
+      col    = (@editor.byte_pointer || 0) + 1
+      right  = "#{lineno}:#{col}"
+
+      max = @cols
+      pad = max - left.length - right.length
+      pad = 1 if pad < 1
+      text = "#{left}#{' ' * pad}#{right}"
+      text = text.byteslice(0, max).to_s
+
+      [DEFAULT_SEGMENT.merge(text: text, inverse: true)]
+    end
+
+    def mode_label_text
+      case mode_label
+      when :insert then '-- INSERT --'
+      when :visual then '-- VISUAL --'
+      else              ''
+      end
+    end
 
     def line_to_segments(line)
       return [DEFAULT_SEGMENT.merge(text: '')] if line.nil? || line.empty?

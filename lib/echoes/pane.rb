@@ -129,7 +129,7 @@ module Echoes
     end
 
     def alive?
-      return true if viewer?
+      return !@file_viewer.closed? if viewer?
       if embedded?
         @embedded_shell.alive?
       else

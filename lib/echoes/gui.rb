@@ -1250,6 +1250,16 @@ module Echoes
         pane.scroll_accum = 0.0
       end
 
+      # Viewer panes (rvim-backed) consume keys directly via
+      # `pane.handle_key`, not via a pty. Without this branch the
+      # legacy PTY path below tries to write keystrokes to a
+      # non-existent pty fd, so vim never sees the input.
+      if pane.viewer?
+        pane.handle_key(chars: chars, flags: flags)
+        ObjC::MSG_VOID_I.call(@view, ObjC.sel('setNeedsDisplay:'), 1)
+        return
+      end
+
       # Embedded-shell panes don't speak the byte-stream / escape-code
       # protocol; they have an in-Echoes line editor that submits
       # finished lines to a Rubish::REPL via direct method calls.

@@ -98,6 +98,79 @@ class Echoes::FileViewerTest < Test::Unit::TestCase
     rows = v.visible_segments
     assert_equal 20, rows.size
   end
+
+  # --- Editing path: rvim machinery already does the work; the
+  # FileViewer is the rendering shim. These tests pin down the bits
+  # most likely to regress: mode reporting, save semantics, cmdline
+  # rendering on the bottom row, and `:q`-driven viewer death.
+
+  test "i + char + Esc enters insert mode and modifies the buffer" do
+    v = Echoes::FileViewer.new(file: @plain_file, rows: 5, cols: 40)
+    v.feed_key('i')
+    assert_equal :insert, v.mode_label
+    v.feed_key('X')
+    v.feed_key("\e")
+    assert_equal :normal, v.mode_label
+    line = v.instance_variable_get(:@editor).current_buffer.lines.first
+    assert_equal 'Xline 1', line
+  end
+
+  test ":w persists edits to disk" do
+    v = Echoes::FileViewer.new(file: @plain_file, rows: 5, cols: 40)
+    v.feed_key('i'); v.feed_key('X'); v.feed_key("\e")
+    v.feed_key(':'); v.feed_key('w'); v.feed_key("\r")
+    assert_equal 'Xline 1', File.readlines(@plain_file).first.chomp
+  end
+
+  test "cmdline mode renders the typed text on the bottom row" do
+    v = Echoes::FileViewer.new(file: @plain_file, rows: 5, cols: 40)
+    v.feed_key(':')
+    v.feed_key('w')
+    rows = v.visible_segments
+    bottom = rows.last.map { |s| s[:text] }.join
+    assert_match(/\A:w/, bottom)
+    # Cursor sits on the cmdline row at the end of typed text.
+    r, c = v.cursor_position
+    assert_equal 4, r            # rows-1
+    assert_equal 2, c            # `:w` length
+  end
+
+  test "statusline shows the mode + filename + position when not in cmdline" do
+    v = Echoes::FileViewer.new(file: @plain_file, rows: 5, cols: 40)
+    v.feed_key('i')              # enter insert mode
+    rows = v.visible_segments
+    bottom = rows.last
+    text = bottom.map { |s| s[:text] }.join
+    assert_includes text, '-- INSERT --'
+    assert_includes text, File.basename(@plain_file)
+    assert_match(/1:1\s*\z/, text.rstrip)
+    assert_equal true, bottom.first[:inverse]
+  end
+
+  test "modified files get the [+] marker in display_filename" do
+    v = Echoes::FileViewer.new(file: @plain_file, rows: 5, cols: 40)
+    refute_match(/\[\+\]/, v.display_filename)
+    v.feed_key('i'); v.feed_key('X'); v.feed_key("\e")
+    assert_match(/\[\+\]/, v.display_filename)
+  end
+
+  test ":q sets closed? so the host can reap the pane" do
+    v = Echoes::FileViewer.new(file: @plain_file, rows: 5, cols: 40)
+    refute v.closed?
+    v.feed_key(':'); v.feed_key('q'); v.feed_key("\r")
+    assert v.closed?
+  end
+
+  test "padding rows render vim-style ~ markers when the buffer is short" do
+    short = File.join(@dir, 'short.txt')
+    File.write(short, "one\n")
+    v = Echoes::FileViewer.new(file: short, rows: 5, cols: 40)
+    rows = v.visible_segments
+    # rows-1 buffer rows, last is statusline. With 1 line of content,
+    # rows 1..3 are tilde fill.
+    assert_equal '~', rows[1].map { |s| s[:text] }.join
+    assert_equal '~', rows[2].map { |s| s[:text] }.join
+  end
 end
 
 class Echoes::PaneViewerTest < Test::Unit::TestCase
@@ -135,5 +208,14 @@ class Echoes::PaneViewerTest < Test::Unit::TestCase
     pane = Echoes::Pane.new(command: '', rows: 8, cols: 40, viewer_file: @file)
     assert pane.alive?
     assert_equal '', pane.read_available_output
+  end
+
+  test "Pane#alive? becomes false after the viewer quits via :q" do
+    pane = Echoes::Pane.new(command: '', rows: 8, cols: 40, viewer_file: @file)
+    assert pane.alive?
+    pane.handle_key(chars: ':')
+    pane.handle_key(chars: 'q')
+    pane.handle_key(chars: "\r")
+    refute pane.alive?
   end
 end
