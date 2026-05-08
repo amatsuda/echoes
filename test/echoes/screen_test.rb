@@ -414,6 +414,55 @@ class Echoes::ScreenTest < Test::Unit::TestCase
     assert_equal(4, @screen.cursor.col)
   end
 
+  test "put_multicell with halign != 0 lays the whole string out as one block" do
+    @screen = Echoes::Screen.new(rows: 5, cols: 20)
+    @screen.put_multicell("Hi", scale: 2, width: 0, frac_n: 0, frac_d: 0,
+                          valign: 0, halign: 2)
+    anchor = @screen.grid[0][0]
+    # source_chars = 2 ("Hi"), scale = 2 → block 4 cells wide.
+    # Without halign this would be two 2-cell blocks; with halign=2
+    # the whole string is one block so the renderer has 4 cells of
+    # space to center the glyphs in.
+    assert_equal("Hi", anchor.char)
+    assert_equal(4, anchor.multicell[:cols])
+    assert_equal(2, anchor.multicell[:halign])
+    assert_equal(:cont, @screen.grid[0][1].multicell)
+    assert_equal(:cont, @screen.grid[0][2].multicell)
+    assert_equal(:cont, @screen.grid[0][3].multicell)
+    assert_equal(4, @screen.cursor.col)
+  end
+
+  test "put_multicell with halign + proportional widens block to fit measured glyphs" do
+    @screen = Echoes::Screen.new(rows: 5, cols: 30)
+    @screen.cell_pixel_width = 8.0
+    # Stub: each char measures 30px (wider than 2 cells at scale=2,
+    # which would be 16px). source_chars=5 → 5*2=10 cells; measured
+    # width = 5*30 = 150px → ceil(150/8) = 19 cells. Block must be
+    # max(10, 19) = 19 so the proportional glyphs fit.
+    @screen.glyph_measurer = ->(text, _f, _s, _, _) { text.length * 30.0 }
+
+    @screen.put_multicell("Hello", scale: 2, width: 0, frac_n: 0, frac_d: 0,
+                          valign: 0, halign: 2, family: "BigFont")
+    anchor = @screen.grid[0][0]
+    assert_equal("Hello", anchor.char)
+    assert_equal(19, anchor.multicell[:cols])
+  end
+
+  test "put_multicell with halign + proportional uses s × source_chars when that's wider" do
+    @screen = Echoes::Screen.new(rows: 5, cols: 30)
+    @screen.cell_pixel_width = 8.0
+    # Stub: each char measures only 8px (1 cell). source_chars=5 →
+    # s × source_chars = 5*2 = 10 cells; measured = 5*8 = 40px → 5
+    # cells. max(10, 5) = 10. Block stays at 10 cells so the
+    # narrow glyphs are centered with margins on both sides.
+    @screen.glyph_measurer = ->(text, _f, _s, _, _) { text.length * 8.0 }
+
+    @screen.put_multicell("Hello", scale: 2, width: 0, frac_n: 0, frac_d: 0,
+                          valign: 0, halign: 2, family: "TightFont")
+    anchor = @screen.grid[0][0]
+    assert_equal(10, anchor.multicell[:cols])
+  end
+
   # --- to_text ---
 
   test "to_text on empty screen" do

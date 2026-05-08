@@ -169,6 +169,26 @@ module Echoes
       if width > 0
         # Explicit width: entire text in one block of scale*width cols × scale rows
         place_multicell_block(text, scale * width, mc_rows, scale, frac_n, frac_d, valign, halign, family)
+      elsif halign != 0
+        # h= is set: render the whole string as one block of
+        # `scale × source_chars` cells, so the renderer's halign math
+        # has room to center / right-align the glyphs. The spec only
+        # mandates h= when the glyphs are smaller than the block
+        # (fractional n<d), but extending it to non-fractional /
+        # proportional text is a natural superset — other terminals
+        # just ignore the attribute. With a proportional family we
+        # widen the block to `max(scale × source_chars, measured)` so
+        # the text never overflows but still gets visible side
+        # margins for centering.
+        source_chars = text.each_grapheme_cluster.sum { |g| char_width(g) }
+        mc_cols = scale * source_chars
+        if family && @glyph_measurer && @cell_pixel_width && @cell_pixel_width > 0
+          measured_px = @glyph_measurer.call(text, family, scale, frac_n, frac_d).to_f
+          measured_cells = (measured_px / @cell_pixel_width).ceil
+          mc_cols = [mc_cols, measured_cells].max
+        end
+        mc_cols = [mc_cols, 1].max
+        place_multicell_block(text, mc_cols, mc_rows, scale, frac_n, frac_d, valign, halign, family)
       elsif family && @glyph_measurer && @cell_pixel_width && @cell_pixel_width > 0
         # Proportional fonts have variable glyph widths, so reserving
         # `char_width(grapheme) * scale` cells per grapheme leaves big
