@@ -11,7 +11,7 @@ module Echoes
   # the statusline (mode / filename / modified marker / line:col)
   # or, when in command/search mode, for the cmdline (`:`, `/`,
   # or `?` prompt with the typed text and cursor).
-  class FileViewer
+  class Editor
     # rvim's syntax highlighter labels each token with a vim-style
     # color symbol (`:Comment`, `:String`, …). Map to ANSI palette
     # indices that this Screen's Cell.fg uses.

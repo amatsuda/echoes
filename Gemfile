@@ -14,6 +14,6 @@ gem "test-unit", "~> 3.0"
 # only required when an EmbeddedShell pane is created.
 gem "rubish-gem", path: "../rubish"
 
-# In-process editor (read-only viewer pane phase 1). Optional —
-# only required when a FileViewer pane is created.
+# In-process vim-equivalent editor backing Echoes::Editor panes.
+# Lazily loaded: only required when an editor pane is created.
 gem "rvim", path: "../rvim"

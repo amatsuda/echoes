@@ -71,11 +71,11 @@ module Echoes
       start_app
     end
 
-    def create_tab(viewer_file: nil)
+    def create_tab(editor_file: nil)
       cwd = self.class.pane_local_cwd(current_tab&.active_pane)
       tab = Tab.new(command: @command, rows: @rows, cols: @cols, cwd: cwd,
-                    embedded: embedded_mode?, viewer_file: viewer_file)
-      tab.title = viewer_file ? File.basename(viewer_file) : "Tab #{@tabs.size + 1}"
+                    embedded: embedded_mode?, editor_file: editor_file)
+      tab.title = editor_file ? File.basename(editor_file) : "Tab #{@tabs.size + 1}"
       tab.panes.each do |pane|
         if @cell_width && @cell_height
           pane.screen.cell_pixel_width = @cell_width
@@ -294,7 +294,7 @@ module Echoes
       add_menu_item(shell_menu, "New Tab", 'newTab:', 't')
       add_menu_item(shell_menu, "Close Tab", 'closeTab:', 'w')
       add_separator(shell_menu)
-      add_menu_item(shell_menu, "View File…", 'viewFile:', 'e',
+      add_menu_item(shell_menu, "Edit File…", 'editFile:', 'e',
                     modifiers: ObjC::NSEventModifierFlagCommand | ObjC::NSEventModifierFlagShift)
       add_separator(shell_menu)
       add_menu_item(shell_menu, "Split Right", 'splitRight:', 'd')
@@ -611,10 +611,10 @@ module Echoes
         create_tab
         ObjC::MSG_VOID_I.call(@view, ObjC.sel('setNeedsDisplay:'), 1)
       })
-      @view_file_closure = menu_action.call(-> {
-        path = prompt_for_file_to_view
+      @edit_file_closure = menu_action.call(-> {
+        path = prompt_for_file_to_edit
         if path
-          create_tab(viewer_file: path)
+          create_tab(editor_file: path)
           ObjC::MSG_VOID_I.call(@view, ObjC.sel('setNeedsDisplay:'), 1)
         end
       })
@@ -775,7 +775,7 @@ module Echoes
         'windowDidResignKey:'   => ['v@:@', @focus_lost_closure],
         'newWindow:'             => ['v@:@', @new_window_closure],
         'newTab:'               => ['v@:@', @new_tab_closure],
-        'viewFile:'             => ['v@:@', @view_file_closure],
+        'editFile:'             => ['v@:@', @edit_file_closure],
         'closeTab:'             => ['v@:@', @close_tab_closure],
         'copy:'                 => ['v@:@', @copy_closure],
         'paste:'                => ['v@:@', @paste_closure],
@@ -1254,7 +1254,7 @@ module Echoes
       # `pane.handle_key`, not via a pty. Without this branch the
       # legacy PTY path below tries to write keystrokes to a
       # non-existent pty fd, so vim never sees the input.
-      if pane.viewer?
+      if pane.editor?
         pane.handle_key(chars: chars, flags: flags)
         ObjC::MSG_VOID_I.call(@view, ObjC.sel('setNeedsDisplay:'), 1)
         return
@@ -1958,10 +1958,10 @@ module Echoes
     end
 
     # Show an NSOpenPanel for the user to pick a file to load into a
-    # FileViewer pane. Returns the chosen path as a String, or nil if
+    # Editor pane. Returns the chosen path as a String, or nil if
     # the user canceled. Only single-file selection; directories not
     # accepted.
-    def prompt_for_file_to_view
+    def prompt_for_file_to_edit
       panel = ObjC::MSG_PTR.call(ObjC.cls('NSOpenPanel'), ObjC.sel('openPanel'))
       ObjC::MSG_VOID_I.call(panel, ObjC.sel('setCanChooseFiles:'), 1)
       ObjC::MSG_VOID_I.call(panel, ObjC.sel('setCanChooseDirectories:'), 0)
