@@ -2022,7 +2022,15 @@ module Echoes
       attr_alloc = ObjC::MSG_PTR.call(ObjC.cls('NSAttributedString'), ObjC.sel('alloc'))
       attr_str   = ObjC::MSG_PTR_1.call(attr_alloc, ObjC.sel('initWithString:'), ns_credits)
 
-      options = ObjC.nsdict(ObjC.nsstring('Credits') => attr_str)
+      # Without ApplicationName/Version, Cocoa picks up the running
+      # process name ("ruby" — the interpreter the launcher exec'd
+      # into) and the generic Ruby folder icon. Override with our
+      # bundle values so the panel reads "Echoes 0.1.0".
+      options = ObjC.nsdict(
+        ObjC.nsstring('ApplicationName')    => ObjC.nsstring('Echoes'),
+        ObjC.nsstring('ApplicationVersion') => ObjC.nsstring(Echoes::VERSION),
+        ObjC.nsstring('Credits')            => attr_str,
+      )
       ObjC::MSG_VOID_1.call(@app, ObjC.sel('orderFrontStandardAboutPanelWithOptions:'), options)
     end
 
