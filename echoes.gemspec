@@ -8,12 +8,18 @@ Gem::Specification.new do |spec|
   spec.authors = ["Akira Matsuda"]
   spec.email = ["ronnie@dio.jp"]
 
-  spec.summary = "TODO: Write a short summary, because RubyGems requires one."
-  spec.description = "TODO: Write a longer description or delete this line."
+  spec.summary = "A pure-Ruby AppKit-based macOS terminal emulator."
+  spec.description = <<~DESC
+    Echoes is a pure-Ruby macOS terminal emulator with first-class
+    integrations for rubish (in-process shell) and rvim (in-process
+    vim editor) panes, plus a private OSC namespace for in-pane
+    Ruby tools that want to drive UI features (gradient backgrounds,
+    rectangular fills, proportional-font text) other terminals
+    can't. Written in pure Ruby on top of AppKit via Fiddle.
+  DESC
   spec.homepage = "https://github.com/amatsuda/echoes"
   spec.license = "MIT"
   spec.required_ruby_version = ">= 3.2.0"
-  spec.metadata["allowed_push_host"] = "TODO: Set to your gem server 'https://example.com'"
   spec.metadata["homepage_uri"] = spec.homepage
   spec.metadata["source_code_uri"] = "https://github.com/amatsuda/echoes"
 
