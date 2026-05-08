@@ -218,6 +218,14 @@ module Echoes
     def setup_app
       @app = ObjC::MSG_PTR.call(ObjC.cls('NSApplication'), ObjC.sel('sharedApplication'))
       ObjC::MSG_VOID_I.call(@app, ObjC.sel('setActivationPolicy:'), 0)
+      # Disable native NSWindow tabbing so Cmd+N always spawns a real
+      # new window. Default macOS behavior in fullscreen is to fold
+      # additional NSWindows into the same OS-level tabbed window —
+      # but Echoes already has its own tab abstraction (with its own
+      # tab bar and @tabs array per window), so that promotion creates
+      # a phantom OS tab the Echoes side has no record of, leaving a
+      # second clickable tab that switches to nothing.
+      ObjC::MSG_VOID_I.call(ObjC.cls('NSWindow'), ObjC.sel('setAllowsAutomaticWindowTabbing:'), 0)
       setup_menu_bar
     end
 
