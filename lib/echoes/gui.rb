@@ -931,6 +931,7 @@ module Echoes
       # Per-pane gradient background (set via OSC 7772 ;bg-gradient).
       # Drawn before any cells so cell-level bg colors paint on top.
       draw_pane_background(screen.background, px, py, pane_cols, pane_rows) if screen.background
+      draw_pane_fills(screen.bg_fills, px, py, pane_cols, pane_rows) if screen.bg_fills && !screen.bg_fills.empty?
 
       pane_rows.times do |r|
         y = py + r * @cell_height
@@ -2744,6 +2745,36 @@ module Echoes
         ObjC.release(gradient)
         ObjC.release(ns_start)
         ObjC.release(ns_end)
+      end
+    end
+
+    # Paint each `bg-fill` overlay rectangle on top of the base pane
+    # background but below cell content. `fills` is a list of
+    # {rect: [r1,c1,r2,c2], color: [r,g,b,a]} hashes accumulated by
+    # the OSC 7772 `bg-fill` parser. Coordinates are 0-indexed and
+    # inclusive on both ends; the rect is clipped to the pane bounds
+    # so out-of-range emitter values don't draw outside the pane.
+    def draw_pane_fills(fills, px, py, pane_cols, pane_rows)
+      fills.each do |fill|
+        rect  = fill[:rect]
+        rgba  = fill[:color]
+        next unless rect && rgba && rect.size == 4
+        r1, c1, r2, c2 = rect
+        r1 = r1.clamp(0, pane_rows - 1)
+        r2 = r2.clamp(0, pane_rows - 1)
+        c1 = c1.clamp(0, pane_cols - 1)
+        c2 = c2.clamp(0, pane_cols - 1)
+        next if r1 > r2 || c1 > c2
+
+        x = px + c1 * @cell_width
+        y = py + r1 * @cell_height
+        w = (c2 - c1 + 1) * @cell_width
+        h = (r2 - r1 + 1) * @cell_height
+
+        ns = make_color(*rgba)
+        ObjC::MSG_VOID.call(ns, ObjC.sel('setFill'))
+        ObjC::NSRectFill.call(x, y, w, h)
+        ObjC.release(ns)
       end
     end
   end

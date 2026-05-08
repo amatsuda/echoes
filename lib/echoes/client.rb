@@ -44,8 +44,26 @@ module Echoes
       nil
     end
 
-    # Drop any pane background override and revert to the solid
-    # default_bg. Safe to call when no override is set.
+    # Paint a rectangular region of the pane on top of the base
+    # background. Calls accumulate — emit several to build up a
+    # layout (header/footer bars, sidebars, accent stripes, etc.).
+    # `bg_clear` wipes the whole list along with the base background.
+    #
+    # Coordinates are 0-indexed cell positions, inclusive on both
+    # ends — i.e. row1=0, col1=0, row2=2, col2=9 paints a 3x10 block.
+    #
+    # Example:
+    #   Echoes::Client.bg_fill('#222',  row1: 0,  col1: 0, row2: 0,  col2: 79)  # status bar
+    #   Echoes::Client.bg_fill('#3a3', row1: 24, col1: 0, row2: 24, col2: 79)  # footer
+    def bg_fill(color, row1:, col1:, row2:, col2:, io: $stdout)
+      args = "color=#{color}:rect=#{row1},#{col1},#{row2},#{col2}"
+      io.write("#{OSC};bg-fill;#{args}#{BEL}")
+      io.flush if io.respond_to?(:flush)
+      nil
+    end
+
+    # Drop any pane background override (bg-color/bg-gradient) AND
+    # all bg-fill overlays. Safe to call when nothing is set.
     def bg_clear(io: $stdout)
       io.write("#{OSC};bg-clear#{BEL}")
       io.flush if io.respond_to?(:flush)

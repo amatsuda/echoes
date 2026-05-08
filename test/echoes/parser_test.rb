@@ -1285,4 +1285,43 @@ class Echoes::ParserTest < Test::Unit::TestCase
     @parser.feed("\e]7772;bg-clear\a")
     assert_nil @screen.background
   end
+
+  # --- bg-fill (rectangular overlay regions) ---
+
+  test "OSC 7772 bg-fill appends a region to the screen's bg_fills" do
+    @parser.feed("\e]7772;bg-fill;color=#1a1a2e:rect=0,0,2,9\a")
+    assert_equal 1, @screen.bg_fills.size
+    fill = @screen.bg_fills[0]
+    assert_equal [0, 0, 2, 9], fill[:rect]
+    r, g, b, a = fill[:color]
+    assert_in_delta 0x1a / 255.0, r, 0.001
+    assert_in_delta 0x1a / 255.0, g, 0.001
+    assert_in_delta 0x2e / 255.0, b, 0.001
+    assert_in_delta 1.0, a, 0.001
+  end
+
+  test "OSC 7772 bg-fill calls accumulate" do
+    @parser.feed("\e]7772;bg-fill;color=#aaa:rect=0,0,0,9\a")
+    @parser.feed("\e]7772;bg-fill;color=#bbb:rect=4,0,4,9\a")
+    assert_equal 2, @screen.bg_fills.size
+    assert_equal [0, 0, 0, 9], @screen.bg_fills[0][:rect]
+    assert_equal [4, 0, 4, 9], @screen.bg_fills[1][:rect]
+  end
+
+  test "OSC 7772 bg-fill with a malformed rect is ignored" do
+    @parser.feed("\e]7772;bg-fill;color=#abc:rect=1,2,3\a")  # 3 nums, need 4
+    assert_equal [], @screen.bg_fills
+  end
+
+  test "OSC 7772 bg-fill missing color is ignored" do
+    @parser.feed("\e]7772;bg-fill;rect=0,0,1,1\a")
+    assert_equal [], @screen.bg_fills
+  end
+
+  test "OSC 7772 bg-clear empties the bg_fills list" do
+    @parser.feed("\e]7772;bg-fill;color=#abc:rect=0,0,0,5\a")
+    assert_equal 1, @screen.bg_fills.size
+    @parser.feed("\e]7772;bg-clear\a")
+    assert_equal [], @screen.bg_fills
+  end
 end

@@ -56,6 +56,20 @@ class Echoes::ClientTest < Test::Unit::TestCase
     assert_equal 1, screen.background[:colors].size
   end
 
+  test "bg_fill emits an OSC 7772 sequence with color and rect" do
+    Echoes::Client.bg_fill('#1a1a2e', row1: 0, col1: 0, row2: 2, col2: 9, io: @io)
+    assert_equal "\e]7772;bg-fill;color=#1a1a2e:rect=0,0,2,9\a", @io.string
+  end
+
+  test "bg_fill roundtrips through the parser, appending a region" do
+    Echoes::Client.bg_fill('#1a1a2e', row1: 1, col1: 2, row2: 3, col2: 7, io: @io)
+    screen = Echoes::Screen.new(rows: 5, cols: 10)
+    parser = Echoes::Parser.new(screen)
+    parser.feed(@io.string)
+    assert_equal 1, screen.bg_fills.size
+    assert_equal [1, 2, 3, 7], screen.bg_fills[0][:rect]
+  end
+
   test "bg_clear roundtrips through the parser" do
     screen = Echoes::Screen.new(rows: 5, cols: 10)
     screen.background = {type: :linear, angle: 0.0, colors: [[0, 0, 0, 1.0], [1.0, 1.0, 1.0, 1.0]]}

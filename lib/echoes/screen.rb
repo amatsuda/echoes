@@ -7,7 +7,7 @@ module Echoes
     attr_reader :rows, :cols, :cursor, :grid, :scrollback, :dirty_rows,
                 :command_marks
     attr_accessor :cell_pixel_width, :cell_pixel_height, :title, :current_directory,
-                  :pending_wrap, :background
+                  :pending_wrap, :background, :bg_fills
 
     def self.scrollback_limit
       Echoes.config.scrollback_limit
@@ -55,6 +55,7 @@ module Echoes
       @last_char = nil
       @title_stack = []
       @dirty_rows = Set.new((0...rows).to_a)
+      @bg_fills = []  # OSC 7772 ;bg-fill regions; each: {rect:[r1,c1,r2,c2], color:[r,g,b,a]}
       # OSC 133 prompt-boundary markers: each entry is a Hash with
       # :prompt_start / :input_start / :output_start / :output_end /
       # :exit_code keys, where the row values are *visual* row indices —

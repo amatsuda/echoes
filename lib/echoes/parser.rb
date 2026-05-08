@@ -519,6 +519,7 @@ module Echoes
     # gracefully. Supported commands:
     #   bg-color    ; #rrggbb              (solid pane background)
     #   bg-gradient ; type=linear:angle=N:colors=#rrggbb,#rrggbb[,...]
+    #   bg-fill     ; color=#rrggbb:rect=row1,col1,row2,col2
     #   bg-clear                           (revert to default_bg)
     def dispatch_osc7772(rest)
       command, args = rest.split(';', 2)
@@ -535,8 +536,15 @@ module Echoes
           @screen.background = spec
           @screen.mark_all_dirty if @screen.respond_to?(:mark_all_dirty)
         end
+      when 'bg-fill'
+        fill = parse_bg_fill_args(args || '')
+        if fill && @screen.respond_to?(:bg_fills) && @screen.bg_fills
+          @screen.bg_fills << fill
+          @screen.mark_all_dirty if @screen.respond_to?(:mark_all_dirty)
+        end
       when 'bg-clear'
         @screen.background = nil
+        @screen.bg_fills.clear if @screen.respond_to?(:bg_fills) && @screen.bg_fills
         @screen.mark_all_dirty if @screen.respond_to?(:mark_all_dirty)
       end
     end
@@ -557,6 +565,28 @@ module Echoes
       end
       return nil if params[:colors].size < 2
       params
+    end
+
+    # Parse `color=#rrggbb:rect=r1,c1,r2,c2` into
+    # `{rect: [r1,c1,r2,c2], color: [r,g,b,a]}`. Returns nil if
+    # either field is missing or malformed; the renderer clamps the
+    # rect to the pane bounds, so out-of-range values are tolerated.
+    def parse_bg_fill_args(args)
+      color = nil
+      rect = nil
+      args.split(':').each do |pair|
+        k, v = pair.split('=', 2)
+        next unless v
+        case k
+        when 'color'
+          color = parse_hex_color(v)
+        when 'rect'
+          parts = v.split(',').map(&:to_i)
+          rect = parts if parts.size == 4
+        end
+      end
+      return nil unless color && rect
+      {rect: rect, color: color}
     end
 
     # Accepts "#rrggbb", "#rgb", or "#rrggbbaa". Returns [r, g, b, a]
