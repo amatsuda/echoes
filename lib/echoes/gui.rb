@@ -1023,6 +1023,9 @@ module Echoes
             if cell.underline
               draw_attrs[ObjC::NSUnderlineStyleAttributeName] = ObjC.nsnumber_int(1)
             end
+            if cell.strikethrough
+              draw_attrs[ObjC::NSStrikethroughStyleAttributeName] = ObjC.nsnumber_int(1)
+            end
             ns_attrs = ObjC.nsdict(draw_attrs)
             ns_char = cached_nsstring(cell.char)
 
