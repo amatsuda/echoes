@@ -1,10 +1,15 @@
 #!/usr/bin/env ruby
 # frozen_string_literal: true
 
-require "echoes"
-
-if ARGV.delete('--tty') || ARGV.delete('-t')
-  Echoes::Terminal.new.run
+case ARGV.first
+when 'install', 'uninstall'
+  require 'echoes/installer'
+  Echoes::Installer.public_send(ARGV.shift)
 else
-  Echoes::GUI.new.run
+  require 'echoes'
+  if ARGV.delete('--tty') || ARGV.delete('-t')
+    Echoes::Terminal.new.run
+  else
+    Echoes::GUI.new.run
+  end
 end

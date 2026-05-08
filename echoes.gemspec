@@ -30,6 +30,17 @@ Gem::Specification.new do |spec|
   spec.executables = spec.files.grep(%r{\Aexe/}) { |f| File.basename(f) }
   spec.require_paths = ["lib"]
 
+  spec.post_install_message = <<~MSG
+    To launch Echoes from Spotlight / Dock / Cmd-Space, run:
+
+        echoes install
+
+    This drops thin Echoes.app and EchoesEmbed.app shortcuts in
+    ~/Applications/ that exec into the real gem-bundled launchers.
+    Re-run `echoes install` after each `gem update echoes` to refresh
+    the shortcuts; `echoes uninstall` removes them.
+  MSG
+
   # Uncomment to register a new dependency of your gem
   spec.add_dependency 'syslog'
   spec.add_dependency 'fiddle'
