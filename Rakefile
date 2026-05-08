@@ -11,40 +11,35 @@ end
 
 task default: :test
 
-desc "Build Echoes.app macOS application bundle"
+desc "Sync .app Info.plist CFBundleVersion with Echoes::VERSION"
 task :app do
+  # The .app bundles (Echoes.app, EchoesEmbed.app) are committed
+  # to the repo, including their MacOS/ launcher scripts which
+  # locate `lib/` and `exe/echoes` from the script's own path —
+  # no per-machine rewrite needed. The one thing that drifts on a
+  # version bump is each bundle's Info.plist CFBundleVersion. This
+  # task patches that line in place; everything else (launchers,
+  # bundle id, package type) is left alone so any hand-edits the
+  # bundles have picked up survive.
   require_relative "lib/echoes/version"
+  version = Echoes::VERSION
 
-  app_dir = "Echoes.app/Contents"
-  mkdir_p "#{app_dir}/MacOS"
-
-  File.write "#{app_dir}/Info.plist", <<~PLIST
-    <?xml version="1.0" encoding="UTF-8"?>
-    <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-    <plist version="1.0">
-    <dict>
-      <key>CFBundleName</key>
-      <string>Echoes</string>
-      <key>CFBundleIdentifier</key>
-      <string>com.github.amatsuda.echoes</string>
-      <key>CFBundleVersion</key>
-      <string>#{Echoes::VERSION}</string>
-      <key>CFBundleExecutable</key>
-      <string>Echoes</string>
-      <key>CFBundlePackageType</key>
-      <string>APPL</string>
-    </dict>
-    </plist>
-  PLIST
-
-  gem_dir = File.expand_path(__dir__)
-  ruby_bin = File.join(RbConfig::CONFIG["bindir"], RbConfig::CONFIG["ruby_install_name"])
-
-  File.write "#{app_dir}/MacOS/Echoes", <<~SHELL
-    #!/bin/bash
-    exec "#{ruby_bin}" -I"#{gem_dir}/lib" "#{gem_dir}/exe/echoes"
-  SHELL
-  chmod 0755, "#{app_dir}/MacOS/Echoes"
-
-  puts "Built Echoes.app"
+  plists = %w[Echoes.app/Contents/Info.plist EchoesEmbed.app/Contents/Info.plist]
+  plists.each do |path|
+    unless File.exist?(path)
+      warn "skipping #{path}: not found"
+      next
+    end
+    text = File.read(path)
+    new_text = text.sub(
+      %r{(<key>CFBundleVersion</key>\s*<string>)[^<]*(</string>)},
+      "\\1#{version}\\2"
+    )
+    if text == new_text
+      puts "#{path}: already at #{version}"
+    else
+      File.write(path, new_text)
+      puts "#{path}: CFBundleVersion → #{version}"
+    end
+  end
 end
