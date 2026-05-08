@@ -2,10 +2,35 @@
 # Same as Echoes.app's launcher, but exports ECHOES_EMBED=1 so panes
 # come up running rubish in-process via the per-pane helper instead
 # of the legacy PTY-spawn-a-shell mode. See Echoes.app's launcher for
-# why we force native arch on Apple Silicon.
-RUBY=/Users/a_matsuda/.rbenv/versions/ruby-dev/bin/ruby
-ECHOES_LIB=/Users/a_matsuda/src/github.com/amatsuda/echoes/lib
-ECHOES_BIN=/Users/a_matsuda/src/github.com/amatsuda/echoes/exe/echoes
+# why we force native arch on Apple Silicon and how the paths /
+# Ruby interpreter are resolved.
+
+set -e
+
+SCRIPT="${BASH_SOURCE[0]}"
+SCRIPT_DIR="$(cd "$(dirname "$SCRIPT")" && pwd)"
+ECHOES_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
+ECHOES_LIB="$ECHOES_ROOT/lib"
+ECHOES_BIN="$ECHOES_ROOT/exe/echoes"
+
+if [ -z "${RUBY:-}" ]; then
+  for cand in \
+    "$HOME/.rbenv/shims/ruby" \
+    /opt/homebrew/bin/ruby \
+    /usr/local/bin/ruby \
+    /usr/bin/ruby
+  do
+    if [ -x "$cand" ]; then
+      RUBY="$cand"
+      break
+    fi
+  done
+fi
+RUBY="${RUBY:-$(command -v ruby || true)}"
+if [ -z "$RUBY" ] || [ ! -x "$RUBY" ]; then
+  echo "Echoes: no Ruby interpreter found. Set \$RUBY or install one." >&2
+  exit 127
+fi
 
 export ECHOES_EMBED=1
 

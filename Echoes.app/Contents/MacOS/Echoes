@@ -6,9 +6,42 @@
 # child rubish forks downstream — including brew — inherits the
 # translated arch and may bail with "Cannot install under Rosetta 2".
 # Force native arch on Apple Silicon to break that inheritance.
-RUBY=/Users/a_matsuda/.rbenv/versions/ruby-dev/bin/ruby
-ECHOES_LIB=/Users/a_matsuda/src/github.com/amatsuda/echoes/lib
-ECHOES_BIN=/Users/a_matsuda/src/github.com/amatsuda/echoes/exe/echoes
+
+set -e
+
+# Derive ECHOES_ROOT from the script's own location so the .app works
+# inside any clone of the repo regardless of homedir or path. The
+# script lives at <repo>/Echoes.app/Contents/MacOS/Echoes, so root
+# is three levels up.
+SCRIPT="${BASH_SOURCE[0]}"
+SCRIPT_DIR="$(cd "$(dirname "$SCRIPT")" && pwd)"
+ECHOES_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
+ECHOES_LIB="$ECHOES_ROOT/lib"
+ECHOES_BIN="$ECHOES_ROOT/exe/echoes"
+
+# Pick a Ruby interpreter. Honor an explicit override via $RUBY,
+# otherwise probe common locations (rbenv, homebrew, system) and
+# fall back to whatever `env ruby` finds. Echoes requires Ruby
+# >= 3.2; the first match wins, so adjust your PATH or set $RUBY
+# if you need a specific version.
+if [ -z "${RUBY:-}" ]; then
+  for cand in \
+    "$HOME/.rbenv/shims/ruby" \
+    /opt/homebrew/bin/ruby \
+    /usr/local/bin/ruby \
+    /usr/bin/ruby
+  do
+    if [ -x "$cand" ]; then
+      RUBY="$cand"
+      break
+    fi
+  done
+fi
+RUBY="${RUBY:-$(command -v ruby || true)}"
+if [ -z "$RUBY" ] || [ ! -x "$RUBY" ]; then
+  echo "Echoes: no Ruby interpreter found. Set \$RUBY or install one." >&2
+  exit 127
+fi
 
 if [ "$(/usr/sbin/sysctl -in hw.optional.arm64)" = "1" ]; then
   exec /usr/bin/arch -arm64 "$RUBY" -I"$ECHOES_LIB" "$ECHOES_BIN"
