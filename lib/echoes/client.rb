@@ -31,8 +31,21 @@ module Echoes
       nil
     end
 
+    # Paint the pane's background with a single solid color. The
+    # color paints beneath cell content, so cells with their own
+    # bg color (selection, themed cells, etc.) still occlude
+    # correctly. Pair with bg_clear to revert.
+    #
+    # Example:
+    #   Echoes::Client.bg_color('#1a1a2e')
+    def bg_color(color, io: $stdout)
+      io.write("#{OSC};bg-color;#{color}#{BEL}")
+      io.flush if io.respond_to?(:flush)
+      nil
+    end
+
     # Drop any pane background override and revert to the solid
-    # default_bg. Safe to call when no gradient is set.
+    # default_bg. Safe to call when no override is set.
     def bg_clear(io: $stdout)
       io.write("#{OSC};bg-clear#{BEL}")
       io.flush if io.respond_to?(:flush)

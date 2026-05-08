@@ -517,11 +517,18 @@ module Echoes
     #   \e]7772;<command>;<args>\a
     # Other terminals ignore the unknown OSC code, so emitters degrade
     # gracefully. Supported commands:
+    #   bg-color    ; #rrggbb              (solid pane background)
     #   bg-gradient ; type=linear:angle=N:colors=#rrggbb,#rrggbb[,...]
-    #   bg-clear
+    #   bg-clear                           (revert to default_bg)
     def dispatch_osc7772(rest)
       command, args = rest.split(';', 2)
       case command
+      when 'bg-color'
+        rgba = parse_hex_color((args || '').strip)
+        if rgba
+          @screen.background = {type: :flat, colors: [rgba]}
+          @screen.mark_all_dirty if @screen.respond_to?(:mark_all_dirty)
+        end
       when 'bg-gradient'
         spec = parse_bg_gradient_args(args || '')
         if spec

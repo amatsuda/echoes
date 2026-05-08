@@ -42,6 +42,20 @@ class Echoes::ClientTest < Test::Unit::TestCase
     assert_equal "\e]7772;bg-clear\a", @io.string
   end
 
+  test "bg_color writes a well-formed OSC 7772 sequence" do
+    Echoes::Client.bg_color('#1a1a2e', io: @io)
+    assert_equal "\e]7772;bg-color;#1a1a2e\a", @io.string
+  end
+
+  test "bg_color roundtrips through the parser as a flat background" do
+    Echoes::Client.bg_color('#1a1a2e', io: @io)
+    screen = Echoes::Screen.new(rows: 5, cols: 10)
+    parser = Echoes::Parser.new(screen)
+    parser.feed(@io.string)
+    assert_equal :flat, screen.background[:type]
+    assert_equal 1, screen.background[:colors].size
+  end
+
   test "bg_clear roundtrips through the parser" do
     screen = Echoes::Screen.new(rows: 5, cols: 10)
     screen.background = {type: :linear, angle: 0.0, colors: [[0, 0, 0, 1.0], [1.0, 1.0, 1.0, 1.0]]}

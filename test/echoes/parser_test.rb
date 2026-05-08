@@ -1252,4 +1252,37 @@ class Echoes::ParserTest < Test::Unit::TestCase
     @parser.feed("\e]7772;bg-gradient;type=linear:angle=0:colors=#abc\a")
     assert_nil @screen.background
   end
+
+  test "OSC 7772 bg-color sets a flat background" do
+    @parser.feed("\e]7772;bg-color;#1a1a2e\a")
+    bg = @screen.background
+    assert_not_nil bg
+    assert_equal :flat, bg[:type]
+    assert_equal 1, bg[:colors].size
+    r, g, b, a = bg[:colors][0]
+    assert_in_delta 0x1a / 255.0, r, 0.001
+    assert_in_delta 0x1a / 255.0, g, 0.001
+    assert_in_delta 0x2e / 255.0, b, 0.001
+    assert_in_delta 1.0, a, 0.001
+  end
+
+  test "OSC 7772 bg-color accepts the #rgb short form" do
+    @parser.feed("\e]7772;bg-color;#0f0\a")
+    r, g, b, _ = @screen.background[:colors][0]
+    assert_in_delta 0.0, r, 0.001
+    assert_in_delta 1.0, g, 0.001
+    assert_in_delta 0.0, b, 0.001
+  end
+
+  test "OSC 7772 bg-color with a malformed color is ignored" do
+    @parser.feed("\e]7772;bg-color;not-a-color\a")
+    assert_nil @screen.background
+  end
+
+  test "OSC 7772 bg-clear also drops a flat background" do
+    @parser.feed("\e]7772;bg-color;#000\a")
+    assert_not_nil @screen.background
+    @parser.feed("\e]7772;bg-clear\a")
+    assert_nil @screen.background
+  end
 end
