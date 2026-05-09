@@ -868,7 +868,8 @@ module Echoes
       end
     end
 
-    attr_accessor :clipboard_handler, :palette_handler, :glyph_measurer
+    attr_accessor :clipboard_handler, :palette_handler, :glyph_measurer,
+                  :capture_handler
 
     def set_clipboard(text)
       @clipboard_handler&.call(:set, text)

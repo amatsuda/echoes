@@ -98,4 +98,19 @@ class Echoes::ClientTest < Test::Unit::TestCase
     assert_equal "Menlo", mc[:family]
     assert_equal 2, mc[:scale]
   end
+
+  test "capture emits an OSC 7772 sequence carrying the path" do
+    Echoes::Client.capture('/tmp/snap.png', io: @io)
+    assert_equal "\e]7772;capture;/tmp/snap.png\a", @io.string
+  end
+
+  test "capture roundtrips through the parser, invoking capture_handler" do
+    Echoes::Client.capture('/tmp/snap.png', io: @io)
+    screen = Echoes::Screen.new(rows: 5, cols: 10)
+    parser = Echoes::Parser.new(screen)
+    seen = []
+    screen.capture_handler = ->(p) { seen << p }
+    parser.feed(@io.string)
+    assert_equal ['/tmp/snap.png'], seen
+  end
 end

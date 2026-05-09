@@ -62,6 +62,17 @@ module Echoes
       nil
     end
 
+    # Ask Echoes to write the current pane's pixel buffer to `path`
+    # as a PNG. The path should be absolute. There's no reply on the
+    # wire — the caller polls the filesystem. Other terminals ignore
+    # the OSC, so the call is a no-op outside Echoes (no file gets
+    # written).
+    def capture(path, io: $stdout)
+      io.write("#{OSC};capture;#{path}#{BEL}")
+      io.flush if io.respond_to?(:flush)
+      nil
+    end
+
     # Drop any pane background override (bg-color/bg-gradient) AND
     # all bg-fill overlays. Safe to call when nothing is set.
     def bg_clear(io: $stdout)

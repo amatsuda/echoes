@@ -521,6 +521,7 @@ module Echoes
     #   bg-gradient ; type=linear:angle=N:colors=#rrggbb,#rrggbb[,...]
     #   bg-fill     ; color=#rrggbb:rect=row1,col1,row2,col2
     #   bg-clear                           (revert to default_bg)
+    #   capture     ; <absolute-path-to.png>
     def dispatch_osc7772(rest)
       command, args = rest.split(';', 2)
       case command
@@ -546,6 +547,11 @@ module Echoes
         @screen.background = nil
         @screen.bg_fills.clear if @screen.respond_to?(:bg_fills) && @screen.bg_fills
         @screen.mark_all_dirty if @screen.respond_to?(:mark_all_dirty)
+      when 'capture'
+        path = (args || '').strip
+        if !path.empty? && @screen.respond_to?(:capture_handler) && @screen.capture_handler
+          @screen.capture_handler.call(path)
+        end
       end
     end
 

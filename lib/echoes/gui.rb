@@ -77,7 +77,7 @@ module Echoes
       tab = Tab.new(command: @command, rows: @rows, cols: @cols, cwd: cwd,
                     embedded: embedded_mode?, editor_file: editor_file)
       tab.title = editor_file ? File.basename(editor_file) : "Tab #{@tabs.size + 1}"
-      tab.panes.each { |pane| wire_screen_handlers(pane.screen) }
+      tab.panes.each { |pane| wire_screen_handlers(pane) }
       @tabs << tab
       @active_tab = @tabs.size - 1
     end
@@ -671,13 +671,13 @@ module Echoes
       @split_right_closure = menu_action.call(-> {
         tab = current_tab
         new_pane = tab.split_vertical
-        wire_screen_handlers(new_pane.screen)
+        wire_screen_handlers(new_pane)
         ObjC::MSG_VOID_I.call(@view, ObjC.sel('setNeedsDisplay:'), 1)
       })
       @split_down_closure = menu_action.call(-> {
         tab = current_tab
         new_pane = tab.split_horizontal
-        wire_screen_handlers(new_pane.screen)
+        wire_screen_handlers(new_pane)
         ObjC::MSG_VOID_I.call(@view, ObjC.sel('setNeedsDisplay:'), 1)
       })
       @close_pane_closure = menu_action.call(-> {
@@ -1868,7 +1868,7 @@ module Echoes
       # Create tab
       tab = Tab.new(command: @command, rows: @rows, cols: @cols, embedded: embedded_mode?)
       tab.title = "Shell"
-      tab.panes.each { |pane| wire_screen_handlers(pane.screen) }
+      tab.panes.each { |pane| wire_screen_handlers(pane) }
 
       # Build window and view in locals — DO NOT touch @window / @view yet.
       # makeKeyAndOrderFront: below fires NSWindowDidResignKeyNotification on
@@ -2507,15 +2507,66 @@ module Echoes
     end
 
     # Single point that wires every host-callback a Screen needs
-    # (clipboard, palette, glyph measurement, cell metrics). Called
-    # everywhere a new Screen comes into existence — initial setup,
-    # create_tab, split_horizontal/vertical, and the post-config
-    # update path.
-    def wire_screen_handlers(screen)
+    # (clipboard, palette, glyph measurement, cell metrics, OSC 7772
+    # capture). Called everywhere a new Screen comes into existence —
+    # initial setup, create_tab, split_horizontal/vertical, and the
+    # post-config update path.
+    def wire_screen_handlers(pane)
+      screen = pane.screen
       screen.clipboard_handler = method(:handle_clipboard)
       screen.glyph_measurer    = method(:measure_glyph)
       screen.cell_pixel_width  = @cell_width  if @cell_width
       screen.cell_pixel_height = @cell_height if @cell_height
+      # Capture closure remembers which pane the OSC arrived for so
+      # the renderer grabs the right sub-rect (split layouts have
+      # several panes per view).
+      screen.capture_handler   = ->(path) { capture_pane_to_png(pane, path) }
+    end
+
+    # OSC 7772 ;capture handler. Writes the given pane's pixel buffer
+    # to `path` as a PNG. Uses NSView's
+    # bitmapImageRepForCachingDisplayInRect: / cacheDisplayInRect:
+    # toBitmapImageRep: pair (matches the view's backing scale, so on
+    # Retina displays the file is 2× the cell grid in pixels), then
+    # converts to PNG NSData and writes the bytes via Ruby. No reply
+    # on the wire — the caller polls the filesystem.
+    NS_BITMAP_IMAGE_FILE_TYPE_PNG = 4
+    def capture_pane_to_png(pane, path)
+      return unless @view
+      tab = current_tab
+      return unless tab
+      rect_info = tab.pane_tree.layout(0, 0, @cols, @rows).find { |r| r[:pane] == pane }
+      return unless rect_info
+
+      gy = grid_y_offset
+      px = rect_info[:x] * @cell_width
+      py = gy + rect_info[:y] * @cell_height
+      pw = rect_info[:w] * @cell_width
+      ph = rect_info[:h] * @cell_height
+
+      rep = ObjC::MSG_PTR_RECT.call(
+        @view, ObjC.sel('bitmapImageRepForCachingDisplayInRect:'),
+        px, py, pw, ph
+      )
+      return if rep.nil? || rep.null?
+
+      ObjC::MSG_VOID_RECT_1.call(
+        @view, ObjC.sel('cacheDisplayInRect:toBitmapImageRep:'),
+        px, py, pw, ph, rep
+      )
+
+      empty_dict = ObjC.nsdict({})
+      data = ObjC::MSG_PTR_L_1.call(
+        rep, ObjC.sel('representationUsingType:properties:'),
+        NS_BITMAP_IMAGE_FILE_TYPE_PNG, empty_dict
+      )
+      return if data.nil? || data.null?
+
+      length    = ObjC::MSG_RET_L.call(data, ObjC.sel('length'))
+      bytes_ptr = ObjC::MSG_PTR.call(data, ObjC.sel('bytes'))
+      File.binwrite(path, bytes_ptr.to_str(length))
+    rescue => e
+      warn "echoes capture: #{e.class}: #{e.message}"
     end
 
     def create_nsfont(size, family: nil)
@@ -2556,7 +2607,7 @@ module Echoes
       # idempotent so re-wiring on every font change is fine.
       @window_states.each do |ws|
         ws[:tabs]&.each do |tab|
-          tab.panes.each { |pane| wire_screen_handlers(pane.screen) }
+          tab.panes.each { |pane| wire_screen_handlers(pane) }
         end
       end
     end

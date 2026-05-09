@@ -1324,4 +1324,27 @@ class Echoes::ParserTest < Test::Unit::TestCase
     @parser.feed("\e]7772;bg-clear\a")
     assert_equal [], @screen.bg_fills
   end
+
+  # --- capture (OSC 7772 ;capture;<path>) ---
+
+  test "OSC 7772 capture invokes the screen's capture_handler with the path" do
+    seen = []
+    @screen.capture_handler = ->(path) { seen << path }
+    @parser.feed("\e]7772;capture;/tmp/snap.png\a")
+    assert_equal ["/tmp/snap.png"], seen
+  end
+
+  test "OSC 7772 capture with no path is a no-op" do
+    seen = []
+    @screen.capture_handler = ->(path) { seen << path }
+    @parser.feed("\e]7772;capture;\a")
+    assert_equal [], seen
+  end
+
+  test "OSC 7772 capture without a handler set is a no-op" do
+    # Default screen has no capture_handler — must not raise.
+    assert_nothing_raised do
+      @parser.feed("\e]7772;capture;/tmp/snap.png\a")
+    end
+  end
 end
