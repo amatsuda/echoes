@@ -1483,6 +1483,18 @@ module Echoes
 
       full_redraw = @bell_flash > 0 || blink_toggled
 
+      # DEC private mode 2026 (synchronized output): when a TUI has
+      # opened a sync window with `\e[?2026h`, hold the redraw — even
+      # though we've already mutated the cell grid — until the
+      # matching `\e[?2026l` arrives. This makes vim/bat/helix bulk
+      # repaints land as a single visual frame instead of tearing
+      # mid-batch. Dirty rows accumulate across sync ticks; when sync
+      # ends, the next tick paints them all at once.
+      if tab.panes.any? { |p| p.screen.sync_active }
+        save_window_state
+        return
+      end
+
       if need_redraw
         ObjC::MSG_VOID_1.call(@window, ObjC.sel('setTitle:'), ObjC.nsstring(tab.title))
 

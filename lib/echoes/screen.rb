@@ -30,6 +30,7 @@ module Echoes
       @application_cursor_keys = false
       @bracketed_paste_mode = false
       @focus_reporting = false
+      @sync_active = false  # DEC private mode 2026 (synchronized output)
       @auto_wrap = true
       @mouse_tracking = :off   # :off, :x10, :normal, :button_event, :any_event
       @mouse_encoding = :default  # :default, :sgr
@@ -750,7 +751,7 @@ module Echoes
       @pending_wrap = false
     end
 
-    attr_accessor :mouse_tracking, :mouse_encoding, :insert_mode, :active_charset, :application_keypad, :cursor_style, :bell, :single_shift
+    attr_accessor :mouse_tracking, :mouse_encoding, :insert_mode, :active_charset, :application_keypad, :cursor_style, :bell, :single_shift, :sync_active
 
     def push_title
       @title_stack.push(@title)
@@ -1091,6 +1092,7 @@ module Echoes
       @application_cursor_keys = false
       @bracketed_paste_mode = false
       @focus_reporting = false
+      @sync_active = false  # DEC private mode 2026 (synchronized output)
       @charset_g0 = :ascii
       @charset_g1 = :ascii
       @charset_g2 = :ascii

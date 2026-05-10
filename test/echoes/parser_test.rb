@@ -586,6 +586,18 @@ class Echoes::ParserTest < Test::Unit::TestCase
     assert_false(@screen.bracketed_paste_mode?)
   end
 
+  test "synchronized output mode ?2026h enables sync_active" do
+    refute @screen.sync_active
+    @parser.feed("\e[?2026h")
+    assert @screen.sync_active
+  end
+
+  test "synchronized output mode ?2026l disables sync_active" do
+    @parser.feed("\e[?2026h")
+    @parser.feed("\e[?2026l")
+    refute @screen.sync_active
+  end
+
   test "DECCKM ?1h enables application cursor keys" do
     @parser.feed("\e[?1h")
     assert_true(@screen.application_cursor_keys?)

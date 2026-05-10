@@ -762,6 +762,7 @@ module Echoes
         when 1006 then @screen.mouse_encoding = :sgr
         when 1004 then @screen.focus_reporting = true
         when 2004 then @screen.bracketed_paste_mode = true
+        when 2026 then @screen.sync_active = true
         when 1049
           @screen.save_cursor
           @screen.switch_to_alt_screen
@@ -791,6 +792,7 @@ module Echoes
         when 1006 then @screen.mouse_encoding = :default
         when 1004 then @screen.focus_reporting = false
         when 2004 then @screen.bracketed_paste_mode = false
+        when 2026 then @screen.sync_active = false
         when 1049
           @screen.switch_to_main_screen
           @screen.restore_cursor
