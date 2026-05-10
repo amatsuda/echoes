@@ -254,18 +254,20 @@ module Echoes
 
       # View menu
       view_menu = create_menu('View')
-      add_menu_item(view_menu, "Bigger", 'increaseFontSize:', '=')
-      add_menu_item(view_menu, "Bigger", 'increaseFontSize:', '+')
-      add_menu_item(view_menu, "Smaller", 'decreaseFontSize:', '-')
-      add_menu_item(view_menu, "Reset Font Size", 'resetFontSize:', '0')
+      add_menu_item(view_menu, "Bigger", 'increaseFontSize:', '=', bind: :increase_font_size)
+      add_menu_item(view_menu, "Bigger", 'increaseFontSize:', '+', bind: :increase_font_size_plus)
+      add_menu_item(view_menu, "Smaller", 'decreaseFontSize:', '-', bind: :decrease_font_size)
+      add_menu_item(view_menu, "Reset Font Size", 'resetFontSize:', '0', bind: :reset_font_size)
       add_separator(view_menu)
-      add_menu_item(view_menu, "Find", 'toggleFind:', 'f')
-      add_menu_item(view_menu, "Find Next", 'findNext:', 'g')
+      add_menu_item(view_menu, "Find", 'toggleFind:', 'f', bind: :toggle_find)
+      add_menu_item(view_menu, "Find Next", 'findNext:', 'g', bind: :find_next)
       add_menu_item(view_menu, "Find Previous", 'findPrevious:', 'g',
-                    modifiers: ObjC::NSEventModifierFlagCommand | ObjC::NSEventModifierFlagShift)
+                    modifiers: ObjC::NSEventModifierFlagCommand | ObjC::NSEventModifierFlagShift,
+                    bind: :find_previous)
       add_separator(view_menu)
       add_menu_item(view_menu, "Hide Mouse Pointer", 'togglePointer:', 'p',
-                    modifiers: ObjC::NSEventModifierFlagCommand | ObjC::NSEventModifierFlagShift)
+                    modifiers: ObjC::NSEventModifierFlagCommand | ObjC::NSEventModifierFlagShift,
+                    bind: :toggle_pointer)
       build_profiles_submenu(view_menu)
       add_submenu(main_menu, view_menu, 'View')
 
@@ -277,15 +279,18 @@ module Echoes
                     modifiers: ObjC::NSEventModifierFlagCommand | ObjC::NSEventModifierFlagControl)
       add_separator(window_menu)
       add_menu_item(window_menu, "Show Previous Tab", 'showPreviousTab:', '{',
-                    modifiers: ObjC::NSEventModifierFlagCommand | ObjC::NSEventModifierFlagShift)
+                    modifiers: ObjC::NSEventModifierFlagCommand | ObjC::NSEventModifierFlagShift,
+                    bind: :show_previous_tab)
       add_menu_item(window_menu, "Show Next Tab", 'showNextTab:', '}',
-                    modifiers: ObjC::NSEventModifierFlagCommand | ObjC::NSEventModifierFlagShift)
+                    modifiers: ObjC::NSEventModifierFlagCommand | ObjC::NSEventModifierFlagShift,
+                    bind: :show_next_tab)
       add_separator(window_menu)
-      add_menu_item(window_menu, "Select Next Pane", 'selectNextPane:', ']')
-      add_menu_item(window_menu, "Select Previous Pane", 'selectPreviousPane:', '[')
+      add_menu_item(window_menu, "Select Next Pane", 'selectNextPane:', ']', bind: :select_next_pane)
+      add_menu_item(window_menu, "Select Previous Pane", 'selectPreviousPane:', '[', bind: :select_previous_pane)
       add_separator(window_menu)
       add_menu_item(window_menu, "Toggle Copy Mode", 'toggleCopyMode:', 'c',
-                    modifiers: ObjC::NSEventModifierFlagCommand | ObjC::NSEventModifierFlagShift)
+                    modifiers: ObjC::NSEventModifierFlagCommand | ObjC::NSEventModifierFlagShift,
+                    bind: :toggle_copy_mode)
       add_separator(window_menu)
       # Register the menu as NSApplication's "windows menu"; AppKit
       # auto-populates it with one item per NSWindow (using the window's
@@ -295,18 +300,21 @@ module Echoes
 
       # Shell menu
       shell_menu = create_menu('Shell')
-      add_menu_item(shell_menu, "New Window", 'newWindow:', 'n')
-      add_menu_item(shell_menu, "New Tab", 'newTab:', 't')
-      add_menu_item(shell_menu, "Close Tab", 'closeTab:', 'w')
+      add_menu_item(shell_menu, "New Window", 'newWindow:', 'n', bind: :new_window)
+      add_menu_item(shell_menu, "New Tab", 'newTab:', 't', bind: :new_tab)
+      add_menu_item(shell_menu, "Close Tab", 'closeTab:', 'w', bind: :close_tab)
       add_separator(shell_menu)
       add_menu_item(shell_menu, "Edit File…", 'editFile:', 'e',
-                    modifiers: ObjC::NSEventModifierFlagCommand | ObjC::NSEventModifierFlagShift)
+                    modifiers: ObjC::NSEventModifierFlagCommand | ObjC::NSEventModifierFlagShift,
+                    bind: :edit_file)
       add_separator(shell_menu)
-      add_menu_item(shell_menu, "Split Right", 'splitRight:', 'd')
+      add_menu_item(shell_menu, "Split Right", 'splitRight:', 'd', bind: :split_right)
       add_menu_item(shell_menu, "Split Down", 'splitDown:', 'd',
-                    modifiers: ObjC::NSEventModifierFlagCommand | ObjC::NSEventModifierFlagShift)
+                    modifiers: ObjC::NSEventModifierFlagCommand | ObjC::NSEventModifierFlagShift,
+                    bind: :split_down)
       add_menu_item(shell_menu, "Close Pane", 'closePane:', 'w',
-                    modifiers: ObjC::NSEventModifierFlagCommand | ObjC::NSEventModifierFlagShift)
+                    modifiers: ObjC::NSEventModifierFlagCommand | ObjC::NSEventModifierFlagShift,
+                    bind: :close_pane)
       add_submenu(main_menu, shell_menu, 'Shell')
 
       ObjC::MSG_VOID_1.call(@app, ObjC.sel('setMainMenu:'), main_menu)
@@ -317,10 +325,20 @@ module Echoes
       ObjC::MSG_PTR_1.call(m, ObjC.sel('initWithTitle:'), ObjC.nsstring(title))
     end
 
-    private def add_menu_item(menu, title, action, key, modifiers: ObjC::NSEventModifierFlagCommand)
+    private def add_menu_item(menu, title, selector, key, modifiers: ObjC::NSEventModifierFlagCommand, bind: nil)
+      # When `bind:` is given, allow `~/.config/echoes/echoes.conf`
+      # to override the default shortcut via `keybind "…", :sym`.
+      # The override fully replaces both the key and the modifier
+      # bits — an override of `""` (or `nil`) disables the
+      # shortcut entirely (menu item stays, no keyboard binding).
+      if bind && (over = Echoes.config.keybind_for(bind))
+        key = over[:key].to_s
+        modifiers = over[:modifiers]
+      end
+
       item = ObjC::MSG_PTR.call(ObjC.cls('NSMenuItem'), ObjC.sel('alloc'))
       item = ObjC::MSG_PTR_3.call(item, ObjC.sel('initWithTitle:action:keyEquivalent:'),
-        ObjC.nsstring(title), action.empty? ? Fiddle::Pointer.new(0) : ObjC.sel(action), ObjC.nsstring(key))
+        ObjC.nsstring(title), selector.empty? ? Fiddle::Pointer.new(0) : ObjC.sel(selector), ObjC.nsstring(key))
       if modifiers != ObjC::NSEventModifierFlagCommand && !key.empty?
         ObjC::MSG_VOID_L.call(item, ObjC.sel('setKeyEquivalentModifierMask:'), modifiers)
       end

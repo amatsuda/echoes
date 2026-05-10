@@ -159,6 +159,52 @@ module Echoes
       base.merge(profiles)
     end
 
+    # Rebind a menu shortcut. The first arg is a shortcut string
+    # like "Cmd+Shift+S" (Cmd / Shift / Ctrl / Option modifiers,
+    # case-insensitive); pass an empty string to disable the
+    # shortcut entirely. The second is the action symbol — one
+    # of the symbols Echoes documents (:new_window, :split_right,
+    # :toggle_find, etc.).
+    #
+    #   keybind "Cmd+Shift+T", :new_tab
+    #   keybind "",            :toggle_pointer     # disable
+    def keybind(shortcut, action)
+      keybinds[action.to_sym] = parse_shortcut(shortcut.to_s)
+    end
+
+    def keybinds
+      @keybinds ||= {}
+    end
+
+    # Returns {key:, modifiers:} or nil if no override is set.
+    def keybind_for(action)
+      keybinds[action.to_sym]
+    end
+
+    # Matches the NSEvent modifier flag bits — kept in sync with
+    # `ObjC::NSEventModifierFlag*` in objc.rb. Defined here so
+    # Configuration can resolve shortcut strings without depending
+    # on the AppKit-loading objc.rb at config-load time.
+    SHORTCUT_MODIFIERS = {
+      'shift'   => 1 << 17,
+      'control' => 1 << 18,
+      'ctrl'    => 1 << 18,
+      'option'  => 1 << 19,
+      'opt'     => 1 << 19,
+      'alt'     => 1 << 19,
+      'cmd'     => 1 << 20,
+      'command' => 1 << 20,
+      'super'   => 1 << 20,
+    }.freeze
+
+    def parse_shortcut(str)
+      return {key: '', modifiers: 0} if str.nil? || str.empty?
+      parts = str.split('+').map(&:strip)
+      key = parts.pop.to_s.downcase
+      modifiers = parts.sum { |p| SHORTCUT_MODIFIERS[p.downcase] || 0 }
+      {key: key, modifiers: modifiers}
+    end
+
     # Pick / look up the active profile by name. With no arg, returns
     # whatever the user named via `default_profile "Foo"`, falling
     # back to the synthesized "Default" so legacy configs (just
