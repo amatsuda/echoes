@@ -43,7 +43,7 @@ class Echoes::ProfileTest < Test::Unit::TestCase
       background "#ffffff"
     end
     assert_kind_of Echoes::Profile, p
-    assert_equal({"Light" => p}, cfg.profiles)
+    assert_same p, cfg.profiles["Light"]
     assert_in_delta 0.0, p.foreground[0], 0.001
     assert_in_delta 1.0, p.background[0], 0.001
   end
@@ -56,11 +56,13 @@ class Echoes::ProfileTest < Test::Unit::TestCase
     assert_equal "B", cfg.default_profile.name
   end
 
-  test "default_profile falls back to the first declared profile when none picked" do
+  test "default_profile falls back to the synth when no name was set" do
     cfg = Echoes::Configuration.new
-    a = cfg.profile("A") { foreground "#aaaaaa" }
-    cfg.profile("B") { foreground "#bbbbbb" }
-    assert_equal a, cfg.default_profile
+    cfg.foreground "#abcdef"
+    cfg.profile("A") { foreground "#aaaaaa" }  # NOT picked as default
+    profile = cfg.default_profile
+    assert_equal "Default", profile.name
+    assert_in_delta 0xAB / 255.0, profile.foreground[0], 0.001
   end
 
   test "default_profile synthesizes a Default from flat config when no profiles exist" do
@@ -71,5 +73,30 @@ class Echoes::ProfileTest < Test::Unit::TestCase
     assert_equal "Default", profile.name
     assert_in_delta 0xAB / 255.0, profile.foreground[0], 0.001
     assert_in_delta 0x01 / 255.0, profile.background[0], 0.001
+  end
+
+  test "all_profiles always exposes Default plus every declared profile" do
+    cfg = Echoes::Configuration.new
+    cfg.profile("Mine") { foreground "#111111" }
+    keys = cfg.all_profiles.keys
+    assert_equal "Default", keys.first
+    assert_includes keys, "Mine"
+    assert_includes keys, "Solarized Dark"   # ships out of the box
+  end
+
+  test "config ships Solarized Dark and Solarized Light out of the box" do
+    cfg = Echoes::Configuration.new
+    assert_includes cfg.profiles.keys, "Solarized Dark"
+    assert_includes cfg.profiles.keys, "Solarized Light"
+  end
+
+  test "synthesized Default tracks flat-config attrs without memoization" do
+    cfg = Echoes::Configuration.new
+    cfg.foreground "#111111"
+    p1 = cfg.default_profile
+    cfg.foreground "#222222"
+    p2 = cfg.default_profile
+    refute_equal p1.foreground, p2.foreground,
+      "synth should reflect mutations to the flat config"
   end
 end

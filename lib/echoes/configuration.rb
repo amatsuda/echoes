@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require_relative 'profile'
+
 module Echoes
   class Configuration
     def initialize
@@ -21,6 +23,36 @@ module Echoes
       @pane_divider_color = [0.4, 0.4, 0.4]
       @active_pane_border_color = [0.3, 0.5, 0.8]
       @copy_mode_cursor_color = [0.8, 0.7, 0.2]
+      register_default_profiles
+    end
+
+    # Two opinionated-but-recognizable profiles ship with Echoes so
+    # the View → Profile submenu has alternatives the moment the
+    # user opens it, without forcing them to write any DSL. Users
+    # can declare more (or override these) in their config file —
+    # `profile "Solarized Dark" do …` redeclaring an existing name
+    # replaces the entry.
+    def register_default_profiles
+      profile "Solarized Dark" do
+        foreground "#93a1a1"
+        background "#002b36"
+        cursor_color "#93a1a1"
+        selection_color "#586e75"
+        color_palette %w[
+          #073642 #dc322f #859900 #b58900 #268bd2 #d33682 #2aa198 #eee8d5
+          #002b36 #cb4b16 #586e75 #657b83 #839496 #6c71c4 #93a1a1 #fdf6e3
+        ]
+      end
+      profile "Solarized Light" do
+        foreground "#586e75"
+        background "#fdf6e3"
+        cursor_color "#586e75"
+        selection_color "#93a1a1"
+        color_palette %w[
+          #073642 #dc322f #859900 #b58900 #268bd2 #d33682 #2aa198 #eee8d5
+          #002b36 #cb4b16 #586e75 #657b83 #839496 #6c71c4 #93a1a1 #fdf6e3
+        ]
+      end
     end
 
     def font_family(val = nil)
@@ -108,7 +140,6 @@ module Echoes
     #     background "#ffffff"
     #   end
     def profile(name, &block)
-      require_relative 'profile'
       p = Profile.new(name)
       p.instance_eval(&block) if block
       profiles[p.name] = p
@@ -119,31 +150,38 @@ module Echoes
       @profiles ||= {}
     end
 
+    # Profiles plus the synthesized "Default" — the menu / GUI uses
+    # this so the View → Profile submenu always has at least a
+    # discoverable "Default" entry even when the user hasn't
+    # declared any profiles.
+    def all_profiles
+      base = {'Default' => synthesized_profile}
+      base.merge(profiles)
+    end
+
     # Pick / look up the active profile by name. With no arg, returns
-    # the active Profile object (synthesizing one from the top-level
-    # flat color attrs if the user never declared any profiles, so
-    # legacy configs keep working).
+    # whatever the user named via `default_profile "Foo"`, falling
+    # back to the synthesized "Default" so legacy configs (just
+    # foreground/background/etc.) keep working unchanged.
     def default_profile(name = nil)
       if name
         @default_profile_name = name.to_s
       else
-        profiles[@default_profile_name] || profiles.values.first || synthesized_profile
+        profiles[@default_profile_name] || synthesized_profile
       end
     end
 
-    # Build an unnamed-but-named "Default" Profile from the flat
-    # config attrs so callers that ask for an active profile always
-    # get one back, even when the user's config has no `profile`
-    # declarations.
+    # Build a "Default" Profile from the flat config attrs every
+    # time it's asked for — never memoized, because the user's
+    # config might mutate the flat attrs after our first call.
     def synthesized_profile
-      require_relative 'profile'
-      @synthesized_profile ||= Profile.new('Default').tap do |p|
-        p.foreground(*[@foreground].flatten(1))
-        p.background(*[@background].flatten(1))
-        p.cursor_color(*[@cursor_color].flatten(1))
-        p.selection_color(*[@selection_color].flatten(1))
-        p.color_palette(@color_palette) if @color_palette
-      end
+      p = Profile.new('Default')
+      p.instance_variable_set(:@foreground,      @foreground)
+      p.instance_variable_set(:@background,      @background)
+      p.instance_variable_set(:@cursor_color,    @cursor_color)
+      p.instance_variable_set(:@selection_color, @selection_color)
+      p.instance_variable_set(:@color_palette,   @color_palette)
+      p
     end
 
     private

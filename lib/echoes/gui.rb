@@ -342,23 +342,22 @@ module Echoes
     # can wire the right one to each menu item.
     private def profile_selectors
       out = {}
-      Echoes.config.profiles.each_key.with_index do |pname, i|
+      Echoes.config.all_profiles.each_key.with_index do |pname, i|
         out[profile_selector_for(pname)] = ['v@:@', @profile_closures[pname]]
       end
       out
     end
 
     private def profile_selector_for(name)
-      i = Echoes.config.profiles.keys.index(name)
+      i = Echoes.config.all_profiles.keys.index(name)
       "applyProfile_#{i}:"
     end
 
-    # Add a "Profile" submenu to `view_menu` listing each declared
-    # profile. No-op when no profiles are configured (legacy
-    # configs work unchanged — the synthesized "Default" profile
-    # never lands in this menu).
+    # Add a "Profile" submenu to `view_menu` listing the synthesized
+    # "Default" plus every user-declared profile. Always rendered so
+    # the feature is discoverable even with an empty config.
     private def build_profiles_submenu(view_menu)
-      profiles = Echoes.config.profiles
+      profiles = Echoes.config.all_profiles
       return if profiles.empty?
       add_separator(view_menu)
       submenu = create_menu('Profile')
@@ -662,7 +661,7 @@ module Echoes
       # `applyProfile_<n>:` selector so AppKit can deliver the
       # right one without us having to dispatch by event payload.
       @profile_closures = {}
-      Echoes.config.profiles.each_key do |pname|
+      Echoes.config.all_profiles.each_key do |pname|
         @profile_closures[pname] = menu_action.call(-> { apply_profile(pname) })
       end
       @new_window_closure = menu_action.call(-> { open_new_window })
@@ -1867,7 +1866,7 @@ module Echoes
     # Per-pane gradient overlays (OSC 7772 bg-* commands) are left
     # alone — those are user-driven decoration, not theme.
     def apply_profile(name)
-      profile = Echoes.config.profiles[name.to_s]
+      profile = Echoes.config.all_profiles[name.to_s]
       return unless profile
       @active_profile = profile
 
