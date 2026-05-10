@@ -457,6 +457,15 @@ module Echoes
       when '52'
         dispatch_osc52(rest)
         return
+      when '9'
+        # OSC 9 (iTerm2): everything after `9;` is the message body.
+        # Use the pane title as the notification title; the host
+        # decides how to render it.
+        deliver_notification(nil, rest)
+        return
+      when '777'
+        dispatch_osc777(rest)
+        return
       when '133'
         dispatch_osc133(rest)
         return
@@ -659,6 +668,27 @@ module Echoes
         a = str[6, 2].to_i(16) / 255.0
         [r, g, b, a]
       end
+    end
+
+    # OSC 777 — VTE-style notifications:
+    #   \e]777;notify;<title>;<message>\a
+    # Some emitters omit the body, sending only a title.
+    def dispatch_osc777(rest)
+      parts = rest.split(';', 3)
+      return unless parts[0] == 'notify'
+      title   = parts[1] || ''
+      message = parts[2] || ''
+      deliver_notification(title.empty? ? nil : title, message)
+    end
+
+    # Hand off to whatever the host wired into `screen.notification_handler`.
+    # Title is nil when the emitter (OSC 9) didn't supply one — the
+    # host typically falls back to the pane title or "Echoes". A
+    # missing handler is a no-op so the parser never raises on
+    # non-GUI tests.
+    def deliver_notification(title, message)
+      return unless @screen.respond_to?(:notification_handler) && @screen.notification_handler
+      @screen.notification_handler.call(title, message)
     end
 
     def dispatch_osc133(rest)

@@ -2625,6 +2625,26 @@ module Echoes
       # the renderer grabs the right sub-rect (split layouts have
       # several panes per view).
       screen.capture_handler   = ->(path) { capture_pane_to_png(pane, path) }
+      screen.notification_handler = ->(title, message) { post_notification(pane, title, message) }
+    end
+
+    # Post a macOS notification for an in-pane OSC 9 / OSC 777
+    # request. Uses NSUserNotification (deprecated but still works
+    # on every supported macOS version, no permission prompt or
+    # bundle-id ceremony required). When the emitter didn't supply a
+    # title — OSC 9 omits it — fall back to the pane's title (set
+    # by OSC 0/2) or "Echoes".
+    def post_notification(pane, title, message)
+      effective_title = (title && !title.empty? && title) || pane&.title || 'Echoes'
+      notif = ObjC::MSG_PTR.call(ObjC.cls('NSUserNotification'), ObjC.sel('alloc'))
+      notif = ObjC::MSG_PTR.call(notif, ObjC.sel('init'))
+      return if notif.null?
+      ObjC::MSG_VOID_1.call(notif, ObjC.sel('setTitle:'),           ObjC.nsstring(effective_title.to_s))
+      ObjC::MSG_VOID_1.call(notif, ObjC.sel('setInformativeText:'), ObjC.nsstring(message.to_s))
+      center = ObjC::MSG_PTR.call(ObjC.cls('NSUserNotificationCenter'), ObjC.sel('defaultUserNotificationCenter'))
+      ObjC::MSG_VOID_1.call(center, ObjC.sel('deliverNotification:'), notif)
+    rescue StandardError => e
+      warn "echoes notification: #{e.class}: #{e.message}"
     end
 
     # OSC 7772 ;capture handler. Writes the given pane's pixel buffer

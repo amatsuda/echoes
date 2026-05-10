@@ -1360,6 +1360,50 @@ class Echoes::ParserTest < Test::Unit::TestCase
     end
   end
 
+  # --- OSC 9 / 777 (notifications) ---
+
+  test "OSC 9 invokes notification_handler with nil title and the rest as message" do
+    seen = []
+    @screen.notification_handler = ->(t, m) { seen << [t, m] }
+    @parser.feed("\e]9;Build complete\a")
+    assert_equal [[nil, "Build complete"]], seen
+  end
+
+  test "OSC 9 with empty body fires with empty message" do
+    seen = []
+    @screen.notification_handler = ->(t, m) { seen << [t, m] }
+    @parser.feed("\e]9;\a")
+    assert_equal [[nil, ""]], seen
+  end
+
+  test "OSC 777 ;notify splits title and message" do
+    seen = []
+    @screen.notification_handler = ->(t, m) { seen << [t, m] }
+    @parser.feed("\e]777;notify;Build complete;All tests passed\a")
+    assert_equal [["Build complete", "All tests passed"]], seen
+  end
+
+  test "OSC 777 ;notify with only a title still fires" do
+    seen = []
+    @screen.notification_handler = ->(t, m) { seen << [t, m] }
+    @parser.feed("\e]777;notify;Heads up\a")
+    assert_equal [["Heads up", ""]], seen
+  end
+
+  test "OSC 777 with an unknown subcommand is ignored" do
+    seen = []
+    @screen.notification_handler = ->(t, m) { seen << [t, m] }
+    @parser.feed("\e]777;something-else;a;b\a")
+    assert_empty seen
+  end
+
+  test "OSC 9 / 777 without a handler set is a no-op" do
+    assert_nothing_raised do
+      @parser.feed("\e]9;hello\a")
+      @parser.feed("\e]777;notify;t;m\a")
+    end
+  end
+
   # --- APC (Application Program Command, kitty graphics) ---
 
   test "APC + G prefix routes to KittyGraphics.handle_chunk" do
