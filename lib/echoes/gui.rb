@@ -32,13 +32,14 @@ module Echoes
       @command = command
       @tabs = []
       @active_tab = 0
+      @active_profile = Echoes.config.default_profile
       @colors = build_color_table
-      @default_fg = make_color(*Echoes.config.foreground)
-      @default_bg = make_color(*Echoes.config.background)
+      @default_fg = make_color(*@active_profile.foreground)
+      @default_bg = make_color(*@active_profile.background)
       @tab_bg = make_color(0.15, 0.15, 0.15)
       @tab_active_bg = make_color(0.3, 0.3, 0.3)
       @tab_fg = make_color(0.8, 0.8, 0.8)
-      @selection_color = make_color(*Echoes.config.selection_color)
+      @selection_color = make_color(*@active_profile.selection_color)
       @search_match_color = make_color(0.6, 0.5, 0.0)
       @search_current_color = make_color(0.8, 0.6, 0.0)
       @selection_anchor = nil
@@ -265,6 +266,7 @@ module Echoes
       add_separator(view_menu)
       add_menu_item(view_menu, "Hide Mouse Pointer", 'togglePointer:', 'p',
                     modifiers: ObjC::NSEventModifierFlagCommand | ObjC::NSEventModifierFlagShift)
+      build_profiles_submenu(view_menu)
       add_submenu(main_menu, view_menu, 'View')
 
       # Window menu
@@ -329,6 +331,41 @@ module Echoes
     private def add_separator(menu)
       sep = ObjC::MSG_PTR.call(ObjC.cls('NSMenuItem'), ObjC.sel('separatorItem'))
       ObjC::MSG_VOID_1.call(menu, ObjC.sel('addItem:'), sep)
+    end
+
+    # Generate `applyProfile_<i>:` selector entries — one per
+    # declared profile — for the view-class selector dict. The
+    # closures already exist in @profile_closures keyed by name;
+    # this just gives them stable selector strings AppKit can
+    # dispatch by index. `profile_selector_for` returns the matching
+    # selector string for a given profile name so the menu builder
+    # can wire the right one to each menu item.
+    private def profile_selectors
+      out = {}
+      Echoes.config.profiles.each_key.with_index do |pname, i|
+        out[profile_selector_for(pname)] = ['v@:@', @profile_closures[pname]]
+      end
+      out
+    end
+
+    private def profile_selector_for(name)
+      i = Echoes.config.profiles.keys.index(name)
+      "applyProfile_#{i}:"
+    end
+
+    # Add a "Profile" submenu to `view_menu` listing each declared
+    # profile. No-op when no profiles are configured (legacy
+    # configs work unchanged — the synthesized "Default" profile
+    # never lands in this menu).
+    private def build_profiles_submenu(view_menu)
+      profiles = Echoes.config.profiles
+      return if profiles.empty?
+      add_separator(view_menu)
+      submenu = create_menu('Profile')
+      profiles.each_key do |pname|
+        add_menu_item(submenu, pname, profile_selector_for(pname), '')
+      end
+      add_submenu(view_menu, submenu, 'Profile')
     end
 
     private def add_submenu(parent, submenu, title)
@@ -619,6 +656,15 @@ module Echoes
       }
 
       @show_about_closure = menu_action.call(-> { show_about_panel })
+
+      # One closure per declared profile, indexed by name. The
+      # menu builder later wires each into its own
+      # `applyProfile_<n>:` selector so AppKit can deliver the
+      # right one without us having to dispatch by event payload.
+      @profile_closures = {}
+      Echoes.config.profiles.each_key do |pname|
+        @profile_closures[pname] = menu_action.call(-> { apply_profile(pname) })
+      end
       @new_window_closure = menu_action.call(-> { open_new_window })
       @new_tab_closure = menu_action.call(-> {
         create_tab
@@ -784,6 +830,7 @@ module Echoes
         'windowDidBecomeKey:'   => ['v@:@', @focus_gained_closure],
         'windowDidResignKey:'   => ['v@:@', @focus_lost_closure],
         'showAbout:'             => ['v@:@', @show_about_closure],
+        **profile_selectors,
         'newWindow:'             => ['v@:@', @new_window_closure],
         'newTab:'               => ['v@:@', @new_tab_closure],
         'editFile:'             => ['v@:@', @edit_file_closure],
@@ -1125,7 +1172,7 @@ module Echoes
         if @window_focused
           # Active window: filled cursor (blinking if requested)
           if !blink || (is_active ? @cursor_blink_on : true)
-            cursor_color = is_active ? make_color(*Echoes.config.cursor_color) : make_color(0.5, 0.5, 0.5, 0.3)
+            cursor_color = is_active ? make_color(*@active_profile.cursor_color) : make_color(0.5, 0.5, 0.5, 0.3)
             ObjC::MSG_VOID.call(cursor_color, ObjC.sel('setFill'))
             case style
             when 3, 4 # underline
@@ -1153,7 +1200,7 @@ module Echoes
           end
         else
           # Inactive window: hollow square outline (no blinking)
-          ObjC::MSG_VOID.call(make_color(*Echoes.config.cursor_color), ObjC.sel('setFill'))
+          ObjC::MSG_VOID.call(make_color(*@active_profile.cursor_color), ObjC.sel('setFill'))
           ObjC::NSRectFill.call(cx, cy, @cell_width, 1.0)                       # top
           ObjC::NSRectFill.call(cx, cy + @cell_height - 1.0, @cell_width, 1.0)  # bottom
           ObjC::NSRectFill.call(cx, cy, 1.0, @cell_height)                      # left
@@ -1811,6 +1858,34 @@ module Echoes
 
       seq = focused ? "\e[I" : "\e[O"
       pane.write_input(seq)
+    end
+
+    # Switch the active profile (color theme) by name. Releases the
+    # current NSColor cache, rebuilds default fg/bg/selection and
+    # the 256-color palette from the new profile, and triggers a
+    # full repaint so every existing cell picks up the new colors.
+    # Per-pane gradient overlays (OSC 7772 bg-* commands) are left
+    # alone — those are user-driven decoration, not theme.
+    def apply_profile(name)
+      profile = Echoes.config.profiles[name.to_s]
+      return unless profile
+      @active_profile = profile
+
+      ObjC.release(@default_fg)        if @default_fg
+      ObjC.release(@default_bg)        if @default_bg
+      ObjC.release(@selection_color)   if @selection_color
+      @colors&.each_value { |c| ObjC.release(c) }
+
+      @colors = build_color_table
+      @default_fg      = make_color(*@active_profile.foreground)
+      @default_bg      = make_color(*@active_profile.background)
+      @selection_color = make_color(*@active_profile.selection_color)
+      @rgb_color_cache = {}  # truecolor cache stale after palette swap
+
+      @window_states.each do |ws|
+        ws[:tabs].each { |tab| tab.panes.each { |p| p.screen.mark_all_dirty } } if ws[:tabs]
+        ObjC::MSG_VOID_I.call(ws[:nsview], ObjC.sel('setNeedsDisplay:'), 1) if ws[:nsview]
+      end
     end
 
     def update_font(new_size, persist: true)
@@ -2782,8 +2857,10 @@ module Echoes
         [1.0,  1.0,  1.0],   # 15: bright white
       ]
 
-      # Override with user-configured palette
-      if (palette = Echoes.config.color_palette)
+      # Override with active-profile palette (falls through to the
+      # legacy top-level Echoes.config.color_palette when the user's
+      # config doesn't declare any profiles).
+      if (palette = @active_profile&.color_palette)
         palette.each_with_index do |rgb, i|
           ansi_rgb[i] = rgb if i < 16 && rgb
         end

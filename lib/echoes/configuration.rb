@@ -99,6 +99,53 @@ module Echoes
       end
     end
 
+    # Define a named profile (color theme). Anything not set inside
+    # the block falls back to the top-level config attrs, so a profile
+    # is a partial override.
+    #
+    #   profile "Light" do
+    #     foreground "#1a1a1a"
+    #     background "#ffffff"
+    #   end
+    def profile(name, &block)
+      require_relative 'profile'
+      p = Profile.new(name)
+      p.instance_eval(&block) if block
+      profiles[p.name] = p
+      p
+    end
+
+    def profiles
+      @profiles ||= {}
+    end
+
+    # Pick / look up the active profile by name. With no arg, returns
+    # the active Profile object (synthesizing one from the top-level
+    # flat color attrs if the user never declared any profiles, so
+    # legacy configs keep working).
+    def default_profile(name = nil)
+      if name
+        @default_profile_name = name.to_s
+      else
+        profiles[@default_profile_name] || profiles.values.first || synthesized_profile
+      end
+    end
+
+    # Build an unnamed-but-named "Default" Profile from the flat
+    # config attrs so callers that ask for an active profile always
+    # get one back, even when the user's config has no `profile`
+    # declarations.
+    def synthesized_profile
+      require_relative 'profile'
+      @synthesized_profile ||= Profile.new('Default').tap do |p|
+        p.foreground(*[@foreground].flatten(1))
+        p.background(*[@background].flatten(1))
+        p.cursor_color(*[@cursor_color].flatten(1))
+        p.selection_color(*[@selection_color].flatten(1))
+        p.color_palette(@color_palette) if @color_palette
+      end
+    end
+
     private
 
     def parse_color(args)
