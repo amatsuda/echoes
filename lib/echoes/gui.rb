@@ -2524,13 +2524,23 @@ module Echoes
     end
 
     # OSC 7772 ;capture handler. Writes the given pane's pixel buffer
-    # to `path` as a PNG. Uses NSView's
-    # bitmapImageRepForCachingDisplayInRect: / cacheDisplayInRect:
-    # toBitmapImageRep: pair (matches the view's backing scale, so on
-    # Retina displays the file is 2× the cell grid in pixels), then
-    # converts to PNG NSData and writes the bytes via Ruby. No reply
-    # on the wire — the caller polls the filesystem.
+    # to `path`, dispatching format from the file extension:
+    #   .png  → rasterized PNG via NSBitmapImageRep (matches the
+    #           view's backing scale; 2× pixel dims on Retina).
+    #   else  → vector PDF via [NSView dataWithPDFInsideRect:]
+    #           (default; typical terminal screenshots are 5-20×
+    #           smaller than the PNG equivalent because text and
+    #           rects survive as drawing ops, not raster pixels).
+    # No reply on the wire — the caller polls the filesystem.
     NS_BITMAP_IMAGE_FILE_TYPE_PNG = 4
+
+    # Pick raster vs vector by file extension. PDF is the default
+    # for anything other than `.png` — it's both the cheaper and
+    # more useful format for terminal content.
+    def self.capture_format_for(path)
+      File.extname(path).downcase == '.png' ? :png : :pdf
+    end
+
     def capture_pane_to_png(pane, path)
       return unless @view
       tab = current_tab
@@ -2544,29 +2554,47 @@ module Echoes
       pw = rect_info[:w] * @cell_width
       ph = rect_info[:h] * @cell_height
 
+      bytes =
+        case self.class.capture_format_for(path)
+        when :png then png_bytes_for_view_rect(px, py, pw, ph)
+        else           pdf_bytes_for_view_rect(px, py, pw, ph)
+        end
+      return unless bytes
+      File.binwrite(path, bytes)
+    rescue => e
+      warn "echoes capture: #{e.class}: #{e.message}"
+    end
+
+    def pdf_bytes_for_view_rect(px, py, pw, ph)
+      data = ObjC::MSG_PTR_RECT.call(
+        @view, ObjC.sel('dataWithPDFInsideRect:'),
+        px, py, pw, ph
+      )
+      return nil if data.nil? || data.null?
+      length    = ObjC::MSG_RET_L.call(data, ObjC.sel('length'))
+      bytes_ptr = ObjC::MSG_PTR.call(data, ObjC.sel('bytes'))
+      bytes_ptr.to_str(length)
+    end
+
+    def png_bytes_for_view_rect(px, py, pw, ph)
       rep = ObjC::MSG_PTR_RECT.call(
         @view, ObjC.sel('bitmapImageRepForCachingDisplayInRect:'),
         px, py, pw, ph
       )
-      return if rep.nil? || rep.null?
-
+      return nil if rep.nil? || rep.null?
       ObjC::MSG_VOID_RECT_1.call(
         @view, ObjC.sel('cacheDisplayInRect:toBitmapImageRep:'),
         px, py, pw, ph, rep
       )
-
       empty_dict = ObjC.nsdict({})
       data = ObjC::MSG_PTR_L_1.call(
         rep, ObjC.sel('representationUsingType:properties:'),
         NS_BITMAP_IMAGE_FILE_TYPE_PNG, empty_dict
       )
-      return if data.nil? || data.null?
-
+      return nil if data.nil? || data.null?
       length    = ObjC::MSG_RET_L.call(data, ObjC.sel('length'))
       bytes_ptr = ObjC::MSG_PTR.call(data, ObjC.sel('bytes'))
-      File.binwrite(path, bytes_ptr.to_str(length))
-    rescue => e
-      warn "echoes capture: #{e.class}: #{e.message}"
+      bytes_ptr.to_str(length)
     end
 
     def create_nsfont(size, family: nil)

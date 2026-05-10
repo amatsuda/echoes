@@ -62,11 +62,14 @@ module Echoes
       nil
     end
 
-    # Ask Echoes to write the current pane's pixel buffer to `path`
-    # as a PNG. The path should be absolute. There's no reply on the
-    # wire — the caller polls the filesystem. Other terminals ignore
-    # the OSC, so the call is a no-op outside Echoes (no file gets
-    # written).
+    # Ask Echoes to write the current pane to `path`. Format is
+    # picked from the file extension: `.png` produces a rasterized
+    # PNG; anything else (including `.pdf`) produces a vector PDF
+    # via [NSView dataWithPDFInsideRect:] — typically much smaller
+    # than the PNG equivalent for terminal content. The path should
+    # be absolute. There's no reply on the wire; the caller polls
+    # the filesystem. Other terminals ignore the OSC, so the call
+    # is a no-op outside Echoes (no file gets written).
     def capture(path, io: $stdout)
       io.write("#{OSC};capture;#{path}#{BEL}")
       io.flush if io.respond_to?(:flush)

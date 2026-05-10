@@ -217,3 +217,24 @@ class Echoes::GUISelectedTextTest < Test::Unit::TestCase
     assert_equal "hello", gui.send(:selected_text_from_buffer, 0, 0, 0, 4)
   end
 end
+
+class Echoes::GUICaptureFormatTest < Test::Unit::TestCase
+  test ".png paths capture as raster PNG" do
+    assert_equal :png, Echoes::GUI.capture_format_for('/tmp/snap.png')
+  end
+
+  test ".pdf paths capture as vector PDF" do
+    assert_equal :pdf, Echoes::GUI.capture_format_for('/tmp/snap.pdf')
+  end
+
+  test "extension dispatch is case-insensitive" do
+    assert_equal :png, Echoes::GUI.capture_format_for('/tmp/snap.PNG')
+    assert_equal :pdf, Echoes::GUI.capture_format_for('/tmp/snap.PDF')
+  end
+
+  test "unknown or missing extensions default to PDF" do
+    assert_equal :pdf, Echoes::GUI.capture_format_for('/tmp/snap')
+    assert_equal :pdf, Echoes::GUI.capture_format_for('/tmp/snap.jpg')
+    assert_equal :pdf, Echoes::GUI.capture_format_for('/tmp/snap.tiff')
+  end
+end
