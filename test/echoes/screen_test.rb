@@ -463,6 +463,70 @@ class Echoes::ScreenTest < Test::Unit::TestCase
     assert_equal(10, anchor.multicell[:cols])
   end
 
+  # --- put_kitty_image (Kitty graphics protocol → multicell anchor) ---
+
+  test "put_kitty_image places a multicell anchor sized to the image" do
+    @screen = Echoes::Screen.new(rows: 10, cols: 30)
+    @screen.cell_pixel_width  = 10.0
+    @screen.cell_pixel_height = 20.0
+    rgba = "\xFF".b * (40 * 60 * 4)  # 40×60 px image, junk RGBA
+    @screen.put_kitty_image(rgba: rgba, width: 40, height: 60)
+    anchor = @screen.grid[0][0]
+    # 40px / 10px = 4 cell cols; 60px / 20px = 3 cell rows.
+    assert_equal 4, anchor.multicell[:cols]
+    assert_equal 3, anchor.multicell[:rows]
+    assert_equal 40, anchor.multicell[:sixel][:width]
+    assert_equal 60, anchor.multicell[:sixel][:height]
+    assert_equal :cont, @screen.grid[0][1].multicell
+    assert_equal :cont, @screen.grid[2][3].multicell
+  end
+
+  test "put_kitty_image cells_w/cells_h override natural pixel sizing" do
+    @screen = Echoes::Screen.new(rows: 10, cols: 30)
+    @screen.cell_pixel_width  = 10.0
+    @screen.cell_pixel_height = 20.0
+    rgba = "\x00".b * (40 * 60 * 4)
+    @screen.put_kitty_image(rgba: rgba, width: 40, height: 60,
+                            cells_w: 6, cells_h: 2)
+    anchor = @screen.grid[0][0]
+    assert_equal 6, anchor.multicell[:cols]
+    assert_equal 2, anchor.multicell[:rows]
+  end
+
+  test "put_kitty_image advances cursor to the row after the image" do
+    @screen = Echoes::Screen.new(rows: 10, cols: 30)
+    @screen.cell_pixel_width  = 10.0
+    @screen.cell_pixel_height = 20.0
+    rgba = "\x00".b * (20 * 40 * 4)
+    @screen.put_kitty_image(rgba: rgba, width: 20, height: 40)
+    # Image is 2x2 cells starting at (0,0); cursor lands at (2, 0).
+    assert_equal 2, @screen.cursor.row
+    assert_equal 0, @screen.cursor.col
+  end
+
+  test "put_kitty_image with suppress_cursor leaves the cursor where it was" do
+    @screen = Echoes::Screen.new(rows: 10, cols: 30)
+    @screen.cell_pixel_width  = 10.0
+    @screen.cell_pixel_height = 20.0
+    @screen.cursor.row = 4
+    @screen.cursor.col = 5
+    rgba = "\x00".b * (20 * 40 * 4)
+    @screen.put_kitty_image(rgba: rgba, width: 20, height: 40,
+                            suppress_cursor: true)
+    assert_equal 4, @screen.cursor.row
+    assert_equal 5, @screen.cursor.col
+  end
+
+  test "put_kitty_image discards an image that's larger than the screen" do
+    @screen = Echoes::Screen.new(rows: 5, cols: 10)
+    @screen.cell_pixel_width  = 10.0
+    @screen.cell_pixel_height = 20.0
+    # 200px wide / 10px-per-cell = 20 cells > 10 col limit.
+    rgba = "\x00".b * (200 * 100 * 4)
+    @screen.put_kitty_image(rgba: rgba, width: 200, height: 100)
+    assert_nil @screen.grid[0][0].multicell
+  end
+
   # --- to_text ---
 
   test "to_text on empty screen" do

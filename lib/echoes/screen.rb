@@ -212,6 +212,77 @@ module Echoes
       end
     end
 
+    # Place a Kitty-graphics-protocol image as a multicell anchor.
+    # `rgba` is a Ruby string of width*height*4 bytes (RGBA8, top
+    # row first). `cells_w` / `cells_h` come from the wire's `c=` /
+    # `r=` options; when nil we size to the image's natural pixel
+    # dims divided by cell pixel size. `suppress_cursor` honors the
+    # `C=1` request to leave the cursor where it was.
+    #
+    # The renderer is format-agnostic: it just blits `multicell.sixel`'s
+    # RGBA into the reserved cell rect, so we reuse that storage key
+    # rather than introducing a parallel `:image` key.
+    def put_kitty_image(rgba:, width:, height:, cells_w: nil, cells_h: nil, suppress_cursor: false)
+      return if rgba.nil? || width <= 0 || height <= 0
+      return if @cell_pixel_width.to_f <= 0 || @cell_pixel_height.to_f <= 0
+
+      mc_cols = cells_w && cells_w > 0 ? cells_w : (width  / @cell_pixel_width ).ceil
+      mc_rows = cells_h && cells_h > 0 ? cells_h : (height / @cell_pixel_height).ceil
+      mc_cols = [mc_cols, 1].max
+      mc_rows = [mc_rows, 1].max
+      return if mc_cols > @cols || mc_rows > @rows
+
+      if @cursor.col + mc_cols > @cols
+        @cursor.col = 0
+        line_feed
+      end
+      while @cursor.row + mc_rows > @rows
+        scroll_up(1)
+        @cursor.row = [@cursor.row - 1, 0].max
+      end
+
+      anchor_row = @cursor.row
+      anchor_col = @cursor.col
+
+      mc_rows.times do |dr|
+        mc_cols.times do |dc|
+          erase_multicell_at(anchor_row + dr, anchor_col + dc)
+        end
+      end
+
+      anchor = @grid[anchor_row][anchor_col]
+      anchor.reset!
+      anchor.char = " "
+      anchor.width = 1
+      anchor.multicell = {
+        cols: mc_cols, rows: mc_rows, scale: 1,
+        frac_n: 0, frac_d: 0, valign: 0, halign: 0,
+        sixel: { width: width, height: height, rgba: rgba }
+      }
+
+      mc_rows.times do |dr|
+        mc_cols.times do |dc|
+          next if dr == 0 && dc == 0
+          cont = @grid[anchor_row + dr][anchor_col + dc]
+          cont.reset!
+          cont.multicell = :cont
+        end
+      end
+
+      unless suppress_cursor
+        # Sixel parity: cursor lands at column 0 of the row after
+        # the image. If that row is past the bottom, scroll.
+        @cursor.col = 0
+        @cursor.row += mc_rows
+        while @cursor.row >= @rows
+          scroll_up(1)
+          @cursor.row -= 1
+        end
+      end
+
+      mark_all_dirty
+    end
+
     def put_sixel(data, params)
       decoder = SixelDecoder.new(params).decode(data)
       return if decoder.width == 0 || decoder.height == 0

@@ -32,6 +32,7 @@ module Echoes
     CSI_PARAM_LIMIT = 32
     OSC_BUFFER_LIMIT = 4096
     DCS_BUFFER_LIMIT = 1024 * 1024  # 1 MB (sixel images can be large)
+    APC_BUFFER_LIMIT = 16 * 1024 * 1024  # 16 MB (kitty graphics can be big)
 
     def process_byte(byte)
       # UTF-8 continuation bytes
@@ -72,6 +73,8 @@ module Echoes
         csi_param(byte)
       when :osc_string
         osc_string(byte)
+      when :apc_string
+        apc_string(byte)
       when :dcs_entry
         dcs_entry(byte)
       when :dcs_param
@@ -137,6 +140,9 @@ module Echoes
       when 0x5D # ]
         @state = :osc_string
         @osc_string = "".b
+      when 0x5F # _ (APC — Application Program Command)
+        @state = :apc_string
+        @apc_string = "".b
       when 0x37 # 7
         @screen.save_cursor
         @state = :ground
@@ -289,6 +295,27 @@ module Echoes
       end
     end
 
+    # APC (Application Program Command) accumulator. Mirrors the
+    # OSC state shape: bytes accumulate until BEL or ST (`ESC \`),
+    # then `dispatch_apc` routes by namespace prefix. Currently
+    # only the kitty graphics protocol (`G…`) lives in here.
+    def apc_string(byte)
+      case byte
+      when 0x07 # BEL terminates APC
+        dispatch_apc
+        @state = :ground
+      when 0x1B # ESC — dispatch, enter escape state for ST (\)
+        dispatch_apc
+        @state = :escape
+      else
+        if @apc_string.bytesize < APC_BUFFER_LIMIT
+          @apc_string << byte
+        else
+          @state = :ground
+        end
+      end
+    end
+
     def dcs_entry(byte)
       case byte
       when 0x30..0x39
@@ -378,6 +405,23 @@ module Echoes
           @writer.call("\eP0+r#{hex_key}\e\\")
         end
       end
+    end
+
+    # APC body shape:  G<comma-separated-options>;<base64-payload>
+    # Anything not starting with `G` is some other private APC
+    # subprotocol we don't handle; ignore silently.
+    def dispatch_apc
+      body = @apc_string
+      return if body.empty?
+      return unless body.getbyte(0) == 0x47  # 'G'
+      meta_and_payload = body.byteslice(1..) || ''.b
+      meta, payload = meta_and_payload.split(';'.b, 2)
+      meta    = (meta || '').force_encoding('UTF-8')
+      payload = (payload || ''.b)
+      require_relative 'kitty_graphics'
+      @kitty_state ||= {chunks: {}, cache: {}}
+      KittyGraphics.handle_chunk(@kitty_state, meta, payload,
+                                 screen: @screen, writer: @writer)
     end
 
     def dispatch_osc
