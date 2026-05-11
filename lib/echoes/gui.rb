@@ -54,6 +54,8 @@ module Echoes
       @search_query = +""
       @search_matches = []
       @search_index = -1
+      @search_regex_mode = false
+      @search_case_insensitive = false
       @bell_flash = 0
       @marked_text = nil
       @current_event = nil
@@ -971,7 +973,11 @@ module Echoes
         ObjC::NSRectFill.call(0.0, bar_y, @cols * @cell_width, bar_h)
 
         match_info = @search_matches.empty? ? "" : " [#{@search_index + 1}/#{@search_matches.size}]"
-        label = "Find: #{@search_query}_#{match_info}"
+        mode_flags = []
+        mode_flags << 'regex' if @search_regex_mode
+        mode_flags << 'i'     if @search_case_insensitive
+        mode_tag = mode_flags.empty? ? '' : " (#{mode_flags.join(', ')})"
+        label = "Find#{mode_tag}: #{@search_query}_#{match_info}"
         ns_str = ObjC.nsstring(label)
         ns_attrs = ObjC.nsdict({
           ObjC::NSFontAttributeName => @font,
@@ -2079,6 +2085,8 @@ module Echoes
       @search_query = +""
       @search_matches = []
       @search_index = -1
+      @search_regex_mode = false
+      @search_case_insensitive = false
       @bell_flash = 0
       @marked_text = nil
       @current_event = nil
@@ -2408,6 +2416,8 @@ module Echoes
       key_code = ObjC::MSG_RET_L.call(event_ptr, ObjC.sel('keyCode'))
       flags = ObjC::MSG_RET_L.call(event_ptr, ObjC.sel('modifierFlags'))
 
+      cmd_held = (flags & ObjC::NSEventModifierFlagCommand) != 0
+
       case key_code
       when 53 # Escape
         @search_mode = false
@@ -2422,7 +2432,19 @@ module Echoes
         @search_query.chop!
         perform_search
       else
-        unless chars.empty? || chars[0].ord < 0x20
+        # Cmd+R toggles regex; Cmd+I toggles case-insensitive.
+        # Re-run the search live so the user sees results update
+        # without having to retype.
+        if cmd_held && chars.length == 1
+          case chars.downcase
+          when 'r'
+            @search_regex_mode = !@search_regex_mode
+            perform_search
+          when 'i'
+            @search_case_insensitive = !@search_case_insensitive
+            perform_search
+          end
+        elsif !chars.empty? && chars[0].ord >= 0x20
           @search_query << chars
           perform_search
         end
@@ -2439,29 +2461,70 @@ module Echoes
       screen = tab.screen
       scrollback = screen.scrollback
 
+      matcher = build_search_matcher(@search_query)
+      return unless matcher    # invalid regex → no matches, no crash
+
       # Search scrollback
       scrollback.each_with_index do |row, abs_row|
-        text = row.map(&:char).join
-        pos = 0
-        while (idx = text.index(@search_query, pos))
-          @search_matches << [abs_row, idx, @search_query.length]
-          pos = idx + 1
-        end
+        scan_row_for_matches(row, abs_row, matcher)
       end
 
       # Search grid
       screen.grid.each_with_index do |row, grid_row|
         abs_row = scrollback.size + grid_row
-        text = row.map(&:char).join
-        pos = 0
-        while (idx = text.index(@search_query, pos))
-          @search_matches << [abs_row, idx, @search_query.length]
-          pos = idx + 1
-        end
+        scan_row_for_matches(row, abs_row, matcher)
       end
 
       @search_index = @search_matches.size - 1 if @search_matches.any?
       scroll_to_match if @search_index >= 0
+    end
+
+    # Returns an object that responds to `find_in(text, pos)` →
+    # `[start_idx, length]` or nil. Encapsulates the two axes —
+    # regex vs substring × case-sensitive vs case-insensitive —
+    # so the row scan stays loop-shaped regardless of mode.
+    # Returns nil if `query` is an invalid regex while in regex mode.
+    def build_search_matcher(query)
+      if @search_regex_mode
+        flags = @search_case_insensitive ? Regexp::IGNORECASE : 0
+        re = Regexp.new(query, flags) rescue nil
+        return nil unless re
+        ->(text, pos) {
+          m = re.match(text, pos)
+          m && [m.begin(0), m.end(0) - m.begin(0)]
+        }
+      elsif @search_case_insensitive
+        needle = query.downcase
+        len = needle.length
+        ->(text, pos) {
+          idx = text.downcase.index(needle, pos)
+          idx && [idx, len]
+        }
+      else
+        len = query.length
+        ->(text, pos) {
+          idx = text.index(query, pos)
+          idx && [idx, len]
+        }
+      end
+    end
+
+    def scan_row_for_matches(row, abs_row, matcher)
+      text = row.map(&:char).join
+      pos = 0
+      while pos <= text.length && (hit = matcher.call(text, pos))
+        idx, len = hit
+        # Ruby's `Regexp#match(s, pos)` past `s.length` still
+        # returns the trailing zero-width match, so any
+        # zero-width regex (`\b`, `(?=…)`, `^`, `$`) would
+        # spin forever without these two guards: bail if the
+        # match doesn't start at or after `pos`, and forcibly
+        # advance by 1 cell when the match is zero-width.
+        break if idx < pos
+        step = [len, 1].max
+        @search_matches << [abs_row, idx, step]
+        pos = idx + step
+      end
     end
 
     def search_next

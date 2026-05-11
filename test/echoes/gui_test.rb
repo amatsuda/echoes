@@ -238,3 +238,69 @@ class Echoes::GUICaptureFormatTest < Test::Unit::TestCase
     assert_equal :pdf, Echoes::GUI.capture_format_for('/tmp/snap.tiff')
   end
 end
+
+class Echoes::GUISearchMatcherTest < Test::Unit::TestCase
+  def make_gui(regex: false, case_insensitive: false)
+    gui = Echoes::GUI.allocate
+    gui.instance_variable_set(:@search_regex_mode, regex)
+    gui.instance_variable_set(:@search_case_insensitive, case_insensitive)
+    gui
+  end
+
+  def find_all(gui, query, text)
+    matcher = gui.send(:build_search_matcher, query)
+    return nil if matcher.nil?
+    hits = []
+    pos = 0
+    while pos <= text.length && (hit = matcher.call(text, pos))
+      idx, len = hit
+      break if idx < pos     # regex returned a stale match — done
+      hits << [idx, len]
+      pos = idx + [len, 1].max
+    end
+    hits
+  end
+
+  test "substring mode case-sensitive finds every occurrence" do
+    gui = make_gui
+    assert_equal [[0, 3], [12, 3], [25, 3]],
+                 find_all(gui, 'foo', 'foo bar baz foo qux quux foo')
+  end
+
+  test "substring mode case-sensitive skips wrong-case matches" do
+    gui = make_gui
+    assert_equal [[0, 3]],
+                 find_all(gui, 'foo', 'foo Foo FOO')
+  end
+
+  test "case-insensitive substring mode matches all cases" do
+    gui = make_gui(case_insensitive: true)
+    assert_equal [[0, 3], [4, 3], [8, 3]],
+                 find_all(gui, 'foo', 'foo Foo FOO')
+  end
+
+  test "regex mode finds pattern matches" do
+    gui = make_gui(regex: true)
+    assert_equal [[0, 3], [4, 4], [9, 5]],
+                 find_all(gui, '\d+', '123 4567 89012 abc')
+  end
+
+  test "regex + case-insensitive folds the regex" do
+    gui = make_gui(regex: true, case_insensitive: true)
+    hits = find_all(gui, 'foo', 'foo Foo FOO')
+    assert_equal [[0, 3], [4, 3], [8, 3]], hits
+  end
+
+  test "regex mode returns nil for invalid pattern (no crash)" do
+    gui = make_gui(regex: true)
+    matcher = gui.send(:build_search_matcher, '[unclosed')
+    assert_nil matcher
+  end
+
+  test "regex mode with a zero-width match still advances" do
+    gui = make_gui(regex: true)
+    # `\b` is zero-width — the loop must not infinite-loop on it.
+    hits = find_all(gui, '\b', 'hello world')
+    assert hits.size <= 'hello world'.length + 1
+  end
+end
