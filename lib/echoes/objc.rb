@@ -158,6 +158,7 @@ module Echoes
     NSForegroundColorAttributeName = appkit_const('NSForegroundColorAttributeName')
     NSUnderlineStyleAttributeName      = appkit_const('NSUnderlineStyleAttributeName')
     NSStrikethroughStyleAttributeName  = appkit_const('NSStrikethroughStyleAttributeName')
+    NSLigatureAttributeName            = appkit_const('NSLigatureAttributeName')
     NSPasteboardTypeString         = appkit_const('NSPasteboardTypeString')
     NSPasteboardTypeFileURL        = appkit_const('NSPasteboardTypeFileURL')
 

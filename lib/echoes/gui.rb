@@ -1008,9 +1008,36 @@ module Echoes
               end
         next unless row
 
+        # Text-run accumulator. We batch consecutive cells with
+        # matching style into one drawAtPoint call so the font
+        # shaper sees adjacent characters and can apply ligatures
+        # (`=>`, `!=`, `<=`, etc.) on fonts that have them.
+        # Anything that can't extend the run (multicell, blank
+        # non-bg cell, style change) flushes it first.
+        run_chars   = +''
+        run_start_c = nil
+        run_attrs   = nil
+        run_font    = nil
+        run_sig     = nil
+        flush_run = lambda do
+          next if run_chars.empty?
+          ns_run = ObjC.nsstring(run_chars)
+          run_x  = px + run_start_c * @cell_width
+          run_dy = y + y_offset_for_font(run_font)
+          ObjC::MSG_VOID_PT_1.call(ns_run, ObjC.sel('drawAtPoint:withAttributes:'),
+                                   run_x, run_dy, run_attrs)
+          run_chars   = +''
+          run_start_c = nil
+          run_attrs   = nil
+          run_font    = nil
+          run_sig     = nil
+        end
+
         row.each_with_index do |cell, c|
-          next if cell.width == 0
-          next if cell.multicell == :cont
+          if cell.width == 0 || cell.multicell == :cont
+            flush_run.call
+            next
+          end
 
           fg_val = cell.fg
           bg_val = cell.bg
@@ -1053,6 +1080,7 @@ module Echoes
           end
 
           if cell.multicell.is_a?(Hash)
+            flush_run.call
             mc = cell.multicell
             x = px + c * @cell_width
             block_w = mc[:cols] * @cell_width
@@ -1142,7 +1170,10 @@ module Echoes
               ObjC::NSRectFill.call(x, y, cell_w, @cell_height)
             end
 
-            next if cell.char == " " && !has_bg && !selected && !is_match
+            if cell.char == " " && !has_bg && !selected && !is_match
+              flush_run.call
+              next
+            end
 
             base_font = cell.bold ? @bold_font : font_for_char(cell.char)
             if cell.italic
@@ -1153,22 +1184,30 @@ module Echoes
             elsif cell.faint
               fg_color = make_color_with_alpha(fg_color, 0.5)
             end
-            attrs = {
-              ObjC::NSFontAttributeName => base_font,
-              ObjC::NSForegroundColorAttributeName => fg_color,
-            }
-            if cell.underline
-              attrs[ObjC::NSUnderlineStyleAttributeName] = ObjC.nsnumber_int(1)
+
+            sig = [base_font.to_i, fg_color.to_i, cell.underline, cell.strikethrough]
+            if run_sig != sig
+              flush_run.call
+              run_sig     = sig
+              run_start_c = c
+              run_font    = base_font
+              attrs = {
+                ObjC::NSFontAttributeName            => base_font,
+                ObjC::NSForegroundColorAttributeName => fg_color,
+                # Ligature value `2` requests all discretionary
+                # ligatures (`=>`, `!=`, `<=`, `>=`, etc.) on
+                # fonts like Fira Code that ship them; default
+                # `0` only does fi/fl-style essential ones.
+                ObjC::NSLigatureAttributeName        => ObjC.nsnumber_int(2),
+              }
+              attrs[ObjC::NSUnderlineStyleAttributeName]     = ObjC.nsnumber_int(1) if cell.underline
+              attrs[ObjC::NSStrikethroughStyleAttributeName] = ObjC.nsnumber_int(1) if cell.strikethrough
+              run_attrs = ObjC.nsdict(attrs)
             end
-            if cell.strikethrough
-              attrs[ObjC::NSStrikethroughStyleAttributeName] = ObjC.nsnumber_int(1)
-            end
-            ns_attrs = ObjC.nsdict(attrs)
-            ns_char = cached_nsstring(cell.char)
-            dy = y + y_offset_for_font(base_font)
-            ObjC::MSG_VOID_PT_1.call(ns_char, ObjC.sel('drawAtPoint:withAttributes:'), x, dy, ns_attrs)
+            run_chars << cell.char
           end
         end
+        flush_run.call
       end
 
       # Draw cursor or copy mode cursor
