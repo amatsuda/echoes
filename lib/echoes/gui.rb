@@ -961,6 +961,7 @@ module Echoes
         ObjC::NSRectFill.call(0.0, gy_off, @cols * @cell_width, @rows * @cell_height)
       end
 
+
       # Draw search bar
       if @search_mode
         bar_h = @cell_height + 4.0
@@ -2651,15 +2652,53 @@ module Echoes
     # to "no banner alert". A proper fix is to ship Echoes with a
     # compiled native launcher so the .app's bundle context is
     # preserved across the exec into ruby; tracked as a follow-up.
+    # Post a macOS notification for an in-pane OSC 9 / OSC 777
+    # request. Prefers `terminal-notifier` when it's on $PATH —
+    # it ships as its own .app with its own bundle ID, so the
+    # notification registers under "terminal-notifier" in System
+    # Settings → Notifications, where the user can toggle banner
+    # permission and have it stick.
+    #
+    # Falls back to `osascript display notification` if
+    # terminal-notifier isn't installed. The osascript path goes
+    # through Script Editor's notification slot; whether a banner
+    # actually shows depends on Script Editor's "Alert style"
+    # setting in System Settings → Notifications (which is "None"
+    # by default).
+    #
+    # The real fix for Echoes-attributed notifications needs a
+    # compiled native launcher in Contents/MacOS/ so
+    # NSBundle.mainBundle survives the exec into ruby; until then
+    # `brew install terminal-notifier` is the recommended setup.
     def post_notification(pane, title, message)
       effective_title = (title && !title.empty? && title) || pane&.title || 'Echoes'
-      script = "display notification #{applescript_quote(message)} " \
-               "with title #{applescript_quote(effective_title)}"
-      pid = Process.spawn('osascript', '-e', script,
-                          in: '/dev/null', out: '/dev/null', err: '/dev/null')
+      if (tn = terminal_notifier_path)
+        pid = Process.spawn(tn, '-title', effective_title.to_s, '-message', message.to_s,
+                            in: '/dev/null', out: '/dev/null', err: '/dev/null')
+      else
+        script = "display notification #{applescript_quote(message)} " \
+                 "with title #{applescript_quote(effective_title)}"
+        pid = Process.spawn('osascript', '-e', script,
+                            in: '/dev/null', out: '/dev/null', err: '/dev/null')
+      end
       Process.detach(pid)
     rescue StandardError => e
       warn "echoes notification: #{e.class}: #{e.message}"
+    end
+
+    # Memoize the discovered path so we don't `which` on every call.
+    def terminal_notifier_path
+      return @terminal_notifier_path if defined?(@terminal_notifier_path)
+      candidates = %w[
+        /opt/homebrew/bin/terminal-notifier
+        /usr/local/bin/terminal-notifier
+      ]
+      path = candidates.find { |p| File.executable?(p) }
+      path ||= begin
+        which = `command -v terminal-notifier 2>/dev/null`.strip
+        which.empty? ? nil : which
+      end
+      @terminal_notifier_path = path
     end
 
     # AppleScript string literal: double-quoted, with `\` and `"`
