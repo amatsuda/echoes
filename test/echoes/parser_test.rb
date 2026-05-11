@@ -1104,9 +1104,10 @@ class Echoes::ParserTest < Test::Unit::TestCase
   # --- OSC/DCS buffer size limits ---
 
   test "OSC buffer overflow aborts sequence" do
-    # Send an OSC that exceeds the 4096 byte limit, then a new sequence
-    @parser.feed("\e]0;#{'A' * 5000}\x07")
-    # Title should not be set — sequence was aborted before terminator
+    # The OSC cap is 16MB so the parser can absorb iTerm2 inline
+    # image payloads. Send a title longer than that and confirm
+    # the parser bails before the terminator.
+    @parser.feed("\e]0;#{'A' * (16 * 1024 * 1024 + 1)}\x07")
     assert_nil(@screen.title)
   end
 

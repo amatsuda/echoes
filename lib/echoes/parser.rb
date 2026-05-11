@@ -30,7 +30,10 @@ module Echoes
 
     REPLACEMENT_CHAR = "\u{FFFD}"
     CSI_PARAM_LIMIT = 32
-    OSC_BUFFER_LIMIT = 4096
+    # 16 MB to accommodate OSC 1337 ;File= base64-encoded image
+    # payloads (iTerm2 inline images). Non-image OSCs are short
+    # and don't notice the higher cap.
+    OSC_BUFFER_LIMIT = 16 * 1024 * 1024
     DCS_BUFFER_LIMIT = 1024 * 1024  # 1 MB (sixel images can be large)
     APC_BUFFER_LIMIT = 16 * 1024 * 1024  # 16 MB (kitty graphics can be big)
 
