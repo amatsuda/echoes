@@ -472,6 +472,10 @@ module Echoes
       when '7772'
         dispatch_osc7772(rest)
         return
+      when '1337'
+        require_relative 'iterm2_images'
+        Iterm2Images.handle(rest, screen: @screen, writer: @writer)
+        return
       when '66'
         # fall through to multicell handling below
       else

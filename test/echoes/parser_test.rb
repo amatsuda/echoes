@@ -1404,6 +1404,24 @@ class Echoes::ParserTest < Test::Unit::TestCase
     end
   end
 
+  # --- OSC 1337 (iTerm2 inline images) ---
+
+  test "OSC 1337 routes to Iterm2Images.handle with the rest payload" do
+    require "echoes/iterm2_images"
+    seen = []
+    Echoes::Iterm2Images.singleton_class.send(:alias_method, :_orig_handle, :handle)
+    Echoes::Iterm2Images.define_singleton_method(:handle) do |rest, screen:, writer:|
+      seen << rest.dup
+    end
+    begin
+      @parser.feed("\e]1337;File=inline=1:AAAA\a")
+    ensure
+      Echoes::Iterm2Images.singleton_class.send(:alias_method, :handle, :_orig_handle)
+      Echoes::Iterm2Images.singleton_class.send(:remove_method, :_orig_handle)
+    end
+    assert_equal ["File=inline=1:AAAA"], seen
+  end
+
   # --- APC (Application Program Command, kitty graphics) ---
 
   test "APC + G prefix routes to KittyGraphics.handle_chunk" do
