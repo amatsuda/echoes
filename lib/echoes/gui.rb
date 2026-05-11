@@ -2629,22 +2629,46 @@ module Echoes
     end
 
     # Post a macOS notification for an in-pane OSC 9 / OSC 777
-    # request. Uses NSUserNotification (deprecated but still works
-    # on every supported macOS version, no permission prompt or
-    # bundle-id ceremony required). When the emitter didn't supply a
-    # title — OSC 9 omits it — fall back to the pane's title (set
-    # by OSC 0/2) or "Echoes".
+    # request. Uses `osascript -e 'display notification …'` — the
+    # one notification path that works without a properly-bundled
+    # native launcher.
+    #
+    # macOS gates notifications by the calling app's bundle. UN
+    # (UNUserNotificationCenter, the modern API) requires
+    # `bundleProxyForCurrentProcess` to resolve, which only happens
+    # when the process's `_NSGetExecutablePath` points inside a
+    # `.app` bundle. Echoes' launcher is a bash script that `exec`s
+    # into `ruby`, so the running process's main bundle is the
+    # ruby install — UN throws on startup. NSUserNotification has
+    # the same problem and is silently dropped on macOS 14+.
+    #
+    # osascript runs the AppleScript primitive `display notification`
+    # which posts through the Script Editor host bundle. **If banners
+    # don't appear, open System Settings → Notifications → Script
+    # Editor and enable "Banners" or "Alerts"** — the notification
+    # is being filed in Notification Center either way, but macOS's
+    # display gating is per-host-bundle and Script Editor defaults
+    # to "no banner alert". A proper fix is to ship Echoes with a
+    # compiled native launcher so the .app's bundle context is
+    # preserved across the exec into ruby; tracked as a follow-up.
     def post_notification(pane, title, message)
       effective_title = (title && !title.empty? && title) || pane&.title || 'Echoes'
-      notif = ObjC::MSG_PTR.call(ObjC.cls('NSUserNotification'), ObjC.sel('alloc'))
-      notif = ObjC::MSG_PTR.call(notif, ObjC.sel('init'))
-      return if notif.null?
-      ObjC::MSG_VOID_1.call(notif, ObjC.sel('setTitle:'),           ObjC.nsstring(effective_title.to_s))
-      ObjC::MSG_VOID_1.call(notif, ObjC.sel('setInformativeText:'), ObjC.nsstring(message.to_s))
-      center = ObjC::MSG_PTR.call(ObjC.cls('NSUserNotificationCenter'), ObjC.sel('defaultUserNotificationCenter'))
-      ObjC::MSG_VOID_1.call(center, ObjC.sel('deliverNotification:'), notif)
+      script = "display notification #{applescript_quote(message)} " \
+               "with title #{applescript_quote(effective_title)}"
+      pid = Process.spawn('osascript', '-e', script,
+                          in: '/dev/null', out: '/dev/null', err: '/dev/null')
+      Process.detach(pid)
     rescue StandardError => e
       warn "echoes notification: #{e.class}: #{e.message}"
+    end
+
+    # AppleScript string literal: double-quoted, with `\` and `"`
+    # escaped. Newlines pass through as `\n` which AppleScript
+    # interprets as the literal two characters, which is fine for
+    # the "build done" use case.
+    def applescript_quote(str)
+      escaped = str.to_s.gsub('\\', '\\\\\\\\').gsub('"', '\\"')
+      %("#{escaped}")
     end
 
     # OSC 7772 ;capture handler. Writes the given pane's pixel buffer
