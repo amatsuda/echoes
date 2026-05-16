@@ -315,6 +315,43 @@ class Echoes::KittyGraphicsTest < Test::Unit::TestCase
     assert_includes @writes.first, 'EBADF'
   end
 
+  test "a=d (no d= specifier) clears every placement, keeping the cache" do
+    @state[:cache]['7'] = {rgba: 'X', width: 1, height: 1}
+    @screen.placements << {image_id: '7', anchor_row: 0, anchor_col: 0,
+                            cell_cols: 1, cell_rows: 1, x_off: 0, y_off: 0,
+                            image: @state[:cache]['7']}
+    @screen.placements << {image_id: '8', anchor_row: 2, anchor_col: 2,
+                            cell_cols: 1, cell_rows: 1, x_off: 0, y_off: 0,
+                            image: {rgba: 'Y', width: 1, height: 1}}
+    Echoes::KittyGraphics.handle_chunk(@state, "a=d", '',
+                                       screen: @screen, writer: @writer)
+    assert_empty @screen.placements
+    assert_includes @state[:cache], '7', "lowercase / default d-selector keeps images"
+  end
+
+  test "a=d,d=A clears placements AND drops the bitmap cache" do
+    @state[:cache]['7'] = {rgba: 'X', width: 1, height: 1}
+    @screen.placements << {image_id: '7', anchor_row: 0, anchor_col: 0,
+                            cell_cols: 1, cell_rows: 1, x_off: 0, y_off: 0,
+                            image: @state[:cache]['7']}
+    Echoes::KittyGraphics.handle_chunk(@state, "a=d,d=A", '',
+                                       screen: @screen, writer: @writer)
+    assert_empty @screen.placements
+    assert_empty @state[:cache]
+  end
+
+  test "a=d,d=i selects placements by i= (image id)" do
+    @screen.placements << {image_id: '7', anchor_row: 0, anchor_col: 0,
+                            cell_cols: 1, cell_rows: 1, x_off: 0, y_off: 0,
+                            image: {rgba: 'X', width: 1, height: 1}}
+    @screen.placements << {image_id: '8', anchor_row: 1, anchor_col: 0,
+                            cell_cols: 1, cell_rows: 1, x_off: 0, y_off: 0,
+                            image: {rgba: 'Y', width: 1, height: 1}}
+    Echoes::KittyGraphics.handle_chunk(@state, "a=d,d=i,i=7", '',
+                                       screen: @screen, writer: @writer)
+    assert_equal ['8'], @screen.placements.map { |p| p[:image_id] }
+  end
+
   test "X= / Y= sub-cell offsets propagate to the screen for fine alignment" do
     @state[:cache]['7'] = {rgba: 'X', width: 1, height: 1}
     Echoes::KittyGraphics.handle_chunk(@state, "a=p,i=7,X=3,Y=11", '',
@@ -343,14 +380,15 @@ class Echoes::KittyGraphicsTest < Test::Unit::TestCase
   class StubScreen
     TINY_PNG_BYTES = "PNG-STUB".b
 
-    attr_reader :images
+    attr_reader :images, :placements
 
     def initialize
       @images = []
+      @placements = []
     end
 
     def respond_to?(meth, *)
-      meth == :put_kitty_image || super
+      meth == :put_kitty_image || meth == :placements || super
     end
 
     def put_kitty_image(rgba:, width:, height:, cells_w:, cells_h:,

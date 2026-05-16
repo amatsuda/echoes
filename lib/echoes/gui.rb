@@ -1222,6 +1222,16 @@ module Echoes
         flush_run.call
       end
 
+      # Re-blit kitty graphics placements ON TOP of the rendered
+      # cells. Anchors are stored as logical cell coords on the
+      # Screen; we convert to pixels here using current cell
+      # metrics so font-size and pane-resize changes pick up the
+      # right pixel position automatically — placements need no
+      # bookkeeping when @cell_width / @cell_height shift.
+      screen.placements.each do |pl|
+        blit_kitty_placement(pl, px, py, pane_rows)
+      end
+
       # Draw cursor or copy mode cursor
       if copy_mode&.active
         # Copy mode cursor (inverse block)
@@ -2306,6 +2316,48 @@ module Echoes
         pane.write_input(str)
       end
     rescue Errno::EIO, IOError
+    end
+
+    # Re-blit one Screen#placements entry. Pixel coords are
+    # recomputed every frame from anchor row/col × current cell
+    # metrics, so changing the font or resizing the pane needs no
+    # placement edit — the next draw picks up the new coords. The
+    # decoded CGImage is cached on the shared image hash so
+    # repeated frames (60Hz tick, dirty-rect refreshes) don't
+    # rebuild the bitmap context.
+    def blit_kitty_placement(pl, px, py, pane_rows)
+      img = pl[:image]
+      return unless img && img[:rgba] && img[:width].to_i > 0 && img[:height].to_i > 0
+      return if pl[:anchor_row] + pl[:cell_rows] <= 0   # fully scrolled off above
+      return if pl[:anchor_row] >= pane_rows             # below visible
+
+      unless img[:cg_image]
+        rgba_ptr = Fiddle::Pointer.to_ptr(img[:rgba])
+        cs = ObjC::CGColorSpaceCreateDeviceRGB.call
+        ctx = ObjC::CGBitmapContextCreate.call(
+          rgba_ptr, img[:width], img[:height], 8, img[:width] * 4, cs,
+          ObjC::KCGImageAlphaPremultipliedLast
+        )
+        img[:cg_image] = ObjC::CGBitmapContextCreateImage.call(ctx)
+        ObjC::CGContextRelease.call(ctx)
+        ObjC::CGColorSpaceRelease.call(cs)
+      end
+      cg_image = img[:cg_image]
+      return if cg_image.null?
+
+      x = px + pl[:anchor_col] * @cell_width  + pl[:x_off].to_i
+      y = py + pl[:anchor_row] * @cell_height + pl[:y_off].to_i
+      draw_w = pl[:cell_cols] * @cell_width
+      draw_h = pl[:cell_rows] * @cell_height
+
+      ns_ctx = ObjC::MSG_PTR.call(ObjC.cls('NSGraphicsContext'), ObjC.sel('currentContext'))
+      cg_ctx = ObjC::MSG_PTR.call(ns_ctx, ObjC.sel('CGContext'))
+
+      ObjC::CGContextSaveGState.call(cg_ctx)
+      ObjC::CGContextTranslateCTM.call(cg_ctx, x, y + draw_h)
+      ObjC::CGContextScaleCTM.call(cg_ctx, 1.0, -1.0)
+      ObjC::CGContextDrawImage.call(cg_ctx, 0.0, 0.0, draw_w, draw_h, cg_image)
+      ObjC::CGContextRestoreGState.call(cg_ctx)
     end
 
     def draw_sixel_image(sixel, x, y, draw_w, draw_h)

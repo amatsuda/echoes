@@ -279,11 +279,16 @@ module Echoes
       anchor.reset!
       anchor.char = " "
       anchor.width = 1
+      # Multicell anchor reserves the cell rect (cursor flow,
+      # `:cont` neighbors stay skipped by the renderer); the
+      # actual image is drawn by the GUI's placement re-blit
+      # pass off `screen.placements`, not via mc[:sixel]. Keeps
+      # the kitty path independent of the cell loop so deletes,
+      # scrolls, and font changes affect drawing through one
+      # code path.
       anchor.multicell = {
         cols: mc_cols, rows: mc_rows, scale: 1,
         frac_n: 0, frac_d: 0, valign: 0, halign: 0,
-        sixel: { width: width, height: height, rgba: rgba,
-                  px_x_offset: px_x_offset.to_i, px_y_offset: px_y_offset.to_i }
       }
 
       mc_rows.times do |dr|

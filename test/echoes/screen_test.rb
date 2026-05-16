@@ -465,7 +465,7 @@ class Echoes::ScreenTest < Test::Unit::TestCase
 
   # --- put_kitty_image (Kitty graphics protocol → multicell anchor) ---
 
-  test "put_kitty_image places a multicell anchor sized to the image" do
+  test "put_kitty_image reserves a multicell anchor and records a placement" do
     @screen = Echoes::Screen.new(rows: 10, cols: 30)
     @screen.cell_pixel_width  = 10.0
     @screen.cell_pixel_height = 20.0
@@ -475,10 +475,13 @@ class Echoes::ScreenTest < Test::Unit::TestCase
     # 40px / 10px = 4 cell cols; 60px / 20px = 3 cell rows.
     assert_equal 4, anchor.multicell[:cols]
     assert_equal 3, anchor.multicell[:rows]
-    assert_equal 40, anchor.multicell[:sixel][:width]
-    assert_equal 60, anchor.multicell[:sixel][:height]
     assert_equal :cont, @screen.grid[0][1].multicell
     assert_equal :cont, @screen.grid[2][3].multicell
+    # The bitmap itself now lives on screen.placements, not in
+    # the cell — the GUI's re-blit pass draws it on top of cells.
+    pl = @screen.placements.first
+    assert_equal 40, pl[:image][:width]
+    assert_equal 60, pl[:image][:height]
   end
 
   test "put_kitty_image cells_w/cells_h override natural pixel sizing" do

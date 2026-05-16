@@ -118,10 +118,33 @@ module Echoes
         end
 
       when 'd'
-        id = opts['i'] || opts['I']
-        if id && state[:cache].delete(id)
-          respond(writer, opts, ok: true)
+        # kitty spec: a=d deletes placements (lowercase d-selector)
+        # or placements + images (uppercase selector). Default
+        # selector is 'a' (all placements on the visible screen).
+        #
+        # Supported selectors (subset; expand as use cases arrive):
+        #   d=a / d=A  — all placements; uppercase also flushes
+        #                 the bitmap cache so the next a=p has to
+        #                 re-decode.
+        #   d=i / d=I  — placements matching i= / I=; uppercase
+        #                 also flushes that one cache entry.
+        #   (omitted)  — treated as d=a per spec.
+        sel    = (opts['d'] || 'a').to_s
+        target = opts['i'] || opts['I']
+        upper  = sel == sel.upcase && !sel.empty?
+        case sel.downcase
+        when 'a', ''
+          screen.placements.clear if screen.respond_to?(:placements)
+          state[:cache].clear if upper
+        when 'i', 'n'
+          if target && !target.empty?
+            if screen.respond_to?(:placements)
+              screen.placements.reject! { |pl| pl[:image_id] == target }
+            end
+            state[:cache].delete(target) if upper
+          end
         end
+        respond(writer, opts, ok: true)
 
       when 'q'
         # Capability probe. kitten icat (and others) send a tiny
