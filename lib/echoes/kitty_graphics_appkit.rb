@@ -38,7 +38,23 @@ module Echoes
       ContextRelease = Fiddle::Function.new(
         CG['CGContextRelease'], [P], V
       )
+      # CGDataProviderCreateWithData(info, data, size, releaseCallback)
+      DataProviderCreateWithData = Fiddle::Function.new(
+        CG['CGDataProviderCreateWithData'], [P, P, L, P], P
+      )
+      DataProviderRelease = Fiddle::Function.new(
+        CG['CGDataProviderRelease'], [P], V
+      )
+      # CGImageCreate(w, h, bpc, bpp, bpr, cs, bitmapInfo, provider, decode, interp, intent)
+      ImageCreate = Fiddle::Function.new(
+        CG['CGImageCreate'], [L, L, L, L, L, P, I, P, P, I, I], P
+      )
+      ImageRelease = Fiddle::Function.new(
+        CG['CGImageRelease'], [P], V
+      )
 
+      # kCGImageAlphaNone — source RGB has no alpha channel (24bpp)
+      ALPHA_NONE               = 0
       # kCGImageAlphaPremultipliedLast (RGBA byte order, alpha last)
       ALPHA_PREMULTIPLIED_LAST = 1
 
@@ -90,6 +106,67 @@ module Echoes
           end
         ensure
           ColorSpaceRelease.call(cs)
+        end
+      end
+
+      # Raw 24-bit RGB → RGBA8. The wire carries width*height*3
+      # bytes; we wrap them in a CGImage (kCGImageAlphaNone, 24bpp)
+      # and draw into a fresh kCGImageAlphaPremultipliedLast context.
+      # CG fills the alpha channel with 0xFF for us, so the renderer
+      # sees the same RGBA8 shape PNGs produce.
+      def from_rgb(bytes, width, height)
+        return nil if bytes.nil? || width <= 0 || height <= 0
+        return nil if bytes.bytesize != width * height * 3
+        draw_into_rgba(bytes, width, height,
+                       bits_per_pixel: 24,
+                       bytes_per_row:  width * 3,
+                       source_bitmap_info: ALPHA_NONE)
+      end
+
+      # Raw 32-bit RGBA → RGBA8 (premultiplied). The wire carries
+      # width*height*4 bytes; treated as alpha-premultiplied to
+      # match the PNG path's output exactly.
+      def from_rgba(bytes, width, height)
+        return nil if bytes.nil? || width <= 0 || height <= 0
+        return nil if bytes.bytesize != width * height * 4
+        draw_into_rgba(bytes, width, height,
+                       bits_per_pixel: 32,
+                       bytes_per_row:  width * 4,
+                       source_bitmap_info: ALPHA_PREMULTIPLIED_LAST)
+      end
+
+      # Wrap raw pixel bytes in a CGImage, draw into a fresh
+      # premultiplied-RGBA8 CGBitmapContext. We keep a Ruby
+      # reference to `bytes` so the GC can't collect it while CG
+      # still holds the data-provider pointer.
+      def draw_into_rgba(bytes, width, height,
+                          bits_per_pixel:, bytes_per_row:, source_bitmap_info:)
+        src_ptr  = Fiddle::Pointer[bytes]
+        provider = DataProviderCreateWithData.call(nil, src_ptr, bytes.bytesize, nil)
+        return nil if provider.null?
+        cs = ColorSpaceCreateDeviceRGB.call
+        begin
+          cgimage = ImageCreate.call(width, height, 8, bits_per_pixel, bytes_per_row,
+                                     cs, source_bitmap_info, provider, nil, 0, 0)
+          return nil if cgimage.null?
+          begin
+            buf = Fiddle::Pointer.malloc(width * height * 4, Fiddle::RUBY_FREE)
+            ctx = BitmapContextCreate.call(buf, width, height, 8, width * 4, cs,
+                                           ALPHA_PREMULTIPLIED_LAST)
+            return nil if ctx.null?
+            begin
+              ContextDrawImage.call(ctx, 0.0, 0.0, width.to_f, height.to_f, cgimage)
+              rgba = buf.to_str(width * height * 4)
+              {rgba: rgba, width: width, height: height}
+            ensure
+              ContextRelease.call(ctx)
+            end
+          ensure
+            ImageRelease.call(cgimage)
+          end
+        ensure
+          ColorSpaceRelease.call(cs)
+          DataProviderRelease.call(provider)
         end
       end
     end

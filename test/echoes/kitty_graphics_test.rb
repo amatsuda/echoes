@@ -159,6 +159,40 @@ class Echoes::KittyGraphicsTest < Test::Unit::TestCase
     assert_includes @writes.first, 'ENOENT'
   end
 
+  test "f=24 (raw RGB) routes to the raw decoder with s= / v= as dimensions" do
+    rgb = ("\xFF\x00\x00" * 6).b   # 3x2 red
+    captured = nil
+    replacement = ->(bytes, format, opts = {}) {
+      captured = [bytes, format, opts['s'], opts['v']]
+      {rgba: "RGBA" * 6, width: 3, height: 2}
+    }
+    Echoes::KittyGraphics.with_decoder(replacement) do
+      Echoes::KittyGraphics.handle_chunk(@state, "a=T,f=24,s=3,v=2,i=11",
+                                         b64(rgb),
+                                         screen: @screen, writer: @writer)
+    end
+    assert_equal [rgb, '24', '3', '2'], captured
+    assert_equal 1, @screen.images.size
+    assert_equal 3, @screen.images.first[:width]
+  end
+
+  test "f=32 (raw RGBA) routes to the raw decoder with s= / v= as dimensions" do
+    rgba = ("\xFF\x00\x00\xFF" * 4).b  # 2x2 red
+    captured = nil
+    replacement = ->(bytes, format, opts = {}) {
+      captured = [bytes, format, opts['s'], opts['v']]
+      {rgba: rgba, width: 2, height: 2}
+    }
+    Echoes::KittyGraphics.with_decoder(replacement) do
+      Echoes::KittyGraphics.handle_chunk(@state, "a=T,f=32,s=2,v=2,i=12",
+                                         b64(rgba),
+                                         screen: @screen, writer: @writer)
+    end
+    assert_equal [rgba, '32', '2', '2'], captured
+    assert_equal 1, @screen.images.size
+    assert_equal 2, @screen.images.first[:width]
+  end
+
   test "t=s (shared memory) is not supported and responds with ENOENT" do
     Echoes::KittyGraphics.handle_chunk(@state, "a=T,t=s,i=5,f=100",
                                         b64('/dev/shm/whatever'),
@@ -240,11 +274,22 @@ end
 module Echoes::KittyGraphics
   def self.stub_decoder(mapping)
     real = method(:decode_image)
-    define_singleton_method(:decode_image) do |bytes, _format|
+    define_singleton_method(:decode_image) do |bytes, _format, _opts = {}|
       mapping[bytes]
     end
     yield
   ensure
-    define_singleton_method(:decode_image) { |bytes, format| real.call(bytes, format) }
+    define_singleton_method(:decode_image) { |bytes, format, opts = {}| real.call(bytes, format, opts) }
+  end
+
+  # Like stub_decoder, but the replacement is a callable that
+  # receives (bytes, format, opts). Useful for asserting which
+  # branch the format dispatch took.
+  def self.with_decoder(replacement)
+    real = method(:decode_image)
+    define_singleton_method(:decode_image, &replacement)
+    yield
+  ensure
+    define_singleton_method(:decode_image) { |bytes, format, opts = {}| real.call(bytes, format, opts) }
   end
 end

@@ -88,7 +88,7 @@ module Echoes
         bytes = resolve_transmission(bytes, opts)
         return respond(writer, opts, error: 'ENOENT') unless bytes
 
-        image = decode_image(bytes, opts['f'] || DEFAULT_FORMAT)
+        image = decode_image(bytes, opts['f'] || DEFAULT_FORMAT, opts)
         return respond(writer, opts, error: 'EBADPNG') unless image
 
         cache_image(state, opts['i'] || opts['I'] || '', image)
@@ -150,20 +150,34 @@ module Echoes
       nil
     end
 
-    # Decode an image payload to {rgba:, width:, height:}. Only PNG
-    # (f=100) is wired up in this first cut; raw RGB / RGBA are
-    # follow-ups.
-    def decode_image(bytes, format)
-      return nil unless format.to_s == '100' || format.to_s.empty?
-      decode_png(bytes)
+    # Decode an image payload to {rgba:, width:, height:}.
+    #   f=100 / unset — PNG (and anything else NSBitmapImageRep
+    #                   eats: JPEG, GIF, TIFF, BMP)
+    #   f=24          — raw RGB packed, dims from s= / v=
+    #   f=32          — raw RGBA packed, dims from s= / v=
+    def decode_image(bytes, format, opts = {})
+      case format.to_s
+      when '100', ''
+        decode_png(bytes)
+      when '24'
+        load_appkit
+        AppKitPng.from_rgb(bytes, opts['s'].to_i, opts['v'].to_i)
+      when '32'
+        load_appkit
+        AppKitPng.from_rgba(bytes, opts['s'].to_i, opts['v'].to_i)
+      end
     end
 
     # PNG → {rgba:, width:, height:}. Implemented in
     # kitty_graphics_appkit.rb; loaded lazily so non-GUI tests
     # (which don't link AppKit) still pass.
     def decode_png(bytes)
-      require_relative 'kitty_graphics_appkit'
+      load_appkit
       AppKitPng.decode(bytes)
+    end
+
+    def load_appkit
+      require_relative 'kitty_graphics_appkit'
     end
 
     def cache_image(state, id, image)
