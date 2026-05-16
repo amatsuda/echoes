@@ -79,6 +79,15 @@ module Echoes
       when 'T', 't'
         bytes = decode_payload(b64)
         return respond(writer, opts, error: 'EBADPNG') unless bytes
+
+        # Transmission medium (`t=…`):
+        #   d (default) — payload is the image bytes (already decoded above)
+        #   f          — payload is an absolute file path; we read it
+        #   t          — same as `f`, then delete the file (temp file)
+        #   s          — shared memory; not supported
+        bytes = resolve_transmission(bytes, opts)
+        return respond(writer, opts, error: 'ENOENT') unless bytes
+
         image = decode_image(bytes, opts['f'] || DEFAULT_FORMAT)
         return respond(writer, opts, error: 'EBADPNG') unless image
 
@@ -116,6 +125,28 @@ module Echoes
       out = cleaned.unpack1('m0')
       out
     rescue ArgumentError
+      nil
+    end
+
+    # Read image bytes off the filesystem when the wire requested
+    # `t=f` or `t=t`. Returns nil on missing / unreadable file or
+    # any read error. For `t=t` the file is unlinked after a
+    # successful read; the kitty client uses this when sending a
+    # one-shot tempfile it owns.
+    def resolve_transmission(decoded_payload, opts)
+      case opts['t'].to_s
+      when '', 'd'
+        decoded_payload
+      when 'f', 't'
+        path = decoded_payload.dup.force_encoding('UTF-8')
+        return nil if path.empty? || !File.file?(path) || !File.readable?(path)
+        data = File.binread(path)
+        File.delete(path) if opts['t'] == 't'
+        data
+      else
+        nil  # 's' / anything else — not supported
+      end
+    rescue StandardError
       nil
     end
 

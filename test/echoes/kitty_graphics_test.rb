@@ -118,6 +118,55 @@ class Echoes::KittyGraphicsTest < Test::Unit::TestCase
     assert_includes @state[:cache], '3'
   end
 
+  test "t=f reads the file at the (base64-encoded) path and displays it" do
+    require 'tmpdir'
+    Dir.mktmpdir do |dir|
+      png_path = File.join(dir, 'snap.png')
+      File.binwrite(png_path, "PNGBYTES-FROM-FILE")
+      Echoes::KittyGraphics.stub_decoder("PNGBYTES-FROM-FILE" => {rgba: 'X', width: 7, height: 5}) do
+        Echoes::KittyGraphics.handle_chunk(@state, "a=T,t=f,i=1,f=100",
+                                            b64(png_path),
+                                            screen: @screen, writer: @writer)
+      end
+      assert_equal 1, @screen.images.size
+      assert_equal 7, @screen.images.first[:width]
+      assert File.exist?(png_path), "t=f should leave the file in place"
+    end
+  end
+
+  test "t=t reads the file then deletes it" do
+    require 'tmpdir'
+    Dir.mktmpdir do |dir|
+      png_path = File.join(dir, 'tmp.png')
+      File.binwrite(png_path, "TMP-PNG")
+      Echoes::KittyGraphics.stub_decoder("TMP-PNG" => {rgba: 'Y', width: 2, height: 2}) do
+        Echoes::KittyGraphics.handle_chunk(@state, "a=T,t=t,i=2,f=100",
+                                            b64(png_path),
+                                            screen: @screen, writer: @writer)
+      end
+      assert_equal 1, @screen.images.size
+      refute File.exist?(png_path), "t=t should unlink the file after reading"
+    end
+  end
+
+  test "t=f with a missing path responds with ENOENT" do
+    # resolve_transmission returns nil → decode_image never runs, so
+    # we don't need a stub here.
+    Echoes::KittyGraphics.handle_chunk(@state, "a=T,t=f,i=4,f=100",
+                                        b64('/nonexistent/path/to/image.png'),
+                                        screen: @screen, writer: @writer)
+    assert_empty @screen.images
+    assert_includes @writes.first, 'ENOENT'
+  end
+
+  test "t=s (shared memory) is not supported and responds with ENOENT" do
+    Echoes::KittyGraphics.handle_chunk(@state, "a=T,t=s,i=5,f=100",
+                                        b64('/dev/shm/whatever'),
+                                        screen: @screen, writer: @writer)
+    assert_empty @screen.images
+    assert_includes @writes.first, 'ENOENT'
+  end
+
   test "a=p displays a cached image without re-decoding" do
     @state[:cache]['5'] = {rgba: 'PIX', width: 4, height: 4}
     Echoes::KittyGraphics.handle_chunk(@state, "a=p,i=5", '',
