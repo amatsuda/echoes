@@ -223,7 +223,9 @@ module Echoes
     # The renderer is format-agnostic: it just blits `multicell.sixel`'s
     # RGBA into the reserved cell rect, so we reuse that storage key
     # rather than introducing a parallel `:image` key.
-    def put_kitty_image(rgba:, width:, height:, cells_w: nil, cells_h: nil, suppress_cursor: false)
+    def put_kitty_image(rgba:, width:, height:, cells_w: nil, cells_h: nil,
+                         px_x_offset: 0, px_y_offset: 0,
+                         suppress_cursor: false)
       return if rgba.nil? || width <= 0 || height <= 0
       return if @cell_pixel_width.to_f <= 0 || @cell_pixel_height.to_f <= 0
 
@@ -271,7 +273,8 @@ module Echoes
       anchor.multicell = {
         cols: mc_cols, rows: mc_rows, scale: 1,
         frac_n: 0, frac_d: 0, valign: 0, halign: 0,
-        sixel: { width: width, height: height, rgba: rgba }
+        sixel: { width: width, height: height, rgba: rgba,
+                  px_x_offset: px_x_offset.to_i, px_y_offset: px_y_offset.to_i }
       }
 
       mc_rows.times do |dr|

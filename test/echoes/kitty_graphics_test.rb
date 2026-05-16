@@ -315,6 +315,22 @@ class Echoes::KittyGraphicsTest < Test::Unit::TestCase
     assert_includes @writes.first, 'EBADF'
   end
 
+  test "X= / Y= sub-cell offsets propagate to the screen for fine alignment" do
+    @state[:cache]['7'] = {rgba: 'X', width: 1, height: 1}
+    Echoes::KittyGraphics.handle_chunk(@state, "a=p,i=7,X=3,Y=11", '',
+                                       screen: @screen, writer: @writer)
+    assert_equal 3,  @screen.images[0][:px_x_offset]
+    assert_equal 11, @screen.images[0][:px_y_offset]
+  end
+
+  test "missing X= / Y= default to zero" do
+    @state[:cache]['8'] = {rgba: 'X', width: 1, height: 1}
+    Echoes::KittyGraphics.handle_chunk(@state, "a=p,i=8", '',
+                                       screen: @screen, writer: @writer)
+    assert_equal 0, @screen.images[0][:px_x_offset]
+    assert_equal 0, @screen.images[0][:px_y_offset]
+  end
+
   test "C=1 in display options propagates as suppress_cursor" do
     @state[:cache]['1'] = {rgba: 'X', width: 1, height: 1}
     Echoes::KittyGraphics.handle_chunk(@state, "a=p,i=1,C=1", '',
@@ -337,9 +353,11 @@ class Echoes::KittyGraphicsTest < Test::Unit::TestCase
       meth == :put_kitty_image || super
     end
 
-    def put_kitty_image(rgba:, width:, height:, cells_w:, cells_h:, suppress_cursor:)
+    def put_kitty_image(rgba:, width:, height:, cells_w:, cells_h:,
+                         px_x_offset: 0, px_y_offset: 0, suppress_cursor:)
       @images << {rgba: rgba, width: width, height: height,
                    cells_w: cells_w, cells_h: cells_h,
+                   px_x_offset: px_x_offset, px_y_offset: px_y_offset,
                    suppress_cursor: suppress_cursor}
     end
   end

@@ -254,6 +254,12 @@ module Echoes
         height:           image[:height],
         cells_w:          (opts['c'] && !opts['c'].empty?) ? opts['c'].to_i : nil,
         cells_h:          (opts['r'] && !opts['r'].empty?) ? opts['r'].to_i : nil,
+        # Sub-cell pixel offsets for fine alignment. The kitty spec
+        # caps these at one cell minus one pixel; we let them
+        # through as-is — the renderer clips at the cell rect, so
+        # anything larger just gets cropped.
+        px_x_offset:      opts['X'].to_i,
+        px_y_offset:      opts['Y'].to_i,
         suppress_cursor:  opts['C'] == '1',
       )
     end

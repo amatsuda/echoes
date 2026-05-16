@@ -2333,9 +2333,15 @@ module Echoes
       ns_ctx = ObjC::MSG_PTR.call(ObjC.cls('NSGraphicsContext'), ObjC.sel('currentContext'))
       cg_ctx = ObjC::MSG_PTR.call(ns_ctx, ObjC.sel('CGContext'))
 
+      # Sub-cell pixel offsets (kitty X= / Y=). Both default to 0
+      # so legacy callers pay nothing; non-zero values shift the
+      # image within its anchor cell for fine alignment.
+      ox = sixel[:px_x_offset].to_i
+      oy = sixel[:px_y_offset].to_i
+
       # Draw with flipping (view is flipped, but CGContext draws bottom-up)
       ObjC::CGContextSaveGState.call(cg_ctx)
-      ObjC::CGContextTranslateCTM.call(cg_ctx, x, y + draw_h)
+      ObjC::CGContextTranslateCTM.call(cg_ctx, x + ox, y + oy + draw_h)
       ObjC::CGContextScaleCTM.call(cg_ctx, 1.0, -1.0)
       ObjC::CGContextDrawImage.call(cg_ctx, 0.0, 0.0, draw_w, draw_h, cg_image)
       ObjC::CGContextRestoreGState.call(cg_ctx)
