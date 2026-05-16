@@ -553,6 +553,72 @@ class Echoes::ScreenTest < Test::Unit::TestCase
                  "without C=1, the auto-scroll-to-fit should have dragged 'A' off-screen"
   end
 
+  test "put_kitty_image records a placement entry" do
+    @screen = Echoes::Screen.new(rows: 10, cols: 30)
+    @screen.cell_pixel_width  = 10.0
+    @screen.cell_pixel_height = 20.0
+    @screen.cursor.row = 2
+    @screen.cursor.col = 4
+    rgba = "\x00".b * (30 * 60 * 4)  # 3 × 3 cells
+    @screen.put_kitty_image(rgba: rgba, width: 30, height: 60,
+                            image_id: '42', px_x_offset: 5, px_y_offset: 7,
+                            suppress_cursor: true)
+    assert_equal 1, @screen.placements.size
+    p = @screen.placements.first
+    assert_equal '42', p[:image_id]
+    assert_equal 2,    p[:anchor_row]
+    assert_equal 4,    p[:anchor_col]
+    assert_equal 3,    p[:cell_cols]
+    assert_equal 3,    p[:cell_rows]
+    assert_equal 5,    p[:x_off]
+    assert_equal 7,    p[:y_off]
+    assert_equal rgba, p[:image][:rgba]
+    assert_equal 30,   p[:image][:width]
+    assert_equal 60,   p[:image][:height]
+  end
+
+  test "scroll_up shifts placement anchor_row and drops fully-offscreen entries" do
+    @screen = Echoes::Screen.new(rows: 10, cols: 30)
+    @screen.cell_pixel_width  = 10.0
+    @screen.cell_pixel_height = 20.0
+    @screen.cursor.row = 1
+    @screen.cursor.col = 0
+    rgba = "\x00".b * (20 * 40 * 4)  # 2 × 2 cells
+    @screen.put_kitty_image(rgba: rgba, width: 20, height: 40,
+                            image_id: 'A', suppress_cursor: true)
+    assert_equal 1, @screen.placements.first[:anchor_row]
+    @screen.scroll_up(1)
+    assert_equal 0, @screen.placements.first[:anchor_row]
+    # Two more rows of scroll → anchor at -2, cell_rows=2, so it
+    # fully exits the visible area and should be dropped.
+    @screen.scroll_up(2)
+    assert_empty @screen.placements
+  end
+
+  test "erase_in_display(2) clears the placement list" do
+    @screen = Echoes::Screen.new(rows: 10, cols: 30)
+    @screen.cell_pixel_width  = 10.0
+    @screen.cell_pixel_height = 20.0
+    rgba = "\x00".b * (20 * 40 * 4)
+    @screen.put_kitty_image(rgba: rgba, width: 20, height: 40,
+                            image_id: 'A', suppress_cursor: true)
+    assert_equal 1, @screen.placements.size
+    @screen.erase_in_display(2)
+    assert_empty @screen.placements
+  end
+
+  test "reset clears the placement list" do
+    @screen = Echoes::Screen.new(rows: 10, cols: 30)
+    @screen.cell_pixel_width  = 10.0
+    @screen.cell_pixel_height = 20.0
+    rgba = "\x00".b * (20 * 40 * 4)
+    @screen.put_kitty_image(rgba: rgba, width: 20, height: 40,
+                            image_id: 'A', suppress_cursor: true)
+    refute_empty @screen.placements
+    @screen.reset
+    assert_empty @screen.placements
+  end
+
   test "put_kitty_image discards an image that's larger than the screen" do
     @screen = Echoes::Screen.new(rows: 5, cols: 10)
     @screen.cell_pixel_width  = 10.0

@@ -354,11 +354,13 @@ class Echoes::KittyGraphicsTest < Test::Unit::TestCase
     end
 
     def put_kitty_image(rgba:, width:, height:, cells_w:, cells_h:,
-                         px_x_offset: 0, px_y_offset: 0, suppress_cursor:)
+                         px_x_offset: 0, px_y_offset: 0,
+                         suppress_cursor:, image_id: nil)
       @images << {rgba: rgba, width: width, height: height,
                    cells_w: cells_w, cells_h: cells_h,
                    px_x_offset: px_x_offset, px_y_offset: px_y_offset,
-                   suppress_cursor: suppress_cursor}
+                   suppress_cursor: suppress_cursor,
+                   image_id: image_id}
     end
   end
 end

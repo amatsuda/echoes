@@ -248,6 +248,8 @@ module Echoes
 
     def display_image(screen, image, opts)
       return unless screen.respond_to?(:put_kitty_image)
+      raw_id = opts['i'].to_s
+      raw_id = opts['I'].to_s if raw_id.empty?
       screen.put_kitty_image(
         rgba:             image[:rgba],
         width:            image[:width],
@@ -261,6 +263,7 @@ module Echoes
         px_x_offset:      opts['X'].to_i,
         px_y_offset:      opts['Y'].to_i,
         suppress_cursor:  opts['C'] == '1',
+        image_id:         raw_id.empty? ? nil : raw_id,
       )
     end
 

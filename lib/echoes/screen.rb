@@ -8,6 +8,14 @@ module Echoes
                 :command_marks
     attr_accessor :cell_pixel_width, :cell_pixel_height, :title, :current_directory,
                   :pending_wrap, :background, :bg_fills
+    # Tracks what kitty-graphics images are currently visible on
+    # this pane's grid. Each entry: {image_id:, anchor_row:,
+    # anchor_col:, cell_cols:, cell_rows:, x_off:, y_off:, image:}.
+    # image: is the {rgba:, width:, height:} hash put_kitty_image
+    # received (held by reference, not a deep copy — the parser's
+    # bitmap cache and the placement share the same object so a
+    # later a=d ;d=I … can delete by image id without re-decoding).
+    attr_reader :placements
 
     def self.scrollback_limit
       Echoes.config.scrollback_limit
@@ -55,6 +63,7 @@ module Echoes
       @pending_wrap = false
       @last_char = nil
       @title_stack = []
+      @placements = []
       @dirty_rows = Set.new((0...rows).to_a)
       @bg_fills = []  # OSC 7772 ;bg-fill regions; each: {rect:[r1,c1,r2,c2], color:[r,g,b,a]}
       # OSC 133 prompt-boundary markers: each entry is a Hash with
@@ -225,7 +234,7 @@ module Echoes
     # rather than introducing a parallel `:image` key.
     def put_kitty_image(rgba:, width:, height:, cells_w: nil, cells_h: nil,
                          px_x_offset: 0, px_y_offset: 0,
-                         suppress_cursor: false)
+                         suppress_cursor: false, image_id: nil)
       return if rgba.nil? || width <= 0 || height <= 0
       return if @cell_pixel_width.to_f <= 0 || @cell_pixel_height.to_f <= 0
 
@@ -285,6 +294,22 @@ module Echoes
           cont.multicell = :cont
         end
       end
+
+      # Record the placement BEFORE any post-place scroll fires —
+      # if the cursor advance below pushes us past the bottom and
+      # triggers scroll_up, that path needs the placement already
+      # in @placements so its anchor_row gets decremented along
+      # with the rest of the content.
+      @placements << {
+        image_id:   image_id,
+        anchor_row: anchor_row,
+        anchor_col: anchor_col,
+        cell_cols:  mc_cols,
+        cell_rows:  mc_rows,
+        x_off:      px_x_offset.to_i,
+        y_off:      px_y_offset.to_i,
+        image:      {rgba: rgba, width: width, height: height},
+      }
 
       unless suppress_cursor
         # Sixel parity: cursor lands at column 0 of the row after
@@ -470,6 +495,7 @@ module Echoes
         (0...@cursor.row).each { |r| clear_row(r); @line_wrapped[r] = false; mark_dirty(r) }
       when 2
         (0...@rows).each { |r| clear_row(r); @line_wrapped[r] = false }
+        @placements.clear
         mark_all_dirty
       when 3
         @scrollback.clear
@@ -563,7 +589,18 @@ module Echoes
         @grid.insert(@scroll_bottom, Array.new(@cols) { Cell.new })
         @line_wrapped.insert(@scroll_bottom, false)
       end
+      shift_placements(-n)
       (@scroll_top..@scroll_bottom).each { |r| mark_dirty(r) }
+    end
+
+    # Move every placement anchor by `delta` rows and drop entries
+    # that have scrolled entirely off-screen. Called by scroll_up
+    # so the placement list tracks the same visual shift the grid
+    # rows just took.
+    def shift_placements(delta)
+      return if @placements.empty?
+      @placements.each { |p| p[:anchor_row] += delta }
+      @placements.reject! { |p| p[:anchor_row] + p[:cell_rows] <= 0 }
     end
 
     def scroll_down(n = 1)
@@ -1148,6 +1185,7 @@ module Echoes
       @scrollback_wrapped = []
       @tab_stops = default_tab_stops
       @pending_wrap = false
+      @placements = []
       mark_all_dirty
     end
 
