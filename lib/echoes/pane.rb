@@ -27,7 +27,13 @@ module Echoes
       elsif embedded
         require_relative 'embedded_shell'
         @embedded_shell = EmbeddedShell.new(no_rc: no_rc)
-        @parser = Parser.new(@screen, writer: ->(_s) { })
+        # Writer routes OSC replies (display-info, OSC 52 paste-back,
+        # color queries, terminfo replies, …) to the helper's pty
+        # master so the foreground program reads them on its stdin.
+        # While rubish is at the prompt, anything we write here lands
+        # in Reline; in practice query OSCs only come from a running
+        # foreground program (e.g. przn) so the routing is safe.
+        @parser = Parser.new(@screen, writer: ->(s) { @embedded_shell.forward_input(s) })
         @title = 'rubish'
         @input_buffer = +''
         @input_cursor = 0     # offset within @input_buffer (0..length)
@@ -50,11 +56,16 @@ module Echoes
           ENV['TERM'] = Echoes.config.term
           ENV['LANG'] ||= 'en_US.UTF-8'
           ENV['LC_CTYPE'] = 'UTF-8'
-          @pty_read, @pty_write, @pty_pid = PTY.spawn(command)
+          # `command` may be a String (shell-parsed by /bin/sh) or an
+          # Array of [argv0, *args] (execve directly, no shell). The
+          # array form is what the OSC 7772 ;open-window handler
+          # uses so user-supplied argv isn't subject to shell quoting.
+          @pty_read, @pty_write, @pty_pid =
+            command.is_a?(Array) ? PTY.spawn(*command) : PTY.spawn(command)
           @pty_read.winsize = [rows, cols]
         end
         @parser = Parser.new(@screen, writer: ->(s) { @pty_write.write(s) rescue nil })
-        @title = File.basename(command)
+        @title = File.basename(command.is_a?(Array) ? command.first : command)
       end
       @scroll_offset = 0
       @scroll_accum = 0.0

@@ -582,6 +582,10 @@ module Echoes
     #   bg-fill     ; color=#rrggbb:rect=row1,col1,row2,col2
     #   bg-clear                           (revert to default_bg)
     #   capture     ; <absolute-path-to.png>
+    #   display-info                        (sync query — host writes
+    #                                        \e]7772;display-info;<json>\a
+    #                                        back to the pty)
+    #   open-window ; display=N:program=<base64-argv>:fullscreen=yes|no
     def dispatch_osc7772(rest)
       command, args = rest.split(';', 2)
       case command
@@ -611,6 +615,15 @@ module Echoes
         path = (args || '').strip
         if !path.empty? && @screen.respond_to?(:capture_handler) && @screen.capture_handler
           @screen.capture_handler.call(path)
+        end
+      when 'display-info'
+        if @screen.respond_to?(:display_info_handler) && @screen.display_info_handler
+          json = @screen.display_info_handler.call.to_s
+          @writer.call("\e]7772;display-info;#{json}\a") if @writer
+        end
+      when 'open-window'
+        if @screen.respond_to?(:open_window_handler) && @screen.open_window_handler
+          @screen.open_window_handler.call(args || '')
         end
       end
     end

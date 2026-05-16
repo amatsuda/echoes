@@ -4,6 +4,7 @@ require 'pty'
 require 'shellwords'
 require 'socket'
 require 'uri'
+require 'json'
 
 module Echoes
   class GUI
@@ -2729,6 +2730,8 @@ module Echoes
       # several panes per view).
       screen.capture_handler   = ->(path) { capture_pane_to_png(pane, path) }
       screen.notification_handler = ->(title, message) { post_notification(pane, title, message) }
+      screen.display_info_handler = -> { display_info_json(pane) }
+      screen.open_window_handler  = ->(args) { open_window_from_osc(pane, args) }
     end
 
     # Post a macOS notification for an in-pane OSC 9 / OSC 777
@@ -2828,6 +2831,184 @@ module Echoes
     # more useful format for terminal content.
     def self.capture_format_for(path)
       File.extname(path).downcase == '.png' ? :png : :pdf
+    end
+
+    # OSC 7772 ;display-info handler. Returns a JSON string of
+    # one entry per NSScreen with pixel dimensions and two flags:
+    # `primary` (the screen that owns the menu bar) and `current`
+    # (the screen the requesting Echoes window is on). The caller
+    # uses `current` to pick "anywhere but here" for a second-screen
+    # presentation window. Empty `[]` on any AppKit failure.
+    def display_info_json(pane)
+      screens = ObjC::MSG_PTR.call(ObjC.cls('NSScreen'), ObjC.sel('screens'))
+      return '[]' if screens.nil? || screens.null?
+      count = ObjC::MSG_RET_L.call(screens, ObjC.sel('count'))
+
+      main_screen = ObjC::MSG_PTR.call(ObjC.cls('NSScreen'), ObjC.sel('mainScreen'))
+      win_screen = nsscreen_for_pane(pane)
+
+      entries = []
+      count.times do |i|
+        s = ObjC::MSG_PTR_L.call(screens, ObjC.sel('objectAtIndex:'), i)
+        _, _, w, h = nsrect_via_invocation(s, 'frame')
+        entries << {
+          'index'   => i,
+          'w'       => w.to_i,
+          'h'       => h.to_i,
+          'primary' => s.to_i == main_screen.to_i,
+          'current' => win_screen && s.to_i == win_screen.to_i,
+        }
+      end
+      JSON.generate(entries)
+    rescue StandardError => e
+      warn "echoes display-info: #{e.class}: #{e.message}"
+      '[]'
+    end
+
+    # Return the NSScreen of the NSWindow that owns `pane`, or nil
+    # if the pane isn't currently parented to any window state.
+    def nsscreen_for_pane(pane)
+      ws = @window_states.find { |w| w[:tabs]&.any? { |t| t.panes.include?(pane) } }
+      return nil unless ws && ws[:nswindow]
+      ObjC::MSG_PTR.call(ws[:nswindow], ObjC.sel('screen'))
+    end
+
+    # Invoke a zero-arg method on `target` that returns an NSRect
+    # (4 doubles). Fiddle can't model "return 4 doubles" directly,
+    # so we route through NSInvocation — same pattern as
+    # event_location does for NSPoint.
+    def nsrect_via_invocation(target, sel_name)
+      target_class = ObjC::MSG_PTR.call(target, ObjC.sel('class'))
+      sig = ObjC::MSG_PTR_1.call(
+        target_class, ObjC.sel('instanceMethodSignatureForSelector:'),
+        ObjC.sel(sel_name)
+      )
+      inv = ObjC::MSG_PTR_1.call(
+        ObjC.cls('NSInvocation'), ObjC.sel('invocationWithMethodSignature:'), sig
+      )
+      ObjC::MSG_VOID_1.call(inv, ObjC.sel('setSelector:'), ObjC.sel(sel_name))
+      ObjC::MSG_VOID_1.call(inv, ObjC.sel('invokeWithTarget:'), target)
+      buf = Fiddle::Pointer.malloc(32, Fiddle::RUBY_FREE)
+      ObjC::MSG_VOID_1.call(inv, ObjC.sel('getReturnValue:'), buf)
+      buf[0, 32].unpack('dddd')  # x, y, w, h
+    end
+
+    # OSC 7772 ;open-window handler. Parses
+    # `display=N:program=<base64-argv>:fullscreen=yes|no`, decodes
+    # the base64 JSON-encoded argv, and opens a new window on
+    # NSScreen.screens[N] running that argv via PTY. fullscreen=yes
+    # uses the screen's full frame with a borderless, above-menu-bar
+    # window; otherwise visibleFrame with the default style mask.
+    # Fire-and-forget: no reply. The caller polls for whatever
+    # signal the launched program emits (e.g. a unix socket).
+    def open_window_from_osc(pane, args_str)
+      params = {}
+      args_str.to_s.split(':').each do |pair|
+        k, v = pair.split('=', 2)
+        next if k.nil? || k.empty? || v.nil?
+        params[k] = v
+      end
+
+      display_index = (params['display'] || '0').to_i
+      fullscreen    = params['fullscreen'] == 'yes'
+      program_b64   = params['program']
+      return unless program_b64
+
+      json_str = program_b64.delete("\r\n\t ").unpack1('m0')
+      argv = JSON.parse(json_str)
+      return unless argv.is_a?(Array) && !argv.empty?
+
+      open_external_window(argv: argv, display_index: display_index, fullscreen: fullscreen)
+    rescue StandardError => e
+      warn "echoes open-window: #{e.class}: #{e.message}"
+    end
+
+    # Open a new window running `argv` (e.g. ["/usr/local/bin/przn",
+    # "--audience", …]) on a specific display. Sizes the content
+    # area to the screen's frame (fullscreen) or visibleFrame, picks
+    # cell rows/cols that fit, and routes lifecycle through the
+    # standard tab/pane/window-state pipeline so the window
+    # auto-closes when the child program exits.
+    def open_external_window(argv:, display_index:, fullscreen:)
+      save_window_state
+
+      screens = ObjC::MSG_PTR.call(ObjC.cls('NSScreen'), ObjC.sel('screens'))
+      count = ObjC::MSG_RET_L.call(screens, ObjC.sel('count'))
+      return if display_index < 0 || display_index >= count
+      target = ObjC::MSG_PTR_L.call(screens, ObjC.sel('objectAtIndex:'), display_index)
+
+      rect_sel = fullscreen ? 'frame' : 'visibleFrame'
+      sx, sy, sw, sh = nsrect_via_invocation(target, rect_sel)
+
+      cols = (sw / @cell_width).floor
+      rows = (sh / @cell_height).floor
+      cols = [cols, 20].max
+      rows = [rows, 5].max
+
+      tab = Tab.new(command: argv, rows: rows, cols: cols, embedded: false)
+      tab.title = File.basename(argv.first.to_s)
+      tab.panes.each { |pn| wire_screen_handlers(pn) }
+
+      # Borderless mask (0) for fullscreen; default chrome otherwise.
+      style_mask = fullscreen ? 0 : ObjC::NSWindowStyleMaskDefault
+      new_window = ObjC::MSG_PTR.call(ObjC.cls('NSWindow'), ObjC.sel('alloc'))
+      new_window = ObjC::MSG_PTR_RECT_L_L_I.call(
+        new_window, ObjC.sel('initWithContentRect:styleMask:backing:defer:'),
+        sx, sy, sw, sh, style_mask, ObjC::NSBackingStoreBuffered, 0
+      )
+      ObjC::MSG_VOID_1.call(new_window, ObjC.sel('setTitle:'), ObjC.nsstring(tab.title))
+      ObjC::MSG_VOID_L.call(new_window, ObjC.sel('setCollectionBehavior:'), 1 << 7)
+      ObjC::MSG_VOID_I.call(new_window, ObjC.sel('setAcceptsMouseMovedEvents:'), 1)
+      if fullscreen
+        # NSMainMenuWindowLevel + 1 = 25 = NSStatusWindowLevel; floats
+        # above the menu bar so the presentation truly fills the
+        # screen even without going through AppKit's fullscreen
+        # transition.
+        ObjC::MSG_VOID_L.call(new_window, ObjC.sel('setLevel:'), 25)
+      end
+
+      new_view = ObjC::MSG_PTR.call(@view_class, ObjC.sel('alloc'))
+      new_view = ObjC::MSG_PTR_RECT.call(new_view, ObjC.sel('initWithFrame:'),
+                                          0.0, 0.0, sw, sh)
+      drag_types = ObjC::MSG_PTR_1.call(ObjC.cls('NSArray'), ObjC.sel('arrayWithObject:'),
+                                         ObjC::NSPasteboardTypeFileURL)
+      ObjC::MSG_VOID_1.call(new_view, ObjC.sel('registerForDraggedTypes:'), drag_types)
+
+      ObjC::MSG_VOID_1.call(new_window, ObjC.sel('setContentView:'), new_view)
+      ObjC::MSG_VOID_1.call(new_window, ObjC.sel('makeKeyAndOrderFront:'), @app)
+      ObjC::MSG_VOID_1.call(new_window, ObjC.sel('makeFirstResponder:'), new_view)
+      ObjC::MSG_VOID_I.call(@app, ObjC.sel('activateIgnoringOtherApps:'), 1)
+
+      nc = ObjC::MSG_PTR.call(ObjC.cls('NSNotificationCenter'), ObjC.sel('defaultCenter'))
+      ObjC::MSG_VOID_4.call(nc, ObjC.sel('addObserver:selector:name:object:'),
+        new_view, ObjC.sel('windowDidBecomeKey:'),
+        ObjC.nsstring('NSWindowDidBecomeKeyNotification'), new_window)
+      ObjC::MSG_VOID_4.call(nc, ObjC.sel('addObserver:selector:name:object:'),
+        new_view, ObjC.sel('windowDidResignKey:'),
+        ObjC.nsstring('NSWindowDidResignKeyNotification'), new_window)
+
+      @window = new_window
+      @view = new_view
+      @tabs = [tab]
+      @active_tab = 0
+      @search_mode = false
+      @search_query = +""
+      @search_matches = []
+      @search_index = -1
+      @search_regex_mode = false
+      @search_case_insensitive = false
+      @bell_flash = 0
+      @marked_text = nil
+      @current_event = nil
+      @selection_anchor = nil
+      @selection_end = nil
+      @selection_word_anchor = nil
+      @window_focused = true
+
+      ws = {}
+      @window_states << ws
+      @view_to_ws[@view.to_i] = ws
+      save_window_state
     end
 
     def capture_pane_to_png(pane, path)

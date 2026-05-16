@@ -1361,6 +1361,38 @@ class Echoes::ParserTest < Test::Unit::TestCase
     end
   end
 
+  # --- OSC 7772 display-info / open-window ---
+
+  test "OSC 7772 display-info invokes the handler and writes reply via writer" do
+    writes = []
+    parser = Echoes::Parser.new(@screen, writer: ->(s) { writes << s })
+    @screen.display_info_handler = -> { '[{"index":0}]' }
+    parser.feed("\e]7772;display-info\a")
+    assert_equal ["\e]7772;display-info;[{\"index\":0}]\a"], writes
+  end
+
+  test "OSC 7772 display-info with no handler set writes nothing" do
+    writes = []
+    parser = Echoes::Parser.new(@screen, writer: ->(s) { writes << s })
+    assert_nothing_raised do
+      parser.feed("\e]7772;display-info\a")
+    end
+    assert_empty writes
+  end
+
+  test "OSC 7772 open-window routes args to the handler" do
+    seen = []
+    @screen.open_window_handler = ->(args) { seen << args }
+    @parser.feed("\e]7772;open-window;display=1:program=eyJhIjoiYiJ9:fullscreen=yes\a")
+    assert_equal ["display=1:program=eyJhIjoiYiJ9:fullscreen=yes"], seen
+  end
+
+  test "OSC 7772 open-window without a handler is a no-op" do
+    assert_nothing_raised do
+      @parser.feed("\e]7772;open-window;display=0:program=AAAA\a")
+    end
+  end
+
   # --- OSC 9 / 777 (notifications) ---
 
   test "OSC 9 invokes notification_handler with nil title and the rest as message" do
