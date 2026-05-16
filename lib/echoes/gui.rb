@@ -25,6 +25,11 @@ module Echoes
     end
 
     def initialize(command: Echoes.config.shell, rows: Echoes.config.rows, cols: Echoes.config.cols, font_size: nil)
+      # Advertise ourselves the way other terminals do (iTerm2,
+      # WezTerm, Ghostty, …). Child shells and any program they
+      # spawn inherit these via the normal env-inheritance path.
+      ENV['TERM_PROGRAM']         = 'Echoes'
+      ENV['TERM_PROGRAM_VERSION'] = Echoes::VERSION
       @rows = rows
       @cols = cols
       # Persisted font size wins over the config default; both wrappers
