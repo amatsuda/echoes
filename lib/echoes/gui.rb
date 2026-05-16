@@ -2893,6 +2893,24 @@ module Echoes
       buf[0, 32].unpack('dddd')  # x, y, w, h
     end
 
+    # Build the env Hash for a child program spawned via OSC 7772
+    # ;open-window. Starts from Echoes' own NSProcessInfo-equivalent
+    # env (Ruby's ENV) so PATH / HOME / USER / LANG / TERM / any
+    # ECHOES_* vars naturally propagate, then patches in defaults
+    # for the basics — Echoes.app launched by launchd from Finder
+    # inherits a minimal env, so a child that came in via a
+    # presentation tool can otherwise wind up without a usable
+    # PATH or LANG.
+    def child_env_for_open_window
+      env = ENV.to_h
+      env['PATH']  = ENV['PATH'] || '/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin'
+      env['HOME']  = ENV['HOME'] || Dir.home
+      env['USER']  ||= (ENV['LOGNAME'] || `id -un 2>/dev/null`.chomp)
+      env['LANG']  ||= 'en_US.UTF-8'
+      env['TERM']  ||= Echoes.config.term
+      env
+    end
+
     # OSC 7772 ;open-window handler. Parses
     # `display=N:program=<base64-argv>:fullscreen=yes|no`, decodes
     # the base64 JSON-encoded argv, and opens a new window on
@@ -2945,7 +2963,8 @@ module Echoes
       cols = [cols, 20].max
       rows = [rows, 5].max
 
-      tab = Tab.new(command: argv, rows: rows, cols: cols, embedded: false)
+      tab = Tab.new(command: argv, rows: rows, cols: cols, embedded: false,
+                    env: child_env_for_open_window)
       tab.title = File.basename(argv.first.to_s)
       tab.panes.each { |pn| wire_screen_handlers(pn) }
 

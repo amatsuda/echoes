@@ -17,7 +17,7 @@ module Echoes
                   :scroll_offset, :scroll_accum, :title, :copy_mode
     attr_reader :embedded_shell
 
-    def initialize(command:, rows:, cols:, cwd: nil, embedded: false, no_rc: false, editor_file: nil)
+    def initialize(command:, rows:, cols:, cwd: nil, embedded: false, no_rc: false, editor_file: nil, env: nil)
       @screen = Screen.new(rows: rows, cols: cols)
       if editor_file
         require_relative 'editor'
@@ -53,6 +53,15 @@ module Echoes
       else
         start_dir = (cwd && Dir.exist?(cwd)) ? cwd : Dir.home
         Dir.chdir(start_dir) do
+          # When env: is nil (the default), we just normalize a few
+          # vars on our own process — the child then inherits the
+          # whole env from us, same as before. When env: is given,
+          # it's an explicit env Hash that fully replaces what the
+          # child sees, with our normalizations applied on top. The
+          # explicit form is used by the OSC 7772 ;open-window path
+          # so a child program (e.g. przn) reliably gets PATH /
+          # HOME / USER / LANG even when Echoes.app was launched by
+          # launchd with a minimal env.
           ENV['TERM'] = Echoes.config.term
           ENV['LANG'] ||= 'en_US.UTF-8'
           ENV['LC_CTYPE'] = 'UTF-8'
@@ -60,8 +69,12 @@ module Echoes
           # Array of [argv0, *args] (execve directly, no shell). The
           # array form is what the OSC 7772 ;open-window handler
           # uses so user-supplied argv isn't subject to shell quoting.
-          @pty_read, @pty_write, @pty_pid =
-            command.is_a?(Array) ? PTY.spawn(*command) : PTY.spawn(command)
+          spawn_args = command.is_a?(Array) ? command : [command]
+          if env
+            @pty_read, @pty_write, @pty_pid = PTY.spawn(env, *spawn_args)
+          else
+            @pty_read, @pty_write, @pty_pid = PTY.spawn(*spawn_args)
+          end
           @pty_read.winsize = [rows, cols]
         end
         @parser = Parser.new(@screen, writer: ->(s) { @pty_write.write(s) rescue nil })
