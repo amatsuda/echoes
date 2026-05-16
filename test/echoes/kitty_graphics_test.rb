@@ -239,6 +239,30 @@ class Echoes::KittyGraphicsTest < Test::Unit::TestCase
     assert_includes @writes.first, 'ENOENT'
   end
 
+  test "a=q (capability probe) replies OK for supported format/transmission" do
+    # kitten icat sends roughly this as its detection probe
+    Echoes::KittyGraphics.handle_chunk(@state, "a=q,i=31,s=1,v=1,f=24,t=d",
+                                       b64("AAA"),
+                                       screen: @screen, writer: @writer)
+    assert_empty @screen.images, "a=q must not display anything"
+    assert_includes @writes.first, 'i=31'
+    assert_includes @writes.first, 'OK'
+  end
+
+  test "a=q replies EBADF for an unsupported format" do
+    Echoes::KittyGraphics.handle_chunk(@state, "a=q,i=7,f=999,t=d",
+                                       b64("AAA"),
+                                       screen: @screen, writer: @writer)
+    assert_includes @writes.first, 'EBADF'
+  end
+
+  test "a=q replies EBADF for an unsupported transmission medium" do
+    Echoes::KittyGraphics.handle_chunk(@state, "a=q,i=8,f=24,t=s",
+                                       b64("/dev/shm/x"),
+                                       screen: @screen, writer: @writer)
+    assert_includes @writes.first, 'EBADF'
+  end
+
   test "C=1 in display options propagates as suppress_cursor" do
     @state[:cache]['1'] = {rgba: 'X', width: 1, height: 1}
     Echoes::KittyGraphics.handle_chunk(@state, "a=p,i=1,C=1", '',

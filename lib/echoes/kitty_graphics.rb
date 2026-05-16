@@ -112,6 +112,33 @@ module Echoes
         if id && state[:cache].delete(id)
           respond(writer, opts, ok: true)
         end
+
+      when 'q'
+        # Capability probe. kitten icat (and others) send a tiny
+        # dummy frame with a=q before transmitting real images;
+        # they read the OK/error reply to decide whether the
+        # terminal supports the protocol. We don't decode the
+        # payload — just answer whether we'd accept this
+        # format / transmission combo.
+        if supported_format?(opts['f']) && supported_transmission?(opts['t'])
+          respond(writer, opts, ok: true)
+        else
+          respond(writer, opts, error: 'EBADF')
+        end
+      end
+    end
+
+    def supported_format?(f)
+      case f.to_s
+      when '', '100', '24', '32' then true
+      else false
+      end
+    end
+
+    def supported_transmission?(t)
+      case t.to_s
+      when '', 'd', 'f', 't' then true   # direct, file, tempfile
+      else false                          # 's' (shared mem) etc.
       end
     end
 
