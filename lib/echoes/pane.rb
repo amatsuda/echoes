@@ -75,7 +75,7 @@ module Echoes
           else
             @pty_read, @pty_write, @pty_pid = PTY.spawn(*spawn_args)
           end
-          @pty_read.winsize = [rows, cols]
+          @pty_read.winsize = pty_winsize_quad(rows, cols)
         end
         @parser = Parser.new(@screen, writer: ->(s) { @pty_write.write(s) rescue nil })
         @title = File.basename(command.is_a?(Array) ? command.first : command)
@@ -113,7 +113,10 @@ module Echoes
     # embedded mode hands the line directly to the in-process REPL.
     def submit_line(line)
       if embedded?
-        @embedded_shell.submit_line(line)
+        @embedded_shell.submit_line(line,
+                                     rows: @screen.rows, cols: @screen.cols,
+                                     px_width:  pty_pixel_width(@screen.cols),
+                                     px_height: pty_pixel_height(@screen.rows))
       else
         @pty_write.write("#{line}\r") rescue nil
       end
@@ -169,9 +172,30 @@ module Echoes
         @editor.resize(rows: rows, cols: cols)
         render_editor
       elsif embedded?
-        @embedded_shell.resize(rows: rows, cols: cols)
+        @embedded_shell.resize(rows: rows, cols: cols,
+                                px_width:  pty_pixel_width(cols),
+                                px_height: pty_pixel_height(rows))
       else
-        @pty_read.winsize = [rows, cols]
+        @pty_read.winsize = pty_winsize_quad(rows, cols)
+      end
+    rescue Errno::EIO, IOError
+    end
+
+    # Re-send winsize with the current cell pixel metrics. Called
+    # by the GUI after `wire_screen_handlers` updates the Screen's
+    # cell_pixel_width / cell_pixel_height (font load, font size
+    # change, …), so TIOCGWINSZ on the slave side carries the
+    # right pixel dims — kitten icat and other image protocols
+    # read those instead of querying CSI 14 t.
+    def refresh_pty_pixel_size
+      rows = @screen.rows
+      cols = @screen.cols
+      if embedded?
+        @embedded_shell.resize(rows: rows, cols: cols,
+                                px_width:  pty_pixel_width(cols),
+                                px_height: pty_pixel_height(rows))
+      elsif @pty_read && !@pty_read.closed?
+        @pty_read.winsize = pty_winsize_quad(rows, cols)
       end
     rescue Errno::EIO, IOError
     end
@@ -508,7 +532,9 @@ module Echoes
         # Stash the command text on the OSC 133 mark so click-to-rerun
         # can recover it later.
         @screen.set_current_command_text(line)
-        @embedded_shell.submit_line(line, rows: @screen.rows, cols: @screen.cols)
+        @embedded_shell.submit_line(line, rows: @screen.rows, cols: @screen.cols,
+                                          px_width:  pty_pixel_width(@screen.cols),
+                                          px_height: pty_pixel_height(@screen.rows))
         @embedded_running = true
       end
     end
@@ -851,6 +877,22 @@ module Echoes
     end
 
     private
+
+    # 4-element winsize tuple [rows, cols, xpixel, ypixel] for
+    # TIOCSWINSZ. The pixel fields seed the slave's TIOCGWINSZ so
+    # processes that prefer ioctl over CSI 14 t (kitten icat,
+    # tput, …) see real screen pixel dims.
+    def pty_winsize_quad(rows, cols)
+      [rows, cols, pty_pixel_width(cols), pty_pixel_height(rows)]
+    end
+
+    def pty_pixel_width(cols)
+      (cols * @screen.cell_pixel_width).to_i
+    end
+
+    def pty_pixel_height(rows)
+      (rows * @screen.cell_pixel_height).to_i
+    end
 
     def complete_input
       req = completion_request

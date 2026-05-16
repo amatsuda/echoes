@@ -2730,6 +2730,11 @@ module Echoes
       screen.glyph_measurer    = method(:measure_glyph)
       screen.cell_pixel_width  = @cell_width  if @cell_width
       screen.cell_pixel_height = @cell_height if @cell_height
+      # Now that the Screen knows its real cell metrics, re-send
+      # winsize so the pty's TIOCGWINSZ pixel fields carry the
+      # measured dims — kitten icat and similar tools read those
+      # via ioctl before falling back to CSI 14 t.
+      pane.refresh_pty_pixel_size
       # Capture closure remembers which pane the OSC arrived for so
       # the renderer grabs the right sub-rect (split layouts have
       # several panes per view).

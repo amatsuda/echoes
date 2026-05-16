@@ -124,9 +124,9 @@ module Echoes
     # through the pty asynchronously and `command_done` will set
     # @running back to false. The line is added to history (rubish-side)
     # by the helper before execution.
-    def submit_line(line, rows: 24, cols: 80)
+    def submit_line(line, rows: 24, cols: 80, px_width: 0, px_height: 0)
       return if running?
-      @master.winsize = [rows, cols] rescue nil
+      @master.winsize = [rows, cols, px_width.to_i, px_height.to_i] rescue nil
       @running = true
       rpc_async('execute', line: line)
     end
@@ -199,8 +199,8 @@ module Echoes
     # Updates the pty master's winsize. The kernel propagates to the
     # slave (which is the helper's ctty) and emits SIGWINCH to the
     # foreground process group, so vim/less/etc. repaint.
-    def resize(rows:, cols:)
-      @master.winsize = [rows, cols]
+    def resize(rows:, cols:, px_width: 0, px_height: 0)
+      @master.winsize = [rows, cols, px_width.to_i, px_height.to_i]
     rescue IOError, Errno::EIO
     end
 
