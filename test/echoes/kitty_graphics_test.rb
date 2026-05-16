@@ -226,6 +226,24 @@ class Echoes::KittyGraphicsTest < Test::Unit::TestCase
     assert_empty @writes
   end
 
+  test "q=2 on the first chunk of a multi-chunk frame still suppresses the reply" do
+    # kitten icat declares q=2 once on the first chunk and lets
+    # subsequent chunks omit it. Make sure assemble_chunk carries
+    # it through so the final dispatch sees the suppression flag.
+    image_bytes = StubScreen::TINY_PNG_BYTES
+    Echoes::KittyGraphics.stub_decoder(image_bytes => {rgba: 'X', width: 1, height: 1}) do
+      Echoes::KittyGraphics.handle_chunk(@state, "a=T,i=42,q=2,m=1",
+                                         b64(image_bytes[0, 4]),
+                                         screen: @screen, writer: @writer)
+      Echoes::KittyGraphics.handle_chunk(@state, "i=42,m=1",
+                                         b64(image_bytes[4..-1] || ''),
+                                         screen: @screen, writer: @writer)
+      Echoes::KittyGraphics.handle_chunk(@state, "i=42,m=0", '',
+                                         screen: @screen, writer: @writer)
+    end
+    assert_empty @writes, "q=2 from the first chunk must survive assembly"
+  end
+
   test "q=1 suppresses success but not errors" do
     image_bytes = StubScreen::TINY_PNG_BYTES
     Echoes::KittyGraphics.stub_decoder(image_bytes => {rgba: 'X', width: 1, height: 1}) do
