@@ -2898,6 +2898,18 @@ module Echoes
       buf[0, 32].unpack('dddd')  # x, y, w, h
     end
 
+    # Standard macOS / Homebrew search dirs we want a child to be
+    # able to find even when Echoes.app was launched by Finder
+    # (which strips PATH down to /usr/bin:/bin:/usr/sbin:/sbin).
+    DEFAULT_PATH_DIRS = %w[
+      /opt/homebrew/bin
+      /usr/local/bin
+      /usr/bin
+      /bin
+      /usr/sbin
+      /sbin
+    ].freeze
+
     # Build the env Hash for a child program spawned via OSC 7772
     # ;open-window. Starts from Echoes' own NSProcessInfo-equivalent
     # env (Ruby's ENV) so PATH / HOME / USER / LANG / TERM / any
@@ -2908,12 +2920,28 @@ module Echoes
     # PATH or LANG.
     def child_env_for_open_window
       env = ENV.to_h
-      env['PATH']  = ENV['PATH'] || '/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin'
+      env['PATH']  = merge_path(env['PATH'])
       env['HOME']  = ENV['HOME'] || Dir.home
       env['USER']  ||= (ENV['LOGNAME'] || `id -un 2>/dev/null`.chomp)
       env['LANG']  ||= 'en_US.UTF-8'
       env['TERM']  ||= Echoes.config.term
       env
+    end
+
+    # Union the parent's PATH with DEFAULT_PATH_DIRS, preserving
+    # parent order so the parent's preferences win, and dedup so we
+    # don't double up entries the parent already has. Adding rather
+    # than replacing means a user who already exported a tuned PATH
+    # from their shell config keeps it intact.
+    def merge_path(parent_path)
+      seen = {}
+      out  = []
+      (parent_path.to_s.split(':') + DEFAULT_PATH_DIRS).each do |dir|
+        next if dir.empty? || seen[dir]
+        seen[dir] = true
+        out << dir
+      end
+      out.join(':')
     end
 
     # OSC 7772 ;open-window handler. Parses
