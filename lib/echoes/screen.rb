@@ -233,13 +233,26 @@ module Echoes
       mc_rows = [mc_rows, 1].max
       return if mc_cols > @cols || mc_rows > @rows
 
-      if @cursor.col + mc_cols > @cols
-        @cursor.col = 0
-        line_feed
-      end
-      while @cursor.row + mc_rows > @rows
-        scroll_up(1)
-        @cursor.row = [@cursor.row - 1, 0].max
+      if suppress_cursor
+        # C=1 (slide-presentation mode): anchor at the current
+        # cursor without wrapping or scrolling. A multi-image
+        # slideshow would otherwise accumulate a cumulative
+        # scroll offset every time an image landed near the
+        # bottom, dragging earlier rows off-screen. If the image
+        # doesn't fit at the current position, bail — the client
+        # positions the cursor deliberately and would rather see
+        # nothing than have the layout shift out from under it.
+        return if @cursor.col + mc_cols > @cols
+        return if @cursor.row + mc_rows > @rows
+      else
+        if @cursor.col + mc_cols > @cols
+          @cursor.col = 0
+          line_feed
+        end
+        while @cursor.row + mc_rows > @rows
+          scroll_up(1)
+          @cursor.row = [@cursor.row - 1, 0].max
+        end
       end
 
       anchor_row = @cursor.row

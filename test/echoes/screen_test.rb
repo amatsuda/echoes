@@ -517,6 +517,42 @@ class Echoes::ScreenTest < Test::Unit::TestCase
     assert_equal 5, @screen.cursor.col
   end
 
+  test "put_kitty_image with suppress_cursor does NOT scroll when image overflows the bottom" do
+    @screen = Echoes::Screen.new(rows: 10, cols: 30)
+    @screen.cell_pixel_width  = 10.0
+    @screen.cell_pixel_height = 20.0
+    # Mark row 0 so we can detect if a scroll discarded it.
+    @screen.cursor.row = 0
+    @screen.cursor.col = 0
+    @screen.put_char('A')
+    # Now drop a 6-cell-tall image at row 7 — naive math would say
+    # 7+6=13 > 10, scroll up 3 rows, dragging 'A' off-screen.
+    @screen.cursor.row = 7
+    @screen.cursor.col = 0
+    rgba = "\x00".b * (30 * 120 * 4)  # 3 cells wide × 6 cells tall
+    @screen.put_kitty_image(rgba: rgba, width: 30, height: 120,
+                            suppress_cursor: true)
+    assert_equal 'A', @screen.grid[0][0].char, "row 0 must survive — no scroll"
+    assert_equal 7, @screen.cursor.row, "cursor must not move"
+    assert_equal 0, @screen.cursor.col
+    assert_nil @screen.grid[7][0].multicell, "image must NOT be placed (would clip)"
+  end
+
+  test "put_kitty_image without suppress_cursor still scrolls to fit (slide-mode opt-in only)" do
+    @screen = Echoes::Screen.new(rows: 10, cols: 30)
+    @screen.cell_pixel_width  = 10.0
+    @screen.cell_pixel_height = 20.0
+    @screen.cursor.row = 0
+    @screen.cursor.col = 0
+    @screen.put_char('A')
+    @screen.cursor.row = 7
+    @screen.cursor.col = 0
+    rgba = "\x00".b * (30 * 120 * 4)  # 3 × 6 cells
+    @screen.put_kitty_image(rgba: rgba, width: 30, height: 120)
+    refute_equal 'A', @screen.grid[0][0].char,
+                 "without C=1, the auto-scroll-to-fit should have dragged 'A' off-screen"
+  end
+
   test "put_kitty_image discards an image that's larger than the screen" do
     @screen = Echoes::Screen.new(rows: 5, cols: 10)
     @screen.cell_pixel_width  = 10.0
