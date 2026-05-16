@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require 'zlib'
+
 module Echoes
   # Minimum-viable Kitty graphics protocol decoder. Wire format:
   #
@@ -88,6 +90,14 @@ module Echoes
         bytes = resolve_transmission(bytes, opts)
         return respond(writer, opts, error: 'ENOENT') unless bytes
 
+        # Compression (`o=…`):
+        #   (unset) — payload is uncompressed
+        #   z       — payload is raw zlib (deflate). kitten icat
+        #             defaults to o=z for any non-PNG transmission,
+        #             so this is the common case in the wild.
+        bytes = inflate_if_needed(bytes, opts['o'])
+        return respond(writer, opts, error: 'EBADDATA') unless bytes
+
         image = decode_image(bytes, opts['f'] || DEFAULT_FORMAT, opts)
         return respond(writer, opts, error: 'EBADPNG') unless image
 
@@ -119,8 +129,10 @@ module Echoes
         # they read the OK/error reply to decide whether the
         # terminal supports the protocol. We don't decode the
         # payload — just answer whether we'd accept this
-        # format / transmission combo.
-        if supported_format?(opts['f']) && supported_transmission?(opts['t'])
+        # format / transmission / compression combo.
+        if supported_format?(opts['f']) &&
+           supported_transmission?(opts['t']) &&
+           supported_compression?(opts['o'])
           respond(writer, opts, ok: true)
         else
           respond(writer, opts, error: 'EBADF')
@@ -140,6 +152,26 @@ module Echoes
       when '', 'd', 'f', 't' then true   # direct, file, tempfile
       else false                          # 's' (shared mem) etc.
       end
+    end
+
+    def supported_compression?(o)
+      case o.to_s
+      when '', 'z' then true   # uncompressed, or raw zlib
+      else false
+      end
+    end
+
+    # Raw-zlib inflate when the wire says `o=z`. Returns the
+    # original bytes when no compression was applied, or nil on a
+    # corrupt stream (so the caller can answer EBADDATA).
+    def inflate_if_needed(bytes, compression)
+      case compression.to_s
+      when ''  then bytes
+      when 'z' then Zlib::Inflate.inflate(bytes)
+      else          nil
+      end
+    rescue Zlib::Error
+      nil
     end
 
     # Tolerant base64 decode: strips whitespace (some clients

@@ -239,6 +239,33 @@ class Echoes::KittyGraphicsTest < Test::Unit::TestCase
     assert_includes @writes.first, 'ENOENT'
   end
 
+  test "o=z (zlib) inflates the payload before decoding" do
+    require 'zlib'
+    raw       = ("\xFF\x00\x00" * 6).b   # 3x2 raw RGB
+    deflated  = Zlib::Deflate.deflate(raw)
+    captured  = nil
+    replacement = ->(bytes, format, opts = {}) {
+      captured = [bytes, format]
+      {rgba: "RGBA" * 6, width: 3, height: 2}
+    }
+    Echoes::KittyGraphics.with_decoder(replacement) do
+      Echoes::KittyGraphics.handle_chunk(@state, "a=T,f=24,o=z,s=3,v=2,i=21",
+                                         b64(deflated),
+                                         screen: @screen, writer: @writer)
+    end
+    assert_equal raw, captured[0], "decoder must see inflated bytes, not deflated"
+    assert_equal '24', captured[1]
+    assert_equal 1, @screen.images.size
+  end
+
+  test "o=z with a corrupt stream responds with EBADDATA" do
+    Echoes::KittyGraphics.handle_chunk(@state, "a=T,f=24,o=z,s=2,v=1,i=22",
+                                       b64("not a zlib stream"),
+                                       screen: @screen, writer: @writer)
+    assert_empty @screen.images
+    assert_includes @writes.first, 'EBADDATA'
+  end
+
   test "a=q (capability probe) replies OK for supported format/transmission" do
     # kitten icat sends roughly this as its detection probe
     Echoes::KittyGraphics.handle_chunk(@state, "a=q,i=31,s=1,v=1,f=24,t=d",
@@ -259,6 +286,13 @@ class Echoes::KittyGraphicsTest < Test::Unit::TestCase
   test "a=q replies EBADF for an unsupported transmission medium" do
     Echoes::KittyGraphics.handle_chunk(@state, "a=q,i=8,f=24,t=s",
                                        b64("/dev/shm/x"),
+                                       screen: @screen, writer: @writer)
+    assert_includes @writes.first, 'EBADF'
+  end
+
+  test "a=q replies EBADF for an unsupported compression method" do
+    Echoes::KittyGraphics.handle_chunk(@state, "a=q,i=9,f=24,o=xz",
+                                       b64("AAA"),
                                        screen: @screen, writer: @writer)
     assert_includes @writes.first, 'EBADF'
   end
