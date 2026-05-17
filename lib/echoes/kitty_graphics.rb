@@ -201,11 +201,18 @@ module Echoes
     # line-wrap APC payloads) and returns nil on invalid input.
     # Avoids `require 'base64'` (no longer in default gems on
     # Ruby 3.4+) by going through `String#unpack1('m0')`.
+    #
+    # The kitty spec explicitly permits omitted padding, and
+    # `kitten icat --transfer-mode stream` splits its base64 at
+    # arbitrary byte boundaries — the *assembled* payload across
+    # all m=1 chunks can therefore end mid-quad. Pad to a multiple
+    # of 4 before strict decode so we don't silently EBADPNG.
     def decode_payload(b64)
       cleaned = b64.to_s.delete("\r\n\t ")
       return ''.b if cleaned.empty?
-      out = cleaned.unpack1('m0')
-      out
+      pad = (4 - cleaned.bytesize % 4) % 4
+      cleaned += '=' * pad if pad > 0
+      cleaned.unpack1('m0')
     rescue ArgumentError
       nil
     end

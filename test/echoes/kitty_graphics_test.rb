@@ -88,6 +88,19 @@ class Echoes::KittyGraphicsTest < Test::Unit::TestCase
     assert_equal '', Echoes::KittyGraphics.decode_payload('')
   end
 
+  test "decode_payload accepts unpadded base64 (kitty spec lets senders omit padding)" do
+    # kitten icat --transfer-mode stream chunks base64 at arbitrary
+    # byte boundaries; the assembled payload across m=1 chunks can
+    # end mid-quad. Without auto-pad we'd silently EBADPNG every
+    # image whose total base64 length isn't a multiple of 4.
+    original = "Hello, World!"  # base64-encodes to "SGVsbG8sIFdvcmxkIQ==" (20 chars w/ padding)
+    encoded = [original].pack('m0').delete('=')  # 18 chars, no padding
+    assert_equal original, Echoes::KittyGraphics.decode_payload(encoded)
+    # And the 1-byte-short case (3 extra chars):
+    encoded3 = [original + "!"].pack('m0').delete('=')
+    assert_equal(original + "!", Echoes::KittyGraphics.decode_payload(encoded3))
+  end
+
   test "decode_payload returns nil on bogus input" do
     assert_nil Echoes::KittyGraphics.decode_payload('!!!not base64!!!')
   end
