@@ -2153,6 +2153,15 @@ module Echoes
       @window_states << ws
       @view_to_ws[@view.to_i] = ws
       save_window_state
+
+      # setFrameAutosaveName: above may have restored a window
+      # frame larger than the config-sized initial frame; our
+      # setFrameSize: hook ran handle_resize at that moment, which
+      # updated @rows/@cols but no-op'd the tab loop because @tabs
+      # was still empty. Sync the just-created tab to the current
+      # window dimensions now that it's in @tabs. Idempotent when
+      # the saved frame matches the config (or doesn't exist).
+      @tabs.each { |tab| tab.resize(@rows, @cols) }
     end
 
     def select_all
