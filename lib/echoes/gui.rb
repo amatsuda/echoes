@@ -1198,7 +1198,27 @@ module Echoes
             drawn_lh = ObjC::MSG_RET_D.call(scaled_font, ObjC.sel('defaultLineHeightForFont'))
             draw_y += (regular_scaled_lh - drawn_lh)
 
-            ObjC::MSG_VOID_PT_1.call(ns_char, ObjC.sel('drawAtPoint:withAttributes:'), draw_x, draw_y, ns_attrs)
+            if mc[:flip_h] || mc[:flip_v]
+              # Mirror the glyph(s) around the multicell block's
+              # center. Negative-scale the CTM along the requested
+              # axis and translate twice so the flip pivots on the
+              # block midpoint rather than the origin — keeps the
+              # glyph(s) inside the reserved cell rect.
+              ns_ctx = ObjC::MSG_PTR.call(ObjC.cls('NSGraphicsContext'), ObjC.sel('currentContext'))
+              cg_ctx = ObjC::MSG_PTR.call(ns_ctx, ObjC.sel('CGContext'))
+              cx = x + block_w / 2.0
+              cy = y + block_h / 2.0
+              sx = mc[:flip_h] ? -1.0 : 1.0
+              sy = mc[:flip_v] ? -1.0 : 1.0
+              ObjC::CGContextSaveGState.call(cg_ctx)
+              ObjC::CGContextTranslateCTM.call(cg_ctx, cx, cy)
+              ObjC::CGContextScaleCTM.call(cg_ctx, sx, sy)
+              ObjC::CGContextTranslateCTM.call(cg_ctx, -cx, -cy)
+              ObjC::MSG_VOID_PT_1.call(ns_char, ObjC.sel('drawAtPoint:withAttributes:'), draw_x, draw_y, ns_attrs)
+              ObjC::CGContextRestoreGState.call(cg_ctx)
+            else
+              ObjC::MSG_VOID_PT_1.call(ns_char, ObjC.sel('drawAtPoint:withAttributes:'), draw_x, draw_y, ns_attrs)
+            end
             ObjC.release(scaled_font)
           else
             x = px + c * @cell_width

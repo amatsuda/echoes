@@ -173,12 +173,13 @@ module Echoes
       n.times { put_char(@last_char) }
     end
 
-    def put_multicell(text, scale:, width:, frac_n:, frac_d:, valign:, halign:, family: nil)
+    def put_multicell(text, scale:, width:, frac_n:, frac_d:, valign:, halign:,
+                       family: nil, flip_h: false, flip_v: false)
       mc_rows = scale
 
       if width > 0
         # Explicit width: entire text in one block of scale*width cols × scale rows
-        place_multicell_block(text, scale * width, mc_rows, scale, frac_n, frac_d, valign, halign, family)
+        place_multicell_block(text, scale * width, mc_rows, scale, frac_n, frac_d, valign, halign, family, flip_h, flip_v)
       elsif halign != 0
         # h= is set: render the whole string as one block of
         # `scale × source_chars` cells, so the renderer's halign math
@@ -198,7 +199,7 @@ module Echoes
           mc_cols = [mc_cols, measured_cells].max
         end
         mc_cols = [mc_cols, 1].max
-        place_multicell_block(text, mc_cols, mc_rows, scale, frac_n, frac_d, valign, halign, family)
+        place_multicell_block(text, mc_cols, mc_rows, scale, frac_n, frac_d, valign, halign, family, flip_h, flip_v)
       elsif family && @glyph_measurer && @cell_pixel_width && @cell_pixel_width > 0
         # Proportional fonts have variable glyph widths, so reserving
         # `char_width(grapheme) * scale` cells per grapheme leaves big
@@ -210,14 +211,14 @@ module Echoes
         measured_px = @glyph_measurer.call(text, family, scale, frac_n, frac_d).to_f
         mc_cols = (measured_px / @cell_pixel_width).ceil
         mc_cols = [mc_cols, 1].max
-        place_multicell_block(text, mc_cols, mc_rows, scale, frac_n, frac_d, valign, halign, family)
+        place_multicell_block(text, mc_cols, mc_rows, scale, frac_n, frac_d, valign, halign, family, flip_h, flip_v)
       else
         # Auto width: each grapheme gets its own block (monospace
         # assumption — fine for the configured terminal font).
         text.each_grapheme_cluster do |grapheme|
           cw = char_width(grapheme)
           mc_cols = scale * cw
-          place_multicell_block(grapheme, mc_cols, mc_rows, scale, frac_n, frac_d, valign, halign, family)
+          place_multicell_block(grapheme, mc_cols, mc_rows, scale, frac_n, frac_d, valign, halign, family, flip_h, flip_v)
         end
       end
     end
@@ -1399,7 +1400,7 @@ module Echoes
       end
     end
 
-    def place_multicell_block(text, mc_cols, mc_rows, scale, frac_n, frac_d, valign, halign, family = nil)
+    def place_multicell_block(text, mc_cols, mc_rows, scale, frac_n, frac_d, valign, halign, family = nil, flip_h = false, flip_v = false)
       # Discard if block is larger than screen
       return if mc_cols > @cols || mc_rows > @rows
 
@@ -1433,7 +1434,7 @@ module Echoes
       anchor.multicell = {
         cols: mc_cols, rows: mc_rows, scale: scale,
         frac_n: frac_n, frac_d: frac_d, valign: valign, halign: halign,
-        family: family
+        family: family, flip_h: flip_h, flip_v: flip_v,
       }
 
       # Mark continuation cells

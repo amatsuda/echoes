@@ -354,6 +354,22 @@ class Echoes::ScreenTest < Test::Unit::TestCase
     assert_equal(2, @screen.cursor.col)
   end
 
+  test "put_multicell stores flip_h / flip_v on the multicell anchor" do
+    @screen.put_multicell("A", scale: 2, width: 0, frac_n: 0, frac_d: 0,
+                         valign: 0, halign: 0, flip_h: true, flip_v: false)
+    mc = @screen.grid[0][0].multicell
+    assert_equal true,  mc[:flip_h]
+    assert_equal false, mc[:flip_v]
+  end
+
+  test "put_multicell defaults flip_h / flip_v to false when not requested" do
+    @screen.put_multicell("A", scale: 2, width: 0, frac_n: 0, frac_d: 0,
+                         valign: 0, halign: 0)
+    mc = @screen.grid[0][0].multicell
+    assert_equal false, mc[:flip_h]
+    assert_equal false, mc[:flip_v]
+  end
+
   test "put_multicell discards block larger than screen" do
     @screen.put_multicell("A", scale: 6, width: 2, frac_n: 0, frac_d: 0, valign: 0, halign: 0)
     # 6*2=12 cols > 10, should be discarded

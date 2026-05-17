@@ -492,7 +492,8 @@ module Echoes
       # Family names containing `:` aren't representable here because
       # `:` is the meta-field separator — use `,` or omit the colon
       # in the family name (e.g. "Helvetica Neue", not "Foo:Italic").
-      params = {scale: 1, width: 0, frac_n: 0, frac_d: 0, valign: 0, halign: 0, family: nil}
+      params = {scale: 1, width: 0, frac_n: 0, frac_d: 0, valign: 0, halign: 0,
+                 family: nil, flip_h: false, flip_v: false}
       meta_str.split(':').each do |pair|
         k, v = pair.split('=', 2)
         next unless v
@@ -504,6 +505,15 @@ module Echoes
         when 'v' then params[:valign] = v.to_i.clamp(0, 2)
         when 'h' then params[:halign] = v.to_i.clamp(0, 2)
         when 'f' then params[:family] = v unless v.empty?
+        when 'flip'
+          # Echoes extension: mirror the rendered glyph(s) on
+          # the requested axis. `flip=h` → horizontal mirror;
+          # `flip=v` → vertical mirror; `flip=hv` / `flip=vh`
+          # → both. Handy for direction-having emojis (e.g.
+          # turning a rightward 🐇 leftward, or vice versa).
+          flip = v.downcase
+          params[:flip_h] = flip.include?('h')
+          params[:flip_v] = flip.include?('v')
         end
       end
 

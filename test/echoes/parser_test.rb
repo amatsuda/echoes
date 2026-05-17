@@ -196,7 +196,7 @@ class Echoes::ParserTest < Test::Unit::TestCase
     @parser.feed("\e]66;s=2;A\x07")
     cell = @screen.grid[0][0]
     assert_equal("A", cell.char)
-    assert_equal({cols: 2, rows: 2, scale: 2, frac_n: 0, frac_d: 0, valign: 0, halign: 0, family: nil}, cell.multicell)
+    assert_equal({cols: 2, rows: 2, scale: 2, frac_n: 0, frac_d: 0, valign: 0, halign: 0, family: nil, flip_h: false, flip_v: false}, cell.multicell)
     # Continuation cells
     assert_equal(:cont, @screen.grid[0][1].multicell)
     assert_equal(:cont, @screen.grid[1][0].multicell)
@@ -265,6 +265,41 @@ class Echoes::ParserTest < Test::Unit::TestCase
     @parser.feed("\e]66;s=2:f=;X\x07")
     mc = @screen.grid[0][0].multicell
     assert_nil(mc[:family])
+  end
+
+  test "OSC 66 flip=h sets flip_h, leaves flip_v false" do
+    @parser.feed("\e]66;s=2:flip=h;\u{1F407}\x07")
+    mc = @screen.grid[0][0].multicell
+    assert_equal true,  mc[:flip_h]
+    assert_equal false, mc[:flip_v]
+  end
+
+  test "OSC 66 flip=v sets flip_v, leaves flip_h false" do
+    @parser.feed("\e]66;s=2:flip=v;X\x07")
+    mc = @screen.grid[0][0].multicell
+    assert_equal false, mc[:flip_h]
+    assert_equal true,  mc[:flip_v]
+  end
+
+  test "OSC 66 flip=hv sets both axes" do
+    @parser.feed("\e]66;s=2:flip=hv;X\x07")
+    mc = @screen.grid[0][0].multicell
+    assert_equal true, mc[:flip_h]
+    assert_equal true, mc[:flip_v]
+  end
+
+  test "OSC 66 flip=vh (order-insensitive) also sets both axes" do
+    @parser.feed("\e]66;s=2:flip=vh;X\x07")
+    mc = @screen.grid[0][0].multicell
+    assert_equal true, mc[:flip_h]
+    assert_equal true, mc[:flip_v]
+  end
+
+  test "OSC 66 without flip= leaves both axes false" do
+    @parser.feed("\e]66;s=2;X\x07")
+    mc = @screen.grid[0][0].multicell
+    assert_equal false, mc[:flip_h]
+    assert_equal false, mc[:flip_v]
   end
 
   test "DCS sixel sequence creates multicell with sixel data" do
