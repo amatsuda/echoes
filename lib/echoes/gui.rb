@@ -228,6 +228,7 @@ module Echoes
     def setup_app
       @app = ObjC::MSG_PTR.call(ObjC.cls('NSApplication'), ObjC.sel('sharedApplication'))
       ObjC::MSG_VOID_I.call(@app, ObjC.sel('setActivationPolicy:'), 0)
+      disable_press_and_hold
       # Disable native NSWindow tabbing so Cmd+N always spawns a real
       # new window. Default macOS behavior in fullscreen is to fold
       # additional NSWindows into the same OS-level tabbed window —
@@ -237,6 +238,24 @@ module Echoes
       # second clickable tab that switches to nothing.
       ObjC::MSG_VOID_I.call(ObjC.cls('NSWindow'), ObjC.sel('setAllowsAutomaticWindowTabbing:'), 0)
       setup_menu_bar
+    end
+
+    # macOS's "Press and Hold" feature (ApplePressAndHoldEnabled,
+    # default ON) routes every Latin letter through a state machine
+    # that waits to see if the user is summoning the accent popup
+    # — for vowels and a handful of consonants it shows variants
+    # (à á â ä …), for the rest (B, F, J, M, P, Q, V, X — letters
+    # with no diacritical variants in the US English layout) it
+    # just silently suppresses key-repeat. Terminal users want
+    # auto-repeat on every letter, so we register a defaults
+    # override scoped to this process: AppKit sees the value on
+    # the next keyDown and falls back to plain auto-repeat.
+    def disable_press_and_hold
+      std = ObjC::MSG_PTR.call(ObjC.cls('NSUserDefaults'), ObjC.sel('standardUserDefaults'))
+      dict = ObjC.nsdict({
+        ObjC.nsstring('ApplePressAndHoldEnabled') => ObjC.nsnumber_int(0),
+      })
+      ObjC::MSG_VOID_1.call(std, ObjC.sel('registerDefaults:'), dict)
     end
 
     def setup_menu_bar
