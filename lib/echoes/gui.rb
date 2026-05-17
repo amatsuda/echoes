@@ -1143,6 +1143,13 @@ module Echoes
               effective_scale *= mc[:frac_n].to_f / mc[:frac_d]
             end
             scaled_font = ObjC.retain(create_nsfont(@font_size * effective_scale, family: mc[:family]))
+            # Capture the regular line height *before* possibly swapping
+            # in the bold variant so we can re-align the bold baseline
+            # below — bold fonts often report a larger
+            # defaultLineHeightForFont and otherwise sit visually lower
+            # than adjacent non-bold OSC 66 cells (same fix the cell-loop
+            # path already does via y_offset_for_font).
+            regular_scaled_lh = ObjC::MSG_RET_D.call(scaled_font, ObjC.sel('defaultLineHeightForFont'))
             if cell.bold
               regular = scaled_font
               scaled_font = ObjC.retain(create_bold_nsfont(regular))
@@ -1180,6 +1187,16 @@ module Echoes
                       when 2 then y + (block_h - text_h) / 2.0
                       else y
                       end
+
+            # Baseline compensation: drawAtPoint pins the top of the
+            # line box to draw_y, and the line box height is the
+            # font's defaultLineHeightForFont. Bold variants of the
+            # same family often have a larger LH, which pushes the
+            # bold baseline below the regular one. Shift up by the
+            # difference so adjacent bold + regular OSC 66 runs sit
+            # on the same row.
+            drawn_lh = ObjC::MSG_RET_D.call(scaled_font, ObjC.sel('defaultLineHeightForFont'))
+            draw_y += (regular_scaled_lh - drawn_lh)
 
             ObjC::MSG_VOID_PT_1.call(ns_char, ObjC.sel('drawAtPoint:withAttributes:'), draw_x, draw_y, ns_attrs)
             ObjC.release(scaled_font)
