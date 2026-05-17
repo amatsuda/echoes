@@ -1998,6 +1998,8 @@ module Echoes
       @font_cache.each_value { |f| ObjC.release(f) unless f.to_i == old_font&.to_i }
       @font_cache = {}
       @font_y_offset_cache = {}
+      @italic_font_cache&.each_value { |f| ObjC.release(f) }
+      @italic_font_cache = {}
       update_cell_metrics
 
       @window_states.each do |ws|
@@ -2774,8 +2776,20 @@ module Echoes
     end
 
     def create_italic_nsfont(font)
+      # NSFontManager's convertFont:toHaveTrait: returns an
+      # autoreleased font whose pointer can shift call-to-call.
+      # Without this cache the same italic cell churns through a
+      # new pointer every frame, which busts y_offset_for_font's
+      # (pointer-keyed) cache, breaks the run-merging signature,
+      # and re-asks defaultLineHeightForFont — which on some
+      # fonts returns a subtly different float each time and
+      # makes italics jitter vertically in neovim et al.
+      @italic_font_cache ||= {}
+      cached = @italic_font_cache[font.to_i]
+      return cached if cached
       fm = ObjC::MSG_PTR.call(ObjC.cls('NSFontManager'), ObjC.sel('sharedFontManager'))
-      ObjC::MSG_PTR_1L.call(fm, ObjC.sel('convertFont:toHaveTrait:'), font, 0x1)  # NSItalicFontMask
+      italic = ObjC::MSG_PTR_1L.call(fm, ObjC.sel('convertFont:toHaveTrait:'), font, 0x1)  # NSItalicFontMask
+      @italic_font_cache[font.to_i] = ObjC.retain(italic)
     end
 
     # Used by Screen#put_multicell when an OSC 66 cell carries a
