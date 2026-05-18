@@ -607,12 +607,13 @@ module Echoes
     #                                        \e]7772;display-info;<json>\a
     #                                        back to the pty)
     #   open-window ; display=N:program=<base64-argv>:fullscreen=yes|no
-    #   multicell   ; <params> ; <text>
-    #     Same shape as OSC 66, plus Echoes-private params (f=family,
-    #     flip=h|v|hv). Use this instead of stuffing extensions into
-    #     OSC 66, so emitters that care about portability can keep
-    #     OSC 66 strictly kitty-compatible and reach for OSC 7772
-    #     ;multicell only when they want Echoes-only features.
+    #   multicell   ; <params> ; <text>    (OSC-66-shaped multicell + the
+    #                                        Echoes-only knobs `f=family`
+    #                                        and `flip=h|v|hv`. Use this
+    #                                        instead of putting extensions
+    #                                        on OSC 66 so portable emitters
+    #                                        can keep OSC 66 strictly
+    #                                        kitty-compatible.)
     def dispatch_osc7772(rest)
       command, args = rest.split(';', 2)
       case command
