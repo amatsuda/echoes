@@ -70,12 +70,7 @@ module Echoes
           # array form is what the OSC 7772 ;open-window handler
           # uses so user-supplied argv isn't subject to shell quoting.
           spawn_args = command.is_a?(Array) ? command : [command]
-          if env
-            @pty_read, @pty_write, @pty_pid = PTY.spawn(env, *spawn_args)
-          else
-            @pty_read, @pty_write, @pty_pid = PTY.spawn(*spawn_args)
-          end
-          @pty_read.winsize = pty_winsize_quad(rows, cols)
+          @pty_read, @pty_write, @pty_pid = spawn_with_pty(spawn_args, env, rows, cols)
         end
         @parser = Parser.new(@screen, writer: ->(s) { @pty_write.write(s) rescue nil })
         @title = File.basename(command.is_a?(Array) ? command.first : command)
@@ -877,6 +872,44 @@ module Echoes
     end
 
     private
+
+    # macOS ioctl numbers used by the manual pty setup below.
+    # PTY.spawn does setsid + TIOCSCTTY, but skips tcsetpgrp —
+    # leaving the slave's foreground process group unset (the
+    # macOS kernel doesn't fill it in automatically the way Linux
+    # does on TIOCSCTTY). The user's shell rc files then run
+    # things like `stty -ixon`, zsh fork+setpgid's stty into its
+    # own group for job control, that group has no parent in
+    # the slave's session, and tcsetattr returns
+    #   stty: tcsetattr: Input/output error
+    # because the calling group is "orphaned and not foreground".
+    # Pre-seeding the foreground pgrp to the shell's pid in the
+    # child — same way embedded_shell_helper does — makes the
+    # whole startup path tcsetattr-safe.
+    DARWIN_TIOCSCTTY = 0x20007461
+    DARWIN_TIOCSPGRP = 0x80047476
+
+    def spawn_with_pty(spawn_args, env, rows, cols)
+      master, slave = PTY.open
+      slave.winsize = pty_winsize_quad(rows, cols)
+      pid = fork do
+        master.close
+        Process.setsid rescue nil
+        slave.ioctl(DARWIN_TIOCSCTTY, 0) rescue nil
+        slave.ioctl(DARWIN_TIOCSPGRP, [Process.getpgrp].pack('i!')) rescue nil
+        STDIN.reopen(slave)
+        STDOUT.reopen(slave)
+        STDERR.reopen(slave)
+        slave.close rescue nil
+        if env
+          exec(env, *spawn_args)
+        else
+          exec(*spawn_args)
+        end
+      end
+      slave.close
+      [master, master, pid]
+    end
 
     # 4-element winsize tuple [rows, cols, xpixel, ypixel] for
     # TIOCSWINSZ. The pixel fields seed the slave's TIOCGWINSZ so
