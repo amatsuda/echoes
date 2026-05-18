@@ -84,9 +84,9 @@ class Echoes::ClientTest < Test::Unit::TestCase
     assert_equal "\e]66;s=2;Hi\a", @io.string
   end
 
-  test "styled_text includes family when given" do
+  test "styled_text routes through OSC 7772 ;multicell when family is given" do
     Echoes::Client.styled_text("Title", scale: 3, family: "Helvetica Neue", io: @io)
-    assert_equal "\e]66;s=3:f=Helvetica Neue;Title\a", @io.string
+    assert_equal "\e]7772;multicell;s=3:f=Helvetica Neue;Title\a", @io.string
   end
 
   test "styled_text roundtrips through the parser carrying family" do

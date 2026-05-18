@@ -488,13 +488,20 @@ module Echoes
       return unless text
 
       text.force_encoding('UTF-8')
-      # `f=` is an Echoes extension that other terminals ignore.
-      # Family names containing `:` aren't representable here because
-      # `:` is the meta-field separator — use `,` or omit the colon
-      # in the family name (e.g. "Helvetica Neue", not "Foo:Italic").
+      @screen.put_multicell(text, **parse_multicell_meta(meta_str, allow_extensions: false))
+    end
+
+    # Parse the `key=value:key=value:...` meta block that lives in
+    # the second field of OSC 66 (and of OSC 7772 ;multicell).
+    # `allow_extensions: false` accepts only the kitty spec keys
+    # (s/w/n/d/v/h) so OSC 66 stays strictly compatible with other
+    # terminals — Echoes-private knobs (f=family, flip=h|v|hv) are
+    # routed through OSC 7772 ;multicell, where collisions with a
+    # future kitty spec extension can't surprise emitters.
+    def parse_multicell_meta(meta_str, allow_extensions:)
       params = {scale: 1, width: 0, frac_n: 0, frac_d: 0, valign: 0, halign: 0,
                  family: nil, flip_h: false, flip_v: false}
-      meta_str.split(':').each do |pair|
+      meta_str.to_s.split(':').each do |pair|
         k, v = pair.split('=', 2)
         next unless v
         case k
@@ -504,20 +511,24 @@ module Echoes
         when 'd' then params[:frac_d] = v.to_i.clamp(0, 15)
         when 'v' then params[:valign] = v.to_i.clamp(0, 2)
         when 'h' then params[:halign] = v.to_i.clamp(0, 2)
-        when 'f' then params[:family] = v unless v.empty?
+        when 'f'
+          # Family name. Names with ':' aren't representable here
+          # because ':' is the meta-field separator — use ',' or
+          # omit the colon (e.g. "Helvetica Neue", not "Foo:Italic").
+          params[:family] = v if allow_extensions && !v.empty?
         when 'flip'
-          # Echoes extension: mirror the rendered glyph(s) on
-          # the requested axis. `flip=h` → horizontal mirror;
-          # `flip=v` → vertical mirror; `flip=hv` / `flip=vh`
-          # → both. Handy for direction-having emojis (e.g.
-          # turning a rightward 🐇 leftward, or vice versa).
-          flip = v.downcase
-          params[:flip_h] = flip.include?('h')
-          params[:flip_v] = flip.include?('v')
+          # Mirror the rendered glyph(s). `flip=h` horizontal,
+          # `flip=v` vertical, `flip=hv` / `flip=vh` both. Handy
+          # for direction-having emojis (e.g. flipping 🐇 to face
+          # the other way).
+          if allow_extensions
+            flip = v.downcase
+            params[:flip_h] = flip.include?('h')
+            params[:flip_v] = flip.include?('v')
+          end
         end
       end
-
-      @screen.put_multicell(text, **params)
+      params
     end
 
     def dispatch_osc_default_color(key, osc_code, spec)
@@ -596,9 +607,20 @@ module Echoes
     #                                        \e]7772;display-info;<json>\a
     #                                        back to the pty)
     #   open-window ; display=N:program=<base64-argv>:fullscreen=yes|no
+    #   multicell   ; <params> ; <text>
+    #     Same shape as OSC 66, plus Echoes-private params (f=family,
+    #     flip=h|v|hv). Use this instead of stuffing extensions into
+    #     OSC 66, so emitters that care about portability can keep
+    #     OSC 66 strictly kitty-compatible and reach for OSC 7772
+    #     ;multicell only when they want Echoes-only features.
     def dispatch_osc7772(rest)
       command, args = rest.split(';', 2)
       case command
+      when 'multicell'
+        meta_str, text = (args || '').split(';', 2)
+        return unless text
+        text.force_encoding('UTF-8')
+        @screen.put_multicell(text, **parse_multicell_meta(meta_str, allow_extensions: true))
       when 'bg-color'
         rgba = parse_hex_color((args || '').strip)
         if rgba

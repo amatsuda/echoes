@@ -248,58 +248,64 @@ class Echoes::ParserTest < Test::Unit::TestCase
     assert_equal(4, mc[:frac_d])
   end
 
-  test "OSC 66 with f=family records the family on the multicell" do
+  test "OSC 66 ignores f= (Echoes extension lives on OSC 7772 ;multicell)" do
     @parser.feed("\e]66;s=2:f=Helvetica Neue;Title\x07")
+    mc = @screen.grid[0][0].multicell
+    assert_nil(mc[:family], "OSC 66 must stay strictly kitty-compatible")
+    assert_equal(2, mc[:scale])
+  end
+
+  test "OSC 66 ignores flip= (Echoes extension lives on OSC 7772 ;multicell)" do
+    @parser.feed("\e]66;s=2:flip=hv;X\x07")
+    mc = @screen.grid[0][0].multicell
+    assert_equal false, mc[:flip_h]
+    assert_equal false, mc[:flip_v]
+  end
+
+  test "OSC 7772 ;multicell with f=family records the family" do
+    @parser.feed("\e]7772;multicell;s=2:f=Helvetica Neue;Title\x07")
     mc = @screen.grid[0][0].multicell
     assert_equal("Helvetica Neue", mc[:family])
     assert_equal(2, mc[:scale])
   end
 
-  test "OSC 66 without f= leaves family nil" do
-    @parser.feed("\e]66;s=2;X\x07")
+  test "OSC 7772 ;multicell f= empty value leaves family nil" do
+    @parser.feed("\e]7772;multicell;s=2:f=;X\x07")
     mc = @screen.grid[0][0].multicell
     assert_nil(mc[:family])
   end
 
-  test "OSC 66 f= empty value is ignored" do
-    @parser.feed("\e]66;s=2:f=;X\x07")
-    mc = @screen.grid[0][0].multicell
-    assert_nil(mc[:family])
-  end
-
-  test "OSC 66 flip=h sets flip_h, leaves flip_v false" do
-    @parser.feed("\e]66;s=2:flip=h;\u{1F407}\x07")
+  test "OSC 7772 ;multicell flip=h sets flip_h" do
+    @parser.feed("\e]7772;multicell;s=2:flip=h;\u{1F407}\x07")
     mc = @screen.grid[0][0].multicell
     assert_equal true,  mc[:flip_h]
     assert_equal false, mc[:flip_v]
   end
 
-  test "OSC 66 flip=v sets flip_v, leaves flip_h false" do
-    @parser.feed("\e]66;s=2:flip=v;X\x07")
+  test "OSC 7772 ;multicell flip=v sets flip_v" do
+    @parser.feed("\e]7772;multicell;s=2:flip=v;X\x07")
     mc = @screen.grid[0][0].multicell
     assert_equal false, mc[:flip_h]
     assert_equal true,  mc[:flip_v]
   end
 
-  test "OSC 66 flip=hv sets both axes" do
-    @parser.feed("\e]66;s=2:flip=hv;X\x07")
+  test "OSC 7772 ;multicell flip=hv (or vh) sets both axes" do
+    @parser.feed("\e]7772;multicell;s=2:flip=hv;X\x07")
+    mc = @screen.grid[0][0].multicell
+    assert_equal true, mc[:flip_h]
+    assert_equal true, mc[:flip_v]
+
+    @parser.feed("\e[H\e]7772;multicell;s=2:flip=vh;Y\x07")
     mc = @screen.grid[0][0].multicell
     assert_equal true, mc[:flip_h]
     assert_equal true, mc[:flip_v]
   end
 
-  test "OSC 66 flip=vh (order-insensitive) also sets both axes" do
-    @parser.feed("\e]66;s=2:flip=vh;X\x07")
+  test "OSC 7772 ;multicell accepts the standard kitty knobs (s, w, v, h)" do
+    @parser.feed("\e]7772;multicell;s=2:w=3;Hi\x07")
     mc = @screen.grid[0][0].multicell
-    assert_equal true, mc[:flip_h]
-    assert_equal true, mc[:flip_v]
-  end
-
-  test "OSC 66 without flip= leaves both axes false" do
-    @parser.feed("\e]66;s=2;X\x07")
-    mc = @screen.grid[0][0].multicell
-    assert_equal false, mc[:flip_h]
-    assert_equal false, mc[:flip_v]
+    assert_equal 2, mc[:scale]
+    assert_equal 6, mc[:cols]   # scale * width
   end
 
   test "DCS sixel sequence creates multicell with sixel data" do
