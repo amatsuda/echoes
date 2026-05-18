@@ -87,8 +87,18 @@ module Echoes
                     embedded: embedded_mode?, editor_file: editor_file)
       tab.title = editor_file ? File.basename(editor_file) : "Tab #{@tabs.size + 1}"
       tab.panes.each { |pane| wire_screen_handlers(pane) }
-      @tabs << tab
-      @active_tab = @tabs.size - 1
+      # Insert next to the current tab (Cmd+T from the middle of
+      # the tab bar lands the new tab immediately to the right of
+      # the active one, not at the far end) — matches Safari /
+      # Chrome / iTerm2 muscle memory.
+      if @tabs.empty?
+        @tabs << tab
+        @active_tab = 0
+      else
+        insert_at = @active_tab + 1
+        @tabs.insert(insert_at, tab)
+        @active_tab = insert_at
+      end
     end
 
     # Convert the active pane's OSC 7 `current_directory` URI into a local
