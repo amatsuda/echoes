@@ -1158,7 +1158,7 @@ module Echoes
             # below — bold fonts often report a larger
             # defaultLineHeightForFont and otherwise sit visually lower
             # than adjacent non-bold OSC 66 cells (same fix the cell-loop
-            # path already does via y_offset_for_font).
+            # path does via y_offset_for_font for same-family bold).
             regular_scaled_lh = ObjC::MSG_RET_D.call(scaled_font, ObjC.sel('defaultLineHeightForFont'))
             if cell.bold
               regular = scaled_font
@@ -1198,13 +1198,13 @@ module Echoes
                       else y
                       end
 
-            # Baseline compensation: drawAtPoint pins the top of the
-            # line box to draw_y, and the line box height is the
-            # font's defaultLineHeightForFont. Bold variants of the
-            # same family often have a larger LH, which pushes the
-            # bold baseline below the regular one. Shift up by the
-            # difference so adjacent bold + regular OSC 66 runs sit
-            # on the same row.
+            # Baseline compensation: same-family bold variants
+            # report a larger defaultLineHeightForFont; shifting
+            # by LH-delta puts the bold baseline back on the same
+            # row as the regular run beside it. (OSC 66 doesn't
+            # mix unrelated families in a single run, so the
+            # ascender-delta fork the cell-loop path needs doesn't
+            # apply here.)
             drawn_lh = ObjC::MSG_RET_D.call(scaled_font, ObjC.sel('defaultLineHeightForFont'))
             draw_y += (regular_scaled_lh - drawn_lh)
 
@@ -3302,6 +3302,8 @@ module Echoes
       leading = ObjC::MSG_RET_D.call(@font, ObjC.sel('leading'))
       @cell_height = ascender - descender + leading
       @font_default_line_height = ObjC::MSG_RET_D.call(@font, ObjC.sel('defaultLineHeightForFont'))
+      @font_default_ascender = ascender
+      @font_default_family = ObjC.to_ruby_string(ObjC::MSG_PTR.call(@font, ObjC.sel('familyName')))
       @font_y_offset_cache = {}
 
       # Propagate cell metrics to all pane screens (sixel sizing,
@@ -3331,18 +3333,39 @@ module Echoes
       @font_cache[char]
     end
 
-    # AppKit's NSString drawing positions the line box using
-    # defaultLineHeightForFont, which can differ between regular and bold
-    # variants of the same font (e.g. PlemolJP35 Console NF: regular=24, bold=29).
-    # That difference shifts the bold baseline downward versus regular by
-    # `bold_lh - regular_lh` points. Compensate by shifting the draw origin
-    # by the negative of that difference so all baselines coincide.
+    # Aligns a non-@font run's baseline with the @font baseline.
+    # AppKit's drawAtPoint pins the line box top to (x, y), but
+    # the formula it uses to derive the baseline from y differs
+    # between same-family variants and unrelated families:
+    #
+    #   - Same-family bold/italic siblings: AppKit lays out using
+    #     `defaultLineHeightForFont`, and a wider bold LH pushes
+    #     the bold baseline downward (e.g. PlemolJP35 Console NF:
+    #     regular LH=24, bold LH=29). Shifting by LH-delta puts
+    #     them back on the same row.
+    #   - Unrelated fallbacks (CJK, emoji, symbol fonts pulled in
+    #     by CTFontCreateForString): LH-delta tracks total line
+    #     box height but not where the *glyph* sits inside it. A
+    #     geometric-symbol font with a smaller ascender ends up
+    #     rendering ▶ visibly too high alongside ASCII text. The
+    #     ascender delta is the better metric here.
+    #
+    # So pick the metric based on whether the font shares
+    # @font's family.
     def y_offset_for_font(font)
       return 0.0 if font.to_i == @font.to_i
       cached = @font_y_offset_cache[font.to_i]
       return cached if cached
-      font_lh = ObjC::MSG_RET_D.call(font, ObjC.sel('defaultLineHeightForFont'))
-      @font_y_offset_cache[font.to_i] = @font_default_line_height - font_lh
+      font_family = ObjC.to_ruby_string(ObjC::MSG_PTR.call(font, ObjC.sel('familyName')))
+      offset =
+        if font_family == @font_default_family
+          font_lh = ObjC::MSG_RET_D.call(font, ObjC.sel('defaultLineHeightForFont'))
+          @font_default_line_height - font_lh
+        else
+          font_ascender = ObjC::MSG_RET_D.call(font, ObjC.sel('ascender'))
+          @font_default_ascender - font_ascender
+        end
+      @font_y_offset_cache[font.to_i] = offset
     end
 
     MODIFIED_KEYS = {
