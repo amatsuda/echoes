@@ -43,8 +43,8 @@ module Echoes
       @default_fg = make_color(*@active_profile.foreground)
       @default_bg = make_color(*@active_profile.background)
       @tab_bg = make_color(0.15, 0.15, 0.15)
-      @tab_active_bg = make_color(0.3, 0.3, 0.3)
-      @tab_fg = make_color(0.8, 0.8, 0.8)
+      @tab_fg_active   = make_color(0.95, 0.95, 0.95)
+      @tab_fg_inactive = make_color(0.55, 0.55, 0.55)
       @selection_color = make_color(*@active_profile.selection_color)
       @search_match_color = make_color(0.6, 0.5, 0.0)
       @search_current_color = make_color(0.8, 0.6, 0.0)
@@ -1049,6 +1049,24 @@ module Echoes
               end
         next unless row
 
+        # Cell-background fills snap their left/right (and
+        # top/bottom) to integer pixel boundaries against the
+        # *next* cell's left edge. When @cell_width is fractional
+        # (most monospace fonts at most sizes), independent per-
+        # cell rounding leaves sub-pixel AA seams between adjacent
+        # fills, which visibly stripe solid-bg regions (selection
+        # ranges, search matches, SF_DATALESS-file highlights from
+        # `ls`, …). Snapping with the next-boundary trick
+        # guarantees neighbors share an exact device-pixel edge,
+        # which is what makes the seams disappear.
+        snap_fill = lambda do |fx, fy, fw, fh|
+          x0 = fx.round
+          x1 = (fx + fw).round
+          y0 = fy.round
+          y1 = (fy + fh).round
+          ObjC::NSRectFill.call(x0.to_f, y0.to_f, (x1 - x0).to_f, (y1 - y0).to_f)
+        end
+
         # Text-run accumulator. We batch consecutive cells with
         # matching style into one drawAtPoint call so the font
         # shaper sees adjacent characters and can apply ligatures
@@ -1129,10 +1147,10 @@ module Echoes
 
             if selected
               ObjC::MSG_VOID.call(@selection_color, ObjC.sel('setFill'))
-              ObjC::NSRectFill.call(x, y, block_w, block_h)
+              snap_fill.call(x, y, block_w, block_h)
             elsif has_bg
               ObjC::MSG_VOID.call(bg_color, ObjC.sel('setFill'))
-              ObjC::NSRectFill.call(x, y, block_w, block_h)
+              snap_fill.call(x, y, block_w, block_h)
             end
 
             if mc[:sixel]
@@ -1236,16 +1254,16 @@ module Echoes
 
             if is_current_match
               ObjC::MSG_VOID.call(@search_current_color, ObjC.sel('setFill'))
-              ObjC::NSRectFill.call(x, y, cell_w, @cell_height)
+              snap_fill.call(x, y, cell_w, @cell_height)
             elsif is_match
               ObjC::MSG_VOID.call(@search_match_color, ObjC.sel('setFill'))
-              ObjC::NSRectFill.call(x, y, cell_w, @cell_height)
+              snap_fill.call(x, y, cell_w, @cell_height)
             elsif selected
               ObjC::MSG_VOID.call(@selection_color, ObjC.sel('setFill'))
-              ObjC::NSRectFill.call(x, y, cell_w, @cell_height)
+              snap_fill.call(x, y, cell_w, @cell_height)
             elsif has_bg
               ObjC::MSG_VOID.call(bg_color, ObjC.sel('setFill'))
-              ObjC::NSRectFill.call(x, y, cell_w, @cell_height)
+              snap_fill.call(x, y, cell_w, @cell_height)
             end
 
             if cell.char == " " && !has_bg && !selected && !is_match
@@ -2484,31 +2502,34 @@ module Echoes
       ObjC::MSG_VOID.call(@tab_bg, ObjC.sel('setFill'))
       ObjC::NSRectFill.call(0.0, ty, total_w + @cell_width, tbh)
 
+      # Vertically center titles in the bar.
+      title_y = ty + (tbh - @font_default_line_height) / 2.0
+
+      accent_color = make_color(*@active_profile.cursor_color)
+      accent_h     = 2.0
+      accent_inset = @cell_width * 0.5
+
       @tabs.each_with_index do |tab, i|
-        x = i * tab_w
+        x         = i * tab_w
+        is_active = (i == @active_tab)
 
-        # Active tab highlight
-        if i == @active_tab
-          ObjC::MSG_VOID.call(@tab_active_bg, ObjC.sel('setFill'))
-          ObjC::NSRectFill.call(x, ty, tab_w, tbh)
-        end
-
-        # Tab title
         label = tab.title
-        label = "#{label} " if label.length < 12
         ns_label = ObjC.nsstring(label)
         ns_attrs = ObjC.nsdict({
           ObjC::NSFontAttributeName => @font,
-          ObjC::NSForegroundColorAttributeName => @tab_fg,
+          ObjC::NSForegroundColorAttributeName => is_active ? @tab_fg_active : @tab_fg_inactive,
         })
         text_x = x + @cell_width * 0.5
-        ObjC::MSG_VOID_PT_1.call(ns_label, ObjC.sel('drawAtPoint:withAttributes:'), text_x, ty, ns_attrs)
+        ObjC::MSG_VOID_PT_1.call(ns_label, ObjC.sel('drawAtPoint:withAttributes:'), text_x, title_y, ns_attrs)
 
-        # Separator line between tabs
-        if i < @tabs.size - 1
-          sep_color = make_color(0.4, 0.4, 0.4)
-          ObjC::MSG_VOID.call(sep_color, ObjC.sel('setFill'))
-          ObjC::NSRectFill.call(x + tab_w - 0.5, ty + 2.0, 1.0, tbh - 4.0)
+        # Thin accent strip flush to the bottom of the bar marks
+        # the active tab — replaces the previous heavier full-cell
+        # background fill. Inset on each side so it reads as the
+        # tab's own marker rather than a continuous line.
+        if is_active
+          ObjC::MSG_VOID.call(accent_color, ObjC.sel('setFill'))
+          ObjC::NSRectFill.call(x + accent_inset, ty + tbh - accent_h,
+                                 tab_w - 2 * accent_inset, accent_h)
         end
       end
     end
