@@ -99,6 +99,7 @@ module Echoes
         @tabs.insert(insert_at, tab)
         @active_tab = insert_at
       end
+      reflow_to_current_view_size
     end
 
     # Convert the active pane's OSC 7 `current_directory` URI into a local
@@ -135,6 +136,7 @@ module Echoes
       end
 
       @active_tab = @active_tab.clamp(0, @tabs.size - 1)
+      reflow_to_current_view_size
     end
 
     def current_tab
@@ -2008,6 +2010,17 @@ module Echoes
       @rows = new_rows
       @cols = new_cols
       @tabs.each { |tab| tab.resize(@rows, @cols) }
+    end
+
+    # Re-run handle_resize against the current view frame. Toggling
+    # tab_bar_height (when @tabs.size crosses 1↔2) changes the grid
+    # area inside an unchanged window, but AppKit's setFrameSize:
+    # hook only fires on real frame changes — so call it ourselves
+    # so @rows reflows to the new available height.
+    def reflow_to_current_view_size
+      return unless @view && @cell_width && @cell_height
+      _, _, w, h = nsrect_via_invocation(@view, 'frame')
+      handle_resize(w, h)
     end
 
     def window_focus_changed(focused)
