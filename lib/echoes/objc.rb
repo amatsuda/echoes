@@ -174,11 +174,58 @@ module Echoes
     CGContextRestoreGState      = Fiddle::Function.new(COREGRAPHICS['CGContextRestoreGState'], [P], V)
     CGContextTranslateCTM       = Fiddle::Function.new(COREGRAPHICS['CGContextTranslateCTM'], [P, D, D], V)
     CGContextScaleCTM           = Fiddle::Function.new(COREGRAPHICS['CGContextScaleCTM'], [P, D, D], V)
+    CGContextRotateCTM          = Fiddle::Function.new(COREGRAPHICS['CGContextRotateCTM'], [P, D], V)
+    # CGAffineTransform inlined as 6 doubles (a, b, c, d, tx, ty).
+    CGContextConcatCTM          = Fiddle::Function.new(COREGRAPHICS['CGContextConcatCTM'], [P, D, D, D, D, D, D], V)
+    CGContextClearRect          = Fiddle::Function.new(COREGRAPHICS['CGContextClearRect'], [P, D, D, D, D], V)
     CGImageRelease              = Fiddle::Function.new(COREGRAPHICS['CGImageRelease'], [P], V)
     CGContextRelease            = Fiddle::Function.new(COREGRAPHICS['CGContextRelease'], [P], V)
 
+    # Path construction
+    CGContextBeginPath          = Fiddle::Function.new(COREGRAPHICS['CGContextBeginPath'], [P], V)
+    CGContextMoveToPoint        = Fiddle::Function.new(COREGRAPHICS['CGContextMoveToPoint'], [P, D, D], V)
+    CGContextAddLineToPoint     = Fiddle::Function.new(COREGRAPHICS['CGContextAddLineToPoint'], [P, D, D], V)
+    CGContextAddCurveToPoint    = Fiddle::Function.new(COREGRAPHICS['CGContextAddCurveToPoint'], [P, D, D, D, D, D, D], V)
+    CGContextAddQuadCurveToPoint = Fiddle::Function.new(COREGRAPHICS['CGContextAddQuadCurveToPoint'], [P, D, D, D, D], V)
+    # CGContextAddArc(ctx, x, y, radius, startAngle, endAngle, clockwise)
+    CGContextAddArc             = Fiddle::Function.new(COREGRAPHICS['CGContextAddArc'], [P, D, D, D, D, D, I], V)
+    CGContextClosePath          = Fiddle::Function.new(COREGRAPHICS['CGContextClosePath'], [P], V)
+
+    # Paint state
+    CGContextSetRGBFillColor    = Fiddle::Function.new(COREGRAPHICS['CGContextSetRGBFillColor'], [P, D, D, D, D], V)
+    CGContextSetRGBStrokeColor  = Fiddle::Function.new(COREGRAPHICS['CGContextSetRGBStrokeColor'], [P, D, D, D, D], V)
+    CGContextSetAlpha           = Fiddle::Function.new(COREGRAPHICS['CGContextSetAlpha'], [P, D], V)
+    CGContextSetLineWidth       = Fiddle::Function.new(COREGRAPHICS['CGContextSetLineWidth'], [P, D], V)
+    CGContextSetLineCap         = Fiddle::Function.new(COREGRAPHICS['CGContextSetLineCap'], [P, I], V)
+    CGContextSetLineJoin        = Fiddle::Function.new(COREGRAPHICS['CGContextSetLineJoin'], [P, I], V)
+    CGContextSetMiterLimit      = Fiddle::Function.new(COREGRAPHICS['CGContextSetMiterLimit'], [P, D], V)
+
+    # Path rasterization
+    CGContextFillPath           = Fiddle::Function.new(COREGRAPHICS['CGContextFillPath'], [P], V)
+    CGContextEOFillPath         = Fiddle::Function.new(COREGRAPHICS['CGContextEOFillPath'], [P], V)
+    CGContextStrokePath         = Fiddle::Function.new(COREGRAPHICS['CGContextStrokePath'], [P], V)
+    # CGContextDrawPath(ctx, mode) — mode picks fill / EO-fill / stroke / fill+stroke.
+    CGContextDrawPath           = Fiddle::Function.new(COREGRAPHICS['CGContextDrawPath'], [P, I], V)
+
     # kCGImageAlphaPremultipliedLast | kCGBitmapByteOrderDefault
     KCGImageAlphaPremultipliedLast = 1
+
+    # CGPathDrawingMode
+    KCG_PATH_FILL          = 0
+    KCG_PATH_EO_FILL       = 1
+    KCG_PATH_STROKE        = 2
+    KCG_PATH_FILL_STROKE   = 3
+    KCG_PATH_EO_FILL_STROKE = 4
+
+    # CGLineCap
+    KCG_LINE_CAP_BUTT    = 0
+    KCG_LINE_CAP_ROUND   = 1
+    KCG_LINE_CAP_SQUARE  = 2
+
+    # CGLineJoin
+    KCG_LINE_JOIN_MITER = 0
+    KCG_LINE_JOIN_ROUND = 1
+    KCG_LINE_JOIN_BEVEL = 2
 
     # CoreText framework
     CORETEXT = Fiddle.dlopen('/System/Library/Frameworks/CoreText.framework/CoreText')

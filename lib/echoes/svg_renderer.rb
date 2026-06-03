@@ -97,6 +97,11 @@ module Echoes
       # the renderer respects them via the WKWebView frame, but the
       # final pixel count may exceed them on Retina displays (we use
       # whatever the snapshot reports back).
+      #
+      # Tries the native CoreGraphics renderer first (fast, synchronous,
+      # no WebContent XPC process); falls back to WKWebView when the
+      # SVG uses anything outside that subset (text, filters, gradients,
+      # etc.) — see SvgCgRenderer for the precise contract.
       def rasterize(svg_bytes, width:, height:)
         return nil if svg_bytes.nil? || svg_bytes.empty?
         return nil if width <= 0 || height <= 0
@@ -104,6 +109,10 @@ module Echoes
         @rendering = true
 
         begin
+          require_relative 'svg_cg_renderer'
+          fast = SvgCgRenderer.rasterize(svg_bytes, width: width, height: height)
+          return fast if fast
+
           ensure_setup
           html = build_html(svg_bytes)
 

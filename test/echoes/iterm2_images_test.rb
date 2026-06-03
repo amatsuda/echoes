@@ -187,6 +187,64 @@ class Echoes::Iterm2ImagesTest < Test::Unit::TestCase
     Echoes::SvgRenderer.define_singleton_method(:rasterize, &real) if real
   end
 
+  # --- end-to-end through the CG fast path (no SvgRenderer stub) ---
+
+  test "path-only SVG renders through the CG fast path end-to-end" do
+    # No `with_svg_renderer_stub`: SvgRenderer dispatches to the real
+    # SvgCgRenderer, which actually rasterizes via CoreGraphics.
+    svg = %(<svg width="20" height="20"><rect width="20" height="20" fill="red"/></svg>).b
+    osc_rest = "File=inline=1;width=20px;height=20px:#{b64(svg)}"
+    assert Echoes::Iterm2Images.handle(osc_rest, screen: @screen)
+    assert_equal 1, @screen.images.size
+    img = @screen.images.first
+    assert_equal 20, img[:width]
+    assert_equal 20, img[:height]
+    assert_equal 20 * 20 * 4, img[:rgba].bytesize
+    # Premultiplied red, alpha 0xff.
+    r, _, _, a = img[:rgba].byteslice(0, 4).bytes
+    assert_in_delta 255, r, 4
+    assert_in_delta 255, a, 4
+  end
+
+  test "SVG with text bails CG fast path and reaches the WKWebView backend" do
+    # SvgCgRenderer returns nil for <text>; we stub it to a sentinel
+    # tracker and stub the WKWebView entry too so the test stays
+    # headless (no real WebContent process).
+    require 'echoes/svg_cg_renderer'
+    require 'echoes/svg_renderer'
+
+    cg_called = false
+    wk_called = false
+    cg_real = Echoes::SvgCgRenderer.method(:rasterize)
+    Echoes::SvgCgRenderer.define_singleton_method(:rasterize) do |bytes, width:, height:|
+      cg_called = true
+      cg_real.call(bytes, width: width, height: height)  # returns nil (bails on <text>)
+    end
+
+    # Replace the whole SvgRenderer.rasterize so we can detect the
+    # WebKit-path attempt without actually spinning up WKWebView.
+    # We re-implement the fast-path-first / fallback dispatch.
+    sr_real = Echoes::SvgRenderer.method(:rasterize)
+    Echoes::SvgRenderer.define_singleton_method(:rasterize) do |bytes, width:, height:|
+      fast = Echoes::SvgCgRenderer.rasterize(bytes, width: width, height: height)
+      next fast if fast
+      wk_called = true
+      {rgba: ("\xFF" * (width * height * 4)).b, width: width, height: height}
+    end
+
+    begin
+      svg = %(<svg width="10" height="10"><text>hi</text></svg>).b
+      osc_rest = "File=inline=1;width=10px;height=10px:#{b64(svg)}"
+      assert Echoes::Iterm2Images.handle(osc_rest, screen: @screen)
+    ensure
+      Echoes::SvgCgRenderer.define_singleton_method(:rasterize, &cg_real)
+      Echoes::SvgRenderer.define_singleton_method(:rasterize, &sr_real)
+    end
+
+    assert cg_called, "CG fast path should have been attempted first"
+    assert wk_called, "WKWebView fallback should have been reached after CG returned nil"
+  end
+
   # --- helpers ---
 
   class StubScreen

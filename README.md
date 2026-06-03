@@ -60,9 +60,14 @@ bundle exec exe/echoes -t  # TTY mode
   placements with `q=` / `a=p` / `a=d`) and iTerm2 inline images
   (OSC 1337 `File=` with PNG / JPEG / TIFF / GIF). **SVG** is also
   rendered by both protocols — detected by content-sniffing the
-  payload, rasterized through WKWebView at the cell footprint
-  requested (`c=`/`r=` for Kitty, `width=`/`height=` for iTerm2),
-  with the embedded `<svg>` script sandbox disabled.
+  payload, rasterized at the cell footprint requested (`c=`/`r=` for
+  Kitty, `width=`/`height=` for iTerm2). Path-only SVGs (paths,
+  basic shapes, `<g>`, transforms) go through a native CoreGraphics
+  fast path — synchronous, no XPC. SVGs containing `<text>`,
+  `<filter>`, gradients, `<use>`, etc. fall through transparently
+  to a WKWebView backend (slower first paint, but full CSS / SVG
+  surface). JavaScript is disabled and external resources blocked
+  on both paths.
 - **Desktop notifications** — OSC 9 (`\e]9;message\a`, iTerm2 style)
   and OSC 777 (`\e]777;notify;title;message\a`, VTE style) deliver
   to the macOS Notification Center.

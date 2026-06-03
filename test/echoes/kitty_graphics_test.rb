@@ -341,6 +341,53 @@ class Echoes::KittyGraphicsTest < Test::Unit::TestCase
     Echoes::SvgRenderer.define_singleton_method(:rasterize, &real) if real
   end
 
+  test "path-only SVG renders through the CG fast path end-to-end" do
+    # No stub: SvgRenderer dispatches to the real SvgCgRenderer.
+    svg = %(<svg width="20" height="20"><rect width="20" height="20" fill="red"/></svg>).b
+    Echoes::KittyGraphics.handle_chunk(@state, "a=T,s=20,v=20,i=70", b64(svg),
+                                       screen: @screen, writer: @writer)
+    assert_equal 1, @screen.images.size
+    img = @screen.images.first
+    assert_equal 20, img[:width]
+    assert_equal 20, img[:height]
+    assert_equal 20 * 20 * 4, img[:rgba].bytesize
+    r, _, _, a = img[:rgba].byteslice(0, 4).bytes
+    assert_in_delta 255, r, 4
+    assert_in_delta 255, a, 4
+  end
+
+  test "SVG with text bails CG fast path and reaches the WKWebView backend" do
+    require 'echoes/svg_cg_renderer'
+    require 'echoes/svg_renderer'
+
+    cg_called = false
+    wk_called = false
+    cg_real = Echoes::SvgCgRenderer.method(:rasterize)
+    Echoes::SvgCgRenderer.define_singleton_method(:rasterize) do |bytes, width:, height:|
+      cg_called = true
+      cg_real.call(bytes, width: width, height: height)   # nil on <text>
+    end
+    sr_real = Echoes::SvgRenderer.method(:rasterize)
+    Echoes::SvgRenderer.define_singleton_method(:rasterize) do |bytes, width:, height:|
+      fast = Echoes::SvgCgRenderer.rasterize(bytes, width: width, height: height)
+      next fast if fast
+      wk_called = true
+      {rgba: ("\xFF" * (width * height * 4)).b, width: width, height: height}
+    end
+
+    begin
+      svg = %(<svg width="10" height="10"><text>hi</text></svg>).b
+      Echoes::KittyGraphics.handle_chunk(@state, "a=T,s=10,v=10,i=71", b64(svg),
+                                         screen: @screen, writer: @writer)
+    ensure
+      Echoes::SvgCgRenderer.define_singleton_method(:rasterize, &cg_real)
+      Echoes::SvgRenderer.define_singleton_method(:rasterize, &sr_real)
+    end
+
+    assert cg_called, "CG fast path should have been attempted first"
+    assert wk_called, "WKWebView fallback should have been reached after CG returned nil"
+  end
+
   test "o=z with a corrupt stream responds with EBADDATA" do
     Echoes::KittyGraphics.handle_chunk(@state, "a=T,f=24,o=z,s=2,v=1,i=22",
                                        b64("not a zlib stream"),
