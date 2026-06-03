@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'zlib'
+require_relative 'svg_sniffer'
 
 module Echoes
   # Minimum-viable Kitty graphics protocol decoder. Wire format:
@@ -98,7 +99,7 @@ module Echoes
         bytes = inflate_if_needed(bytes, opts['o'])
         return respond(writer, opts, error: 'EBADDATA') unless bytes
 
-        image = decode_image(bytes, opts['f'] || DEFAULT_FORMAT, opts)
+        image = decode_image(bytes, opts['f'] || DEFAULT_FORMAT, opts, screen: screen)
         return respond(writer, opts, error: 'EBADPNG') unless image
 
         cache_image(state, opts['i'] || opts['I'] || '', image)
@@ -240,11 +241,13 @@ module Echoes
     end
 
     # Decode an image payload to {rgba:, width:, height:}.
+    #   <sniffed SVG> — render via WKWebView regardless of f=
     #   f=100 / unset — PNG (and anything else NSBitmapImageRep
     #                   eats: JPEG, GIF, TIFF, BMP)
     #   f=24          — raw RGB packed, dims from s= / v=
     #   f=32          — raw RGBA packed, dims from s= / v=
-    def decode_image(bytes, format, opts = {})
+    def decode_image(bytes, format, opts = {}, screen: nil)
+      return decode_svg(bytes, opts, screen) if SvgSniffer.svg?(bytes)
       case format.to_s
       when '100', ''
         decode_png(bytes)
@@ -255,6 +258,44 @@ module Echoes
         load_appkit
         AppKitPng.from_rgba(bytes, opts['s'].to_i, opts['v'].to_i)
       end
+    end
+
+    # SVG → {rgba:, width:, height:}. Picks the rasterization target
+    # before handing off to SvgRenderer (vector input has no intrinsic
+    # raster size, so the renderer needs explicit pixel dims).
+    def decode_svg(bytes, opts, screen)
+      require_relative 'svg_renderer'
+      w, h = svg_target_pixels(opts, screen, bytes)
+      SvgRenderer.rasterize(bytes, width: w, height: h)
+    end
+
+    # Priority: explicit pixels (s= / v=) → explicit cells (c= / r=)
+    # × cell pixel size → SVG intrinsic → 512² fallback. Capped at
+    # 4096 per axis so a runaway `viewBox="0 0 1e6 1e6"` can't ask
+    # for gigabyte buffers.
+    def svg_target_pixels(opts, screen, bytes)
+      cell_w = screen&.cell_pixel_width.to_f
+      cell_h = screen&.cell_pixel_height.to_f
+      w = svg_explicit_pixels(opts['s'], opts['c'], cell_w)
+      h = svg_explicit_pixels(opts['v'], opts['r'], cell_h)
+      if w.nil? || h.nil?
+        iw, ih = SvgSniffer.intrinsic_size(bytes)
+        w ||= iw if iw
+        h ||= ih if ih
+      end
+      w ||= 512
+      h ||= 512
+      [w.clamp(1, 4096), h.clamp(1, 4096)]
+    end
+
+    def svg_explicit_pixels(px_val, cell_val, cell_px)
+      if px_val && !px_val.empty? && px_val.to_i > 0
+        return px_val.to_i
+      end
+      if cell_val && !cell_val.empty? && cell_val.to_i > 0 && cell_px > 0
+        return (cell_val.to_i * cell_px).round
+      end
+      nil
     end
 
     # PNG → {rgba:, width:, height:}. Implemented in

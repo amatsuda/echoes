@@ -41,7 +41,11 @@ module Echoes
       bytes = decode_payload(payload_b64)
       return nil unless bytes
 
-      image = decode_image(bytes)
+      image = if svg?(bytes)
+                decode_svg(bytes, params, screen)
+              else
+                decode_image(bytes)
+              end
       return nil unless image
 
       cells_w, cells_h = compute_cell_dimensions(params, image, screen)
@@ -84,6 +88,57 @@ module Echoes
     def decode_image(bytes)
       require_relative 'kitty_graphics_appkit'
       KittyGraphics::AppKitPng.decode(bytes)
+    end
+
+    # SVG → {rgba:, width:, height:}. Computes the target pixel size
+    # from the wire-format width / height (cells, px, or %) before
+    # rasterizing, because the renderer needs an explicit target —
+    # vector input has no intrinsic raster dimensions.
+    def decode_svg(bytes, params, screen)
+      require_relative 'svg_renderer'
+      w, h = svg_target_pixels(params, screen, bytes)
+      SvgRenderer.rasterize(bytes, width: w, height: h)
+    end
+
+    def svg?(bytes)
+      require_relative 'svg_sniffer'
+      SvgSniffer.svg?(bytes)
+    end
+
+    # Pick the rasterization target. Priority:
+    #   1. Explicit wire dim from the client (cells × cell_px, Npx, or %)
+    #   2. Intrinsic width/height/viewBox parsed from the <svg> tag
+    #   3. 512² fallback
+    # Capped at 4096 per axis so a runaway `viewBox="0 0 1e6 1e6"`
+    # can't ask for gigabyte buffers.
+    def svg_target_pixels(params, screen, bytes)
+      cell_w = screen.cell_pixel_width.to_f
+      cell_h = screen.cell_pixel_height.to_f
+      w = svg_dim_to_pixels(params['width'],  cell_w, screen.cols)
+      h = svg_dim_to_pixels(params['height'], cell_h, screen.rows)
+      if w.nil? || h.nil?
+        iw, ih = SvgSniffer.intrinsic_size(bytes)
+        w ||= iw if iw
+        h ||= ih if ih
+      end
+      w ||= 512
+      h ||= 512
+      [w.clamp(1, 4096), h.clamp(1, 4096)]
+    end
+
+    def svg_dim_to_pixels(value, cell_px, screen_size)
+      return nil if value.nil? || value.empty? || value == 'auto'
+      if value.end_with?('px')
+        n = value.to_f
+        n.positive? ? n.round : nil
+      elsif value.end_with?('%')
+        return nil if cell_px <= 0
+        (screen_size * value.to_f / 100.0 * cell_px).round
+      else
+        return nil if cell_px <= 0
+        n = value.to_f
+        n.positive? ? (n * cell_px).round : nil
+      end
     end
 
     # Translate the wire's `width=` / `height=` into cell counts

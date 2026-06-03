@@ -124,6 +124,69 @@ class Echoes::Iterm2ImagesTest < Test::Unit::TestCase
                                         screen: @screen)
   end
 
+  # --- SVG path (dispatch only — rendering is stubbed) ---
+
+  test "handle routes SVG payload through SvgRenderer using cell-based dims" do
+    captured = nil
+    svg = %(<svg xmlns="http://www.w3.org/2000/svg"/>).b
+    with_svg_renderer_stub(->(bytes, width:, height:) {
+      captured = [bytes, width, height]
+      {rgba: ('R' * width * height * 4).b, width: width, height: height}
+    }) do
+      assert Echoes::Iterm2Images.handle(
+        "File=inline=1;width=10;height=5:#{b64(svg)}", screen: @screen)
+    end
+    # 10 cells × 8.0 cell_w = 80; 5 × 16.0 = 80.
+    assert_equal [svg, 80, 80], captured
+    assert_equal 1, @screen.images.size
+  end
+
+  test "handle SVG with width=Npx uses literal pixel target" do
+    captured = nil
+    svg = %(<svg xmlns="http://www.w3.org/2000/svg"/>).b
+    with_svg_renderer_stub(->(_bytes, width:, height:) {
+      captured = [width, height]
+      {rgba: ('X' * width * height * 4).b, width: width, height: height}
+    }) do
+      Echoes::Iterm2Images.handle(
+        "File=inline=1;width=300px;height=200px:#{b64(svg)}", screen: @screen)
+    end
+    assert_equal [300, 200], captured
+  end
+
+  test "handle SVG without client dims falls back to intrinsic size" do
+    captured = nil
+    svg = %(<svg width="120" height="80" xmlns="http://www.w3.org/2000/svg"/>).b
+    with_svg_renderer_stub(->(_bytes, width:, height:) {
+      captured = [width, height]
+      {rgba: ('X' * width * height * 4).b, width: width, height: height}
+    }) do
+      Echoes::Iterm2Images.handle("File=inline=1:#{b64(svg)}", screen: @screen)
+    end
+    assert_equal [120, 80], captured
+  end
+
+  test "handle SVG with no client dims and no intrinsic falls back to 512²" do
+    captured = nil
+    svg = %(<svg xmlns="http://www.w3.org/2000/svg"/>).b
+    with_svg_renderer_stub(->(_bytes, width:, height:) {
+      captured = [width, height]
+      {rgba: ('X' * width * height * 4).b, width: width, height: height}
+    }) do
+      Echoes::Iterm2Images.handle("File=inline=1:#{b64(svg)}", screen: @screen)
+    end
+    assert_equal [512, 512], captured
+  end
+
+  def with_svg_renderer_stub(stub)
+    require 'echoes/svg_renderer'
+    real = Echoes::SvgRenderer.method(:rasterize)
+    Echoes::SvgRenderer.define_singleton_method(:rasterize, &stub)
+    yield
+  ensure
+    Echoes::SvgRenderer.define_singleton_method(:rasterize, &real) if real
+  end
+
   # --- helpers ---
 
   class StubScreen

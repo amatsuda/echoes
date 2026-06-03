@@ -175,7 +175,7 @@ class Echoes::KittyGraphicsTest < Test::Unit::TestCase
   test "f=24 (raw RGB) routes to the raw decoder with s= / v= as dimensions" do
     rgb = ("\xFF\x00\x00" * 6).b   # 3x2 red
     captured = nil
-    replacement = ->(bytes, format, opts = {}) {
+    replacement = ->(bytes, format, opts = {}, screen: nil) {
       captured = [bytes, format, opts['s'], opts['v']]
       {rgba: "RGBA" * 6, width: 3, height: 2}
     }
@@ -192,7 +192,7 @@ class Echoes::KittyGraphicsTest < Test::Unit::TestCase
   test "f=32 (raw RGBA) routes to the raw decoder with s= / v= as dimensions" do
     rgba = ("\xFF\x00\x00\xFF" * 4).b  # 2x2 red
     captured = nil
-    replacement = ->(bytes, format, opts = {}) {
+    replacement = ->(bytes, format, opts = {}, screen: nil) {
       captured = [bytes, format, opts['s'], opts['v']]
       {rgba: rgba, width: 2, height: 2}
     }
@@ -275,7 +275,7 @@ class Echoes::KittyGraphicsTest < Test::Unit::TestCase
     raw       = ("\xFF\x00\x00" * 6).b   # 3x2 raw RGB
     deflated  = Zlib::Deflate.deflate(raw)
     captured  = nil
-    replacement = ->(bytes, format, opts = {}) {
+    replacement = ->(bytes, format, opts = {}, screen: nil) {
       captured = [bytes, format]
       {rgba: "RGBA" * 6, width: 3, height: 2}
     }
@@ -287,6 +287,58 @@ class Echoes::KittyGraphicsTest < Test::Unit::TestCase
     assert_equal raw, captured[0], "decoder must see inflated bytes, not deflated"
     assert_equal '24', captured[1]
     assert_equal 1, @screen.images.size
+  end
+
+  test "SVG payload routes through SvgRenderer with c=/r= × cell_px as target" do
+    captured = nil
+    svg = %(<svg xmlns="http://www.w3.org/2000/svg"/>).b
+    with_svg_renderer_stub(->(bytes, width:, height:) {
+      captured = [bytes, width, height]
+      {rgba: ('X' * width * height * 4).b, width: width, height: height}
+    }) do
+      Echoes::KittyGraphics.handle_chunk(@state, "a=T,c=10,r=5,i=42",
+                                         b64(svg),
+                                         screen: @screen, writer: @writer)
+    end
+    # 10 cells × 8.0 cell_w = 80 px; 5 × 16.0 = 80 px.
+    assert_equal [svg, 80, 80], captured
+    assert_equal 1, @screen.images.size
+  end
+
+  test "SVG payload falls back to intrinsic size when no c=/r= or s=/v= given" do
+    captured = nil
+    svg = %(<svg width="200" height="100" xmlns="http://www.w3.org/2000/svg"/>).b
+    with_svg_renderer_stub(->(_bytes, width:, height:) {
+      captured = [width, height]
+      {rgba: ('X' * width * height * 4).b, width: width, height: height}
+    }) do
+      Echoes::KittyGraphics.handle_chunk(@state, "a=T,i=43", b64(svg),
+                                         screen: @screen, writer: @writer)
+    end
+    assert_equal [200, 100], captured
+  end
+
+  test "SVG payload prefers s=/v= explicit pixels over c=/r=" do
+    captured = nil
+    svg = %(<svg xmlns="http://www.w3.org/2000/svg"/>).b
+    with_svg_renderer_stub(->(_bytes, width:, height:) {
+      captured = [width, height]
+      {rgba: ('X' * width * height * 4).b, width: width, height: height}
+    }) do
+      Echoes::KittyGraphics.handle_chunk(@state, "a=T,s=300,v=200,c=10,r=5,i=44",
+                                         b64(svg),
+                                         screen: @screen, writer: @writer)
+    end
+    assert_equal [300, 200], captured
+  end
+
+  def with_svg_renderer_stub(stub)
+    require 'echoes/svg_renderer'
+    real = Echoes::SvgRenderer.method(:rasterize)
+    Echoes::SvgRenderer.define_singleton_method(:rasterize, &stub)
+    yield
+  ensure
+    Echoes::SvgRenderer.define_singleton_method(:rasterize, &real) if real
   end
 
   test "o=z with a corrupt stream responds with EBADDATA" do
@@ -400,6 +452,9 @@ class Echoes::KittyGraphicsTest < Test::Unit::TestCase
       @placements = []
     end
 
+    def cell_pixel_width;  8.0  end
+    def cell_pixel_height; 16.0 end
+
     def respond_to?(meth, *)
       meth == :put_kitty_image || meth == :placements || super
     end
@@ -421,22 +476,26 @@ end
 module Echoes::KittyGraphics
   def self.stub_decoder(mapping)
     real = method(:decode_image)
-    define_singleton_method(:decode_image) do |bytes, _format, _opts = {}|
+    define_singleton_method(:decode_image) do |bytes, _format, _opts = {}, screen: nil|
       mapping[bytes]
     end
     yield
   ensure
-    define_singleton_method(:decode_image) { |bytes, format, opts = {}| real.call(bytes, format, opts) }
+    define_singleton_method(:decode_image) do |bytes, format, opts = {}, screen: nil|
+      real.call(bytes, format, opts, screen: screen)
+    end
   end
 
   # Like stub_decoder, but the replacement is a callable that
-  # receives (bytes, format, opts). Useful for asserting which
-  # branch the format dispatch took.
+  # receives (bytes, format, opts, screen:). Useful for asserting
+  # which branch the format dispatch took.
   def self.with_decoder(replacement)
     real = method(:decode_image)
     define_singleton_method(:decode_image, &replacement)
     yield
   ensure
-    define_singleton_method(:decode_image) { |bytes, format, opts = {}| real.call(bytes, format, opts) }
+    define_singleton_method(:decode_image) do |bytes, format, opts = {}, screen: nil|
+      real.call(bytes, format, opts, screen: screen)
+    end
   end
 end

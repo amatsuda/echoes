@@ -83,6 +83,20 @@ module Echoes
         cgimage = ObjC::MSG_PTR.call(rep, ObjC.sel('CGImage'))
         return nil if cgimage.null?
 
+        cgimage_to_rgba(cgimage, width, height)
+      end
+
+      # Draw a CGImage into a fresh premultiplied-RGBA8 bitmap context
+      # and return the raw pixel buffer as {rgba:, width:, height:}.
+      # Shared between the PNG decoder and SvgRenderer (which gets its
+      # CGImage from a WKWebView snapshot rather than NSBitmapImageRep).
+      # Returns nil if the bitmap context can't be allocated.
+      #
+      # CoreGraphics' coordinate system has y up; PNGs decode top-down.
+      # The renderer expects pixel row 0 at the top, which matches
+      # CGContextDrawImage's natural output here because the bitmap
+      # context we created has the same orientation we'll later read.
+      def cgimage_to_rgba(cgimage, width, height)
         bytes_per_row = width * 4
         buf = Fiddle::Pointer.malloc(width * height * 4, Fiddle::RUBY_FREE)
         cs  = ColorSpaceCreateDeviceRGB.call
@@ -93,11 +107,6 @@ module Echoes
           )
           return nil if ctx.null?
           begin
-            # CoreGraphics' coordinate system has y up; PNGs decode
-            # top-down. The renderer expects pixel row 0 at the top,
-            # which matches CGContextDrawImage's natural output here
-            # because the bitmap context we created has the same
-            # orientation we'll later read from.
             ContextDrawImage.call(ctx, 0.0, 0.0, width.to_f, height.to_f, cgimage)
             rgba = buf.to_str(width * height * 4)
             {rgba: rgba, width: width, height: height}

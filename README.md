@@ -58,7 +58,11 @@ bundle exec exe/echoes -t  # TTY mode
   RGBA via `f=24` / `f=32`, zlib-compressed payloads with `o=z`,
   file-path transmission via `t=f` / `t=t`, sub-cell pixel offsets,
   placements with `q=` / `a=p` / `a=d`) and iTerm2 inline images
-  (OSC 1337 `File=` with PNG / JPEG / TIFF / GIF).
+  (OSC 1337 `File=` with PNG / JPEG / TIFF / GIF). **SVG** is also
+  rendered by both protocols — detected by content-sniffing the
+  payload, rasterized through WKWebView at the cell footprint
+  requested (`c=`/`r=` for Kitty, `width=`/`height=` for iTerm2),
+  with the embedded `<svg>` script sandbox disabled.
 - **Desktop notifications** — OSC 9 (`\e]9;message\a`, iTerm2 style)
   and OSC 777 (`\e]777;notify;title;message\a`, VTE style) deliver
   to the macOS Notification Center.
@@ -258,6 +262,7 @@ knob like `family:` is set.
 | OSC 777              | VTE-style notification — `\e]777;notify;title;message\a`  |
 | OSC 1337             | iTerm2 inline images — `\e]1337;File=<args>:<base64>\a`   |
 | APC `_G…`            | Kitty graphics protocol (PNG, raw RGB/RGBA, zlib, file)   |
+| (sniffed)            | SVG payloads — auto-detected in both image protocols      |
 | DECSET 2026          | Synchronized output                                       |
 
 OSC 9 / OSC 777 notifications go through `terminal-notifier` when it's
