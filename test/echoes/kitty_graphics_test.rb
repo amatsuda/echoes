@@ -242,6 +242,37 @@ class Echoes::KittyGraphicsTest < Test::Unit::TestCase
     assert_equal 4, @screen.images[0][:width]
   end
 
+  test "image cache holds up to CACHE_LIMIT images (slide-deck capacity)" do
+    image_bytes = StubScreen::TINY_PNG_BYTES
+    Echoes::KittyGraphics.stub_decoder(image_bytes => {rgba: 'X', width: 1, height: 1}) do
+      # Upload one fewer than the limit — every entry should be cached.
+      (Echoes::KittyGraphics::CACHE_LIMIT - 1).times do |i|
+        Echoes::KittyGraphics.handle_chunk(@state, "a=t,i=#{i + 1},f=100,q=2",
+                                           b64(image_bytes),
+                                           screen: @screen, writer: @writer)
+      end
+      assert_equal Echoes::KittyGraphics::CACHE_LIMIT - 1, @state[:cache].size
+      assert(@state[:cache].key?('1'), "first upload must still be cached at one below the limit")
+    end
+  end
+
+  test "image cache LRU-evicts only when over the limit (oldest goes)" do
+    image_bytes = StubScreen::TINY_PNG_BYTES
+    Echoes::KittyGraphics.stub_decoder(image_bytes => {rgba: 'X', width: 1, height: 1}) do
+      # Upload one PAST the limit; the oldest (id 1) gets shifted out,
+      # the newest stays.
+      (Echoes::KittyGraphics::CACHE_LIMIT + 1).times do |i|
+        Echoes::KittyGraphics.handle_chunk(@state, "a=t,i=#{i + 1},f=100,q=2",
+                                           b64(image_bytes),
+                                           screen: @screen, writer: @writer)
+      end
+      assert_equal Echoes::KittyGraphics::CACHE_LIMIT, @state[:cache].size
+      assert(!@state[:cache].key?('1'), 'oldest entry should have been LRU-evicted')
+      assert(@state[:cache].key?((Echoes::KittyGraphics::CACHE_LIMIT + 1).to_s),
+             'newest entry should still be cached')
+    end
+  end
+
   test "a=p without a cached image responds with ENOENT" do
     Echoes::KittyGraphics.handle_chunk(@state, "a=p,i=99", '',
                                        screen: @screen, writer: @writer)

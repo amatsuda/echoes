@@ -19,7 +19,14 @@ module Echoes
   # so chunks from different panes don't collide.
   module KittyGraphics
     CHUNK_LIMIT_BYTES = 16 * 1024 * 1024
-    CACHE_LIMIT       = 16   # most-recent N images, LRU
+    # Most-recent N images, LRU. Slide-deck tooling (przn) uploads one
+    # image per shape primitive (`<rect>`, `<line>`, etc.) plus regular
+    # `<img>` tags, so a single slide easily crosses double digits. 16
+    # was a leftover sized for typical TUI clients that only stream a
+    # few inline images; bumping to 128 keeps memory bounded
+    # (~50 MB at typical slide-image sizes) while comfortably handling
+    # a busy slide and a few previous slides' images cached in.
+    CACHE_LIMIT       = 128
     DEFAULT_FORMAT    = '100'.freeze  # PNG
 
     module_function
