@@ -554,7 +554,31 @@ class Echoes::ScreenTest < Test::Unit::TestCase
     assert_equal 'A', @screen.grid[0][0].char, "row 0 must survive — no scroll"
     assert_equal 7, @screen.cursor.row, "cursor must not move"
     assert_equal 0, @screen.cursor.col
-    assert_nil @screen.grid[7][0].multicell, "image must NOT be placed (would clip)"
+    # Image IS placed at the cursor; the part that fits gets reserved
+    # as multicell, the rest renders via the GUI's blit pass and
+    # clips at the pane edge.
+    assert_not_nil @screen.grid[7][0].multicell, "image must be placed at the cursor"
+    assert_equal 1, @screen.placements.size, "placement must be recorded for the blit pass"
+    # Placement entry carries the FULL extent so the GUI draws the
+    # unclipped image (overflow pixels fall outside the pane rect).
+    assert_equal 6, @screen.placements.first[:cell_rows]
+    assert_equal 3, @screen.placements.first[:cell_cols]
+  end
+
+  test "put_kitty_image with suppress_cursor only reserves multicell cells inside the grid" do
+    @screen = Echoes::Screen.new(rows: 10, cols: 30)
+    @screen.cell_pixel_width  = 10.0
+    @screen.cell_pixel_height = 20.0
+    @screen.cursor.row = 8   # only 2 rows fit before the bottom edge
+    @screen.cursor.col = 0
+    rgba = "\x00".b * (30 * 120 * 4)  # 3 cells wide × 6 cells tall
+    @screen.put_kitty_image(rgba: rgba, width: 30, height: 120,
+                            suppress_cursor: true)
+    # Rows 8 and 9 are reserved as multicell (anchor + continuations);
+    # everything past row 9 doesn't exist in the grid.
+    assert_kind_of Hash, @screen.grid[8][0].multicell
+    assert_equal :cont,  @screen.grid[9][0].multicell
+    assert_equal 2, @screen.grid.size - 8, "grid only has 2 more rows"
   end
 
   test "put_kitty_image without suppress_cursor still scrolls to fit (slide-mode opt-in only)" do

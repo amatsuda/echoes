@@ -243,20 +243,20 @@ module Echoes
       mc_rows = cells_h && cells_h > 0 ? cells_h : (height / @cell_pixel_height).ceil
       mc_cols = [mc_cols, 1].max
       mc_rows = [mc_rows, 1].max
-      return if mc_cols > @cols || mc_rows > @rows
-
       if suppress_cursor
         # C=1 (slide-presentation mode): anchor at the current
         # cursor without wrapping or scrolling. A multi-image
         # slideshow would otherwise accumulate a cumulative
         # scroll offset every time an image landed near the
-        # bottom, dragging earlier rows off-screen. If the image
-        # doesn't fit at the current position, bail — the client
-        # positions the cursor deliberately and would rather see
-        # nothing than have the layout shift out from under it.
-        return if @cursor.col + mc_cols > @cols
-        return if @cursor.row + mc_rows > @rows
+        # bottom, dragging earlier rows off-screen. Oversize
+        # placements are registered at the cursor anyway — only
+        # the cells inside the grid get reserved as multicell
+        # anchors / continuations; the rest of the image draws
+        # via the GUI's blit pass and clips at the pane rect.
+        # (Used to bail out entirely on oversize; presentation
+        # clients prefer "show what fits" to "show nothing.")
       else
+        return if mc_cols > @cols || mc_rows > @rows
         if @cursor.col + mc_cols > @cols
           @cursor.col = 0
           line_feed
@@ -270,8 +270,19 @@ module Echoes
       anchor_row = @cursor.row
       anchor_col = @cursor.col
 
-      mc_rows.times do |dr|
-        mc_cols.times do |dc|
+      # How many cells of the multicell footprint actually land
+      # inside the grid. For images that fit, this equals the full
+      # mc_cols / mc_rows; oversize C=1 placements get clamped so
+      # we never index past `@grid`. The placement entry below
+      # still records the full mc_cols × mc_rows so the GUI draws
+      # the unclipped image and the pane-rect clip handles the
+      # overflowing pixels.
+      reservable_cols = [mc_cols, @cols - anchor_col].min
+      reservable_rows = [mc_rows, @rows - anchor_row].min
+      return if reservable_cols < 1 || reservable_rows < 1
+
+      reservable_rows.times do |dr|
+        reservable_cols.times do |dc|
           erase_multicell_at(anchor_row + dr, anchor_col + dc)
         end
       end
@@ -286,14 +297,17 @@ module Echoes
       # pass off `screen.placements`, not via mc[:sixel]. Keeps
       # the kitty path independent of the cell loop so deletes,
       # scrolls, and font changes affect drawing through one
-      # code path.
+      # code path. `cols` / `rows` carry the *full* image extent
+      # — the GUI uses those for the pixel draw rect — even when
+      # only `reservable_*` of those cells actually fit on the
+      # grid.
       anchor.multicell = {
         cols: mc_cols, rows: mc_rows, scale: 1,
         frac_n: 0, frac_d: 0, valign: 0, halign: 0,
       }
 
-      mc_rows.times do |dr|
-        mc_cols.times do |dc|
+      reservable_rows.times do |dr|
+        reservable_cols.times do |dc|
           next if dr == 0 && dc == 0
           cont = @grid[anchor_row + dr][anchor_col + dc]
           cont.reset!
