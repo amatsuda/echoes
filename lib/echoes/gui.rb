@@ -435,8 +435,17 @@ module Echoes
     def create_fonts
       @font = ObjC.retain(create_nsfont(@font_size))
       @bold_font = ObjC.retain(create_bold_nsfont(@font))
+      @tab_font = ObjC.retain(create_nsfont(tab_font_size))
       @font_y_offset_cache = {}
       update_cell_metrics
+    end
+
+    # Tab labels render in a smaller font than the cell grid so long
+    # titles read comfortably even when the bar's split across many
+    # narrow tabs. Scales with the user's font_size so the bar stays
+    # proportional at any zoom.
+    def tab_font_size
+      [(@font_size * 0.85).round(1), 9.0].max
     end
 
     def create_view_class
@@ -2084,10 +2093,13 @@ module Echoes
       Preferences.set_double(:font_size, new_size) if persist
       old_font = @font
       old_bold = @bold_font
+      old_tab  = @tab_font
       @font = ObjC.retain(create_nsfont(@font_size))
       @bold_font = ObjC.retain(create_bold_nsfont(@font))
+      @tab_font  = ObjC.retain(create_nsfont(tab_font_size))
       ObjC.release(old_font) if old_font
       ObjC.release(old_bold) if old_bold
+      ObjC.release(old_tab)  if old_tab
       @font_cache.each_value { |f| ObjC.release(f) unless f.to_i == old_font&.to_i }
       @font_cache = {}
       @font_y_offset_cache = {}
@@ -2522,6 +2534,20 @@ module Echoes
       ObjC::CGContextRestoreGState.call(cg_ctx)
     end
 
+    NSLineBreakByTruncatingTail = 4
+    # macOS empirically uses { Left=0, Center=1, Right=2 } at runtime
+    # (despite Apple's header comments and several years of doc pages
+    # claiming Center=2 / Right=1 for macOS) — verified by setting and
+    # rendering with each value against an offscreen bitmap context.
+    # Get this wrong and the truncated tab title pins to the right edge.
+    NSTextAlignmentCenter       = 1
+    # Engage the modern Cocoa typesetter so the paragraph-style
+    # alignment + line-break-mode actually take effect; the simple
+    # NSString-based draw APIs honor font/color but silently ignore
+    # paragraph styles.
+    NSStringDrawingUsesLineFragmentOrigin = 1
+    NSStringDrawingTruncatesLastVisibleLine = 1 << 5  # 32
+
     def draw_tab_bar(tbh, ty)
       total_w = @cell_width * @cols
       tab_w = total_w / @tabs.size
@@ -2531,24 +2557,51 @@ module Echoes
       ObjC::NSRectFill.call(0.0, ty, total_w + @cell_width, tbh)
 
       # Vertically center titles in the bar.
-      title_y = ty + (tbh - @font_default_line_height) / 2.0
+      title_y = ty + (tbh - @tab_font_line_height) / 2.0
 
       accent_color = make_color(*@active_profile.cursor_color)
       accent_h     = 2.0
       accent_inset = @cell_width * 0.5
 
+      # Truncating-tail paragraph style so titles wider than the tab
+      # render with a trailing "…" instead of overlapping their
+      # neighbors. Built once per draw (paragraph style is mutable
+      # and shared across the loop's attrs dicts).
+      ns_para = ObjC::MSG_PTR.call(ObjC.cls('NSMutableParagraphStyle'), ObjC.sel('alloc'))
+      ns_para = ObjC::MSG_PTR.call(ns_para, ObjC.sel('init'))
+      ObjC::MSG_VOID_L.call(ns_para, ObjC.sel('setLineBreakMode:'), NSLineBreakByTruncatingTail)
+      ObjC::MSG_VOID_L.call(ns_para, ObjC.sel('setAlignment:'),     NSTextAlignmentCenter)
+
+      pad    = @cell_width * 0.5
+      rect_w = tab_w - 2 * pad
+      rect_w = 0.0 if rect_w < 0
+
       @tabs.each_with_index do |tab, i|
         x         = i * tab_w
         is_active = (i == @active_tab)
 
-        label = tab.title
-        ns_label = ObjC.nsstring(label)
+        ns_label = ObjC.nsstring(tab.title)
         ns_attrs = ObjC.nsdict({
-          ObjC::NSFontAttributeName => @font,
+          ObjC::NSFontAttributeName => @tab_font,
           ObjC::NSForegroundColorAttributeName => is_active ? @tab_fg_active : @tab_fg_inactive,
+          ObjC::NSParagraphStyleAttributeName  => ns_para,
         })
-        text_x = x + @cell_width * 0.5
-        ObjC::MSG_VOID_PT_1.call(ns_label, ObjC.sel('drawAtPoint:withAttributes:'), text_x, title_y, ns_attrs)
+        # Build an NSAttributedString rather than passing the dict to
+        # NSString's draw methods — the NSString-based draw APIs honor
+        # font + color but silently ignore paragraph-style alignment,
+        # which is why earlier attempts left the truncated text
+        # drifted toward one edge instead of centered. NSAttributedString
+        # drawWithRect:options:context: routes through the canonical
+        # typesetter and respects the alignment + truncating-tail mode.
+        attr_str = ObjC::MSG_PTR.call(ObjC.cls('NSAttributedString'), ObjC.sel('alloc'))
+        attr_str = ObjC::MSG_PTR_2.call(attr_str,
+          ObjC.sel('initWithString:attributes:'), ns_label, ns_attrs)
+        ObjC::MSG_VOID_RECT_L_1.call(attr_str,
+          ObjC.sel('drawWithRect:options:context:'),
+          x + pad, title_y, rect_w, @tab_font_line_height,
+          NSStringDrawingUsesLineFragmentOrigin | NSStringDrawingTruncatesLastVisibleLine,
+          Fiddle::Pointer.new(0))
+        ObjC.release(attr_str)
 
         # Thin accent strip flush to the bottom of the bar marks
         # the active tab — replaces the previous heavier full-cell
@@ -2560,6 +2613,8 @@ module Echoes
                                  tab_w - 2 * accent_inset, accent_h)
         end
       end
+
+      ObjC.release(ns_para)
     end
 
     def grid_position(event_ptr)
@@ -3353,6 +3408,9 @@ module Echoes
       @font_default_line_height = ObjC::MSG_RET_D.call(@font, ObjC.sel('defaultLineHeightForFont'))
       @font_default_ascender = ascender
       @font_default_family = ObjC.to_ruby_string(ObjC::MSG_PTR.call(@font, ObjC.sel('familyName')))
+      @tab_font_line_height = @tab_font ?
+        ObjC::MSG_RET_D.call(@tab_font, ObjC.sel('defaultLineHeightForFont')) :
+        @font_default_line_height
       @font_y_offset_cache = {}
 
       # Propagate cell metrics to all pane screens (sixel sizing,
