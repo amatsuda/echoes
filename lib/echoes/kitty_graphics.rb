@@ -335,6 +335,10 @@ module Echoes
         px_y_offset:      opts['Y'].to_i,
         suppress_cursor:  opts['C'] == '1',
         image_id:         raw_id.empty? ? nil : raw_id,
+        # z<0 layers the image beneath cell text (the GUI splits the
+        # placement blit into pre-cell and post-cell passes by z sign);
+        # z>=0 (the spec default of 0 included) layers on top.
+        z_index:          opts['z'].to_i,
       )
     end
 

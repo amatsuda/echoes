@@ -1040,6 +1040,19 @@ module Echoes
       draw_pane_background(screen.background, px, py, pane_cols, pane_rows) if screen.background
       draw_pane_fills(screen.bg_fills, px, py, pane_cols, pane_rows) if screen.bg_fills && !screen.bg_fills.empty?
 
+      # Kitty graphics z<0 placements blit BEFORE cells, so cell glyphs
+      # (and explicit cell bg fills) draw on top. Sorted ascending by
+      # z so a less-negative z stacks atop a more-negative one. Cells
+      # with the default (transparent) bg skip the fill rect — the
+      # placement shows through; cells with an explicit ANSI bg paint
+      # opaque and occlude the placement at those cells.
+      below = screen.placements.select { |pl| pl[:z_index].to_i < 0 }
+      if !below.empty?
+        below.sort_by { |pl| pl[:z_index].to_i }.each do |pl|
+          blit_kitty_placement(pl, px, py, pane_rows)
+        end
+      end
+
       pane_rows.times do |r|
         y = py + r * @cell_height
         next if y + @cell_height < dirty_min_y || y > dirty_max_y
@@ -1308,15 +1321,17 @@ module Echoes
         flush_run.call
       end
 
-      # Re-blit kitty graphics placements ON TOP of the rendered
-      # cells. Anchors are stored as logical cell coords on the
-      # Screen; we convert to pixels here using current cell
-      # metrics so font-size and pane-resize changes pick up the
-      # right pixel position automatically — placements need no
-      # bookkeeping when @cell_width / @cell_height shift.
-      screen.placements.each do |pl|
-        blit_kitty_placement(pl, px, py, pane_rows)
-      end
+      # Re-blit kitty graphics z>=0 placements ON TOP of the rendered
+      # cells. (z<0 placements were drawn above before the cell loop,
+      # so cell text appears in front of them.) Anchors are stored as
+      # logical cell coords on the Screen; we convert to pixels here
+      # using current cell metrics so font-size and pane-resize changes
+      # pick up the right pixel position automatically — placements
+      # need no bookkeeping when @cell_width / @cell_height shift.
+      screen.placements
+        .select { |pl| pl[:z_index].to_i >= 0 }
+        .sort_by { |pl| pl[:z_index].to_i }
+        .each { |pl| blit_kitty_placement(pl, px, py, pane_rows) }
 
       # Draw cursor or copy mode cursor
       if copy_mode&.active

@@ -594,6 +594,22 @@ class Echoes::ScreenTest < Test::Unit::TestCase
     assert_equal rgba, p[:image][:rgba]
     assert_equal 30,   p[:image][:width]
     assert_equal 60,   p[:image][:height]
+    assert_equal 0,    p[:z_index]   # default
+  end
+
+  test "put_kitty_image records z_index on the placement entry" do
+    @screen = Echoes::Screen.new(rows: 10, cols: 30)
+    @screen.cell_pixel_width  = 10.0
+    @screen.cell_pixel_height = 20.0
+    rgba = "\x00".b * (10 * 20 * 4)
+    @screen.put_kitty_image(rgba: rgba, width: 10, height: 20,
+                            image_id: 'bg', z_index: -1, suppress_cursor: true)
+    assert_equal(-1, @screen.placements.first[:z_index])
+
+    @screen.cursor.col = 5
+    @screen.put_kitty_image(rgba: rgba, width: 10, height: 20,
+                            image_id: 'fg', z_index: 3, suppress_cursor: true)
+    assert_equal 3, @screen.placements.last[:z_index]
   end
 
   test "scroll_up shifts placement anchor_row and drops fully-offscreen entries" do

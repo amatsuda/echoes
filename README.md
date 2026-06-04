@@ -57,7 +57,9 @@ bundle exec exe/echoes -t  # TTY mode
 - **Images** — Kitty graphics protocol (PNG via `f=100`, raw RGB /
   RGBA via `f=24` / `f=32`, zlib-compressed payloads with `o=z`,
   file-path transmission via `t=f` / `t=t`, sub-cell pixel offsets,
-  placements with `q=` / `a=p` / `a=d`) and iTerm2 inline images
+  placements with `q=` / `a=p` / `a=d`, `z=` for layering — negative
+  `z` blits the image beneath cell text, the default `z=0` and any
+  positive value blit on top) and iTerm2 inline images
   (OSC 1337 `File=` with PNG / JPEG / TIFF / GIF). **SVG** is also
   rendered by both protocols — detected by content-sniffing the
   payload, rasterized at the cell footprint requested (`c=`/`r=` for

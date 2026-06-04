@@ -235,7 +235,7 @@ module Echoes
     # rather than introducing a parallel `:image` key.
     def put_kitty_image(rgba:, width:, height:, cells_w: nil, cells_h: nil,
                          px_x_offset: 0, px_y_offset: 0,
-                         suppress_cursor: false, image_id: nil)
+                         suppress_cursor: false, image_id: nil, z_index: 0)
       return if rgba.nil? || width <= 0 || height <= 0
       return if @cell_pixel_width.to_f <= 0 || @cell_pixel_height.to_f <= 0
 
@@ -314,6 +314,7 @@ module Echoes
         cell_rows:  mc_rows,
         x_off:      px_x_offset.to_i,
         y_off:      px_y_offset.to_i,
+        z_index:    z_index.to_i,
         image:      {rgba: rgba, width: width, height: height},
       }
 

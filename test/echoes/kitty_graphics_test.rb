@@ -120,6 +120,26 @@ class Echoes::KittyGraphicsTest < Test::Unit::TestCase
     assert_includes @writes.first, 'OK'
   end
 
+  test "z= flows through to put_kitty_image as z_index" do
+    image_bytes = StubScreen::TINY_PNG_BYTES
+    Echoes::KittyGraphics.stub_decoder(image_bytes => {rgba: 'X', width: 1, height: 1}) do
+      Echoes::KittyGraphics.handle_chunk(@state, "a=T,i=1,f=100,z=-1",
+                                         b64(image_bytes),
+                                         screen: @screen, writer: @writer)
+    end
+    assert_equal(-1, @screen.images[0][:z_index])
+  end
+
+  test "z= absent defaults to z_index 0" do
+    image_bytes = StubScreen::TINY_PNG_BYTES
+    Echoes::KittyGraphics.stub_decoder(image_bytes => {rgba: 'X', width: 1, height: 1}) do
+      Echoes::KittyGraphics.handle_chunk(@state, "a=T,i=2,f=100",
+                                         b64(image_bytes),
+                                         screen: @screen, writer: @writer)
+    end
+    assert_equal 0, @screen.images[0][:z_index]
+  end
+
   test "a=t caches the image but does not display it" do
     image_bytes = StubScreen::TINY_PNG_BYTES
     Echoes::KittyGraphics.stub_decoder(image_bytes => {rgba: 'RGBA', width: 1, height: 1}) do
@@ -508,12 +528,12 @@ class Echoes::KittyGraphicsTest < Test::Unit::TestCase
 
     def put_kitty_image(rgba:, width:, height:, cells_w:, cells_h:,
                          px_x_offset: 0, px_y_offset: 0,
-                         suppress_cursor:, image_id: nil)
+                         suppress_cursor:, image_id: nil, z_index: 0)
       @images << {rgba: rgba, width: width, height: height,
                    cells_w: cells_w, cells_h: cells_h,
                    px_x_offset: px_x_offset, px_y_offset: px_y_offset,
                    suppress_cursor: suppress_cursor,
-                   image_id: image_id}
+                   image_id: image_id, z_index: z_index}
     end
   end
 end
