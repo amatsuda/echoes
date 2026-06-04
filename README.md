@@ -96,6 +96,8 @@ bundle exec exe/echoes -t  # TTY mode
 | Cmd+Shift+D               | Split pane down                         |
 | Cmd+] / Cmd+[             | Next / previous pane                    |
 | Cmd+Shift+] / Cmd+Shift+[ | Next / previous tab                     |
+| Cmd+1 … Cmd+8             | Jump to tab 1 … 8                       |
+| Cmd+9                     | Jump to the last tab                    |
 | Cmd++ / Cmd+- / Cmd+0     | Bigger / smaller / reset font           |
 | Cmd+F                     | Find                                    |
 | Cmd+G / Cmd+Shift+G       | Find next / previous                    |
@@ -161,9 +163,10 @@ keybind "",            :toggle_pointer    # disable the default
 Available actions (one per menu item): `:new_window`, `:new_tab`,
 `:close_tab`, `:close_pane`, `:edit_file`, `:split_right`, `:split_down`,
 `:select_next_pane`, `:select_previous_pane`, `:show_next_tab`,
-`:show_previous_tab`, `:increase_font_size`, `:decrease_font_size`,
-`:reset_font_size`, `:toggle_find`, `:find_next`, `:find_previous`,
-`:toggle_pointer`, `:toggle_copy_mode`.
+`:show_previous_tab`, `:select_tab_1` … `:select_tab_9`
+(jump-to-tab; `:select_tab_9` is "last tab"), `:increase_font_size`,
+`:decrease_font_size`, `:reset_font_size`, `:toggle_find`,
+`:find_next`, `:find_previous`, `:toggle_pointer`, `:toggle_copy_mode`.
 
 Modifier names are case-insensitive and accept the obvious aliases:
 `Cmd`/`Command`/`Super`, `Ctrl`/`Control`, `Opt`/`Option`/`Alt`, `Shift`.

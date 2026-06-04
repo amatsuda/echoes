@@ -304,3 +304,73 @@ class Echoes::GUISearchMatcherTest < Test::Unit::TestCase
     assert hits.size <= 'hello world'.length + 1
   end
 end
+
+class Echoes::GUISelectTabTest < Test::Unit::TestCase
+  # Same pattern as the other GUI unit tests — bypass GUI.new (which
+  # spins up AppKit menus, windows, etc.) and exercise the pure-state
+  # tab-switch logic directly.
+  def make_gui(num_tabs:, active: 0)
+    gui = Echoes::GUI.allocate
+    gui.instance_variable_set(:@tabs, Array.new(num_tabs) { Object.new })
+    gui.instance_variable_set(:@active_tab, active)
+    gui
+  end
+
+  def active(gui)
+    gui.instance_variable_get(:@active_tab)
+  end
+
+  test "Cmd+N selects tab N-1 by index for 1..8" do
+    # Pick a starting active tab that's never the same as the target,
+    # so every iteration actually triggers a switch.
+    [1, 2, 3, 4, 5, 6, 7, 8].each do |n|
+      start = (n % 8)
+      gui = make_gui(num_tabs: 8, active: start)
+      assert gui.select_tab(n), "Cmd+#{n} (start=#{start}) should switch"
+      assert_equal n - 1, active(gui)
+    end
+  end
+
+  test "Cmd+9 always jumps to the last tab regardless of count" do
+    # Sizes >= 2 so "active = 0" and "last tab" are distinct.
+    [2, 3, 5, 9, 12].each do |size|
+      gui = make_gui(num_tabs: size, active: 0)
+      assert gui.select_tab(9), "Cmd+9 (size=#{size}) should change to last"
+      assert_equal size - 1, active(gui)
+    end
+  end
+
+  test "Cmd+N for N > num_tabs is a no-op" do
+    gui = make_gui(num_tabs: 3, active: 1)
+    refute gui.select_tab(5), "Cmd+5 with 3 tabs must report no change"
+    refute gui.select_tab(8), "Cmd+8 with 3 tabs must report no change"
+    assert_equal 1, active(gui), "active tab must not move"
+  end
+
+  test "Cmd+9 with one tab is a no-op (target equals active)" do
+    gui = make_gui(num_tabs: 1, active: 0)
+    refute gui.select_tab(9), "single-tab Cmd+9 must report no change"
+    assert_equal 0, active(gui)
+  end
+
+  test "Cmd+9 with zero tabs is a no-op (target index would be -1)" do
+    # @tabs.size == 0 yields target = -1; the bounds check must reject it.
+    gui = make_gui(num_tabs: 0, active: 0)
+    refute gui.select_tab(9), "Cmd+9 with no tabs must report no change"
+  end
+
+  test "selecting the already-active tab is a no-op" do
+    gui = make_gui(num_tabs: 5, active: 2)
+    refute gui.select_tab(3), "Cmd+3 when tab 3 (index 2) is already active"
+    assert_equal 2, active(gui)
+  end
+
+  test "Cmd+9 in a 9+ tab window picks the last, not literally the 9th" do
+    # Verifies the spec-difference between "tab 9" and "last tab" —
+    # Cmd+9 must follow the last-tab convention, so a 12-tab window
+    # lands on index 11 (not index 8).
+    gui = make_gui(num_tabs: 12, active: 0)
+    assert gui.select_tab(9)
+    assert_equal 11, active(gui)
+  end
+end

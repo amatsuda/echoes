@@ -143,6 +143,20 @@ module Echoes
       @tabs[@active_tab]
     end
 
+    # Switch to a tab by 1-based slot number (Cmd+N shortcuts).
+    # n=1..8 maps to that tab index; n=9 maps to the LAST tab
+    # regardless of count, matching Safari / Chrome / iTerm2 /
+    # Ghostty. Returns true when the active tab actually changed
+    # (the caller redraws on true), false when the request was a
+    # no-op — target out of range or already active.
+    def select_tab(n)
+      target = (n == 9) ? @tabs.size - 1 : n - 1
+      return false if target < 0 || target >= @tabs.size
+      return false if target == @active_tab
+      @active_tab = target
+      true
+    end
+
     # Phase 1 launch flag for the in-process Rubish embedding. Setting
     # ECHOES_EMBED=1 in the environment routes new Tab/Pane creation
     # through Echoes::EmbeddedShell instead of PTY.spawn.
@@ -323,6 +337,12 @@ module Echoes
       add_menu_item(window_menu, "Show Next Tab", 'showNextTab:', '}',
                     modifiers: ObjC::NSEventModifierFlagCommand | ObjC::NSEventModifierFlagShift,
                     bind: :show_next_tab)
+      # Cmd+1..8 jump to that tab index; Cmd+9 goes to the last tab.
+      (1..9).each do |n|
+        title = (n == 9) ? "Show Last Tab" : "Show Tab #{n}"
+        add_menu_item(window_menu, title, "selectTab#{n}:", n.to_s,
+                      bind: :"select_tab_#{n}")
+      end
       add_separator(window_menu)
       add_menu_item(window_menu, "Select Next Pane", 'selectNextPane:', ']', bind: :select_next_pane)
       add_menu_item(window_menu, "Select Previous Pane", 'selectPreviousPane:', '[', bind: :select_previous_pane)
@@ -779,6 +799,15 @@ module Echoes
         @active_tab = (@active_tab + 1) % @tabs.size
         ObjC::MSG_VOID_I.call(@view, ObjC.sel('setNeedsDisplay:'), 1)
       })
+      # Cmd+1..8 → tabs 1..8; Cmd+9 → last tab (whichever it is) —
+      # matches Safari, Chrome, iTerm2, Ghostty. The indexing /
+      # bounds / no-op logic lives in select_tab so it's testable
+      # without standing up the closure + menu machinery.
+      @select_tab_closures = (1..9).map do |n|
+        menu_action.call(-> {
+          ObjC::MSG_VOID_I.call(@view, ObjC.sel('setNeedsDisplay:'), 1) if select_tab(n)
+        })
+      end
       @split_right_closure = menu_action.call(-> {
         tab = current_tab
         new_pane = tab.split_vertical
@@ -911,6 +940,9 @@ module Echoes
         'findPrevious:'         => ['v@:@', @find_prev_closure],
         'showPreviousTab:'      => ['v@:@', @prev_tab_closure],
         'showNextTab:'          => ['v@:@', @next_tab_closure],
+        **(1..9).each_with_object({}) { |n, h|
+          h["selectTab#{n}:"] = ['v@:@', @select_tab_closures[n - 1]]
+        },
         'splitRight:'           => ['v@:@', @split_right_closure],
         'splitDown:'            => ['v@:@', @split_down_closure],
         'closePane:'            => ['v@:@', @close_pane_closure],
