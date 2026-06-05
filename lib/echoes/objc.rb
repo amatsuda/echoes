@@ -24,6 +24,14 @@ module Echoes
     GetMethodImpl = Fiddle::Function.new(LIBOBJC['class_getMethodImplementation'], [P, P], P)
     AddProtocol = Fiddle::Function.new(LIBOBJC['class_addProtocol'], [P, P], I)
     GetProtocol = Fiddle::Function.new(LIBOBJC['objc_getProtocol'], [P], P)
+    # SEL → const char *name. Used by the message-forwarding hooks
+    # so a single closure can dispatch on selector name.
+    SelGetName = Fiddle::Function.new(LIBOBJC['sel_getName'], [P], P)
+    # Look up a Method by (Class, SEL) and read its type encoding —
+    # lets methodSignatureForSelector: fall back to the runtime's
+    # default behavior for any selector we don't explicitly forward.
+    ClassGetInstanceMethod = Fiddle::Function.new(LIBOBJC['class_getInstanceMethod'], [P, P], P)
+    MethodGetTypeEncoding  = Fiddle::Function.new(LIBOBJC['method_getTypeEncoding'], [P], P)
 
     # objc_msgSend variants for different signatures
     def self.new_msg(args, ret)

@@ -785,10 +785,45 @@ module Echoes
         [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_LONG, Fiddle::TYPE_LONG, Fiddle::TYPE_VOIDP]
       ) { |_self, _cmd, _loc, _len, _actual| Fiddle::Pointer.new(0) }
 
-      @first_rect_closure = Fiddle::Closure::BlockCaller.new(
-        Fiddle::TYPE_DOUBLE,
-        [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_LONG, Fiddle::TYPE_LONG, Fiddle::TYPE_VOIDP]
-      ) { |_self, _cmd, _loc, _len, _actual| 0.0 }
+      # firstRectForCharacterRange:actualRange: returns NSRect (4
+      # doubles). Fiddle::Closure has no way to return a struct, so
+      # we can't implement it directly — a TYPE_DOUBLE closure only
+      # writes one of the four NSRect fields to v0 and leaves the
+      # rest as register garbage, which makes the IME candidate
+      # window appear off-screen or get suppressed entirely.
+      #
+      # Forward it through methodSignatureForSelector: + forward-
+      # Invocation: instead — NSInvocation.setReturnValue: handles
+      # the struct ABI for us. We just write 4 doubles into a buffer
+      # and hand the pointer to AppKit. The wiring lives in
+      # @method_sig_closure / @forward_inv_closure below.
+      @method_sig_closure = Fiddle::Closure::BlockCaller.new(
+        Fiddle::TYPE_VOIDP,
+        [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP]
+      ) do |_self, _cmd, sel|
+        gui.method_signature_for_selector(_self, sel)
+      rescue => e
+        gui.log_crash(e, context: 'methodSignatureForSelector')
+        Fiddle::Pointer.new(0)
+      end
+
+      @forward_inv_closure = Fiddle::Closure::BlockCaller.new(
+        Fiddle::TYPE_VOID,
+        [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP]
+      ) do |_self, _cmd, inv|
+        gui.forward_invocation(_self, inv)
+      rescue => e
+        gui.log_crash(e, context: 'forwardInvocation')
+      end
+
+      # respondsToSelector: needs to claim YES for the forwarded
+      # selector — AppKit's IME code checks before calling, and
+      # the runtime's default class_respondsToSelector returns NO
+      # for selectors we don't implement directly (only forward).
+      @responds_to_sel_closure = Fiddle::Closure::BlockCaller.new(
+        Fiddle::TYPE_CHAR,
+        [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP]
+      ) { |_self, _cmd, sel| gui.responds_to_selector?(_self, sel) }
 
       @char_index_closure = Fiddle::Closure::BlockCaller.new(
         Fiddle::TYPE_LONG,
@@ -1067,7 +1102,14 @@ module Echoes
         'selectedRange'                                     => ['{_NSRange=QQ}@:', @selected_range_closure],
         'validAttributesForMarkedText'                      => ['@@:', @valid_attrs_closure],
         'attributedSubstringForProposedRange:actualRange:'  => ['@@:{_NSRange=QQ}^{_NSRange=QQ}', @attr_substring_closure],
-        'firstRectForCharacterRange:actualRange:'           => ['{CGRect={CGPoint=dd}{CGSize=dd}}@:{_NSRange=QQ}^{_NSRange=QQ}', @first_rect_closure],
+        # firstRectForCharacterRange:actualRange: is intentionally
+        # not in the methods dict — it returns NSRect (4 doubles)
+        # which Fiddle::Closure can't model. The runtime falls
+        # through to the methodSignatureForSelector / forwardInvocation
+        # pair below, which writes the rect via NSInvocation.
+        'methodSignatureForSelector:'                       => ['@@::', @method_sig_closure],
+        'forwardInvocation:'                                => ['v@:@', @forward_inv_closure],
+        'respondsToSelector:'                               => ['c@::', @responds_to_sel_closure],
         'characterIndexForPoint:'                           => ['Q@:{CGPoint=dd}', @char_index_closure],
         'draggingEntered:'                                  => ['Q@:@', @dragging_entered_closure],
         'draggingUpdated:'                                  => ['Q@:@', @dragging_updated_closure],
@@ -1804,6 +1846,141 @@ module Echoes
 
     def ime_marked_range_location
       @marked_text ? 0 : 0x7FFFFFFFFFFFFFFF # NSNotFound
+    end
+
+    # --- IME candidate-window positioning via message forwarding ---
+    #
+    # firstRectForCharacterRange:actualRange: returns NSRect (4 doubles).
+    # Fiddle::Closure can't model a struct return — only single-register
+    # scalar returns. Without a real implementation, AppKit reads the
+    # rect from v0..v3 with only v0 set to our scalar return value, so
+    # the IME sees a garbage rect and either positions the candidate
+    # window off-screen or suppresses it entirely.
+    #
+    # The workaround: don't implement the selector directly; let it
+    # fall through to forwardInvocation:. Inside forward_invocation we
+    # pack four doubles into an NSRect-sized buffer and hand it to
+    # NSInvocation.setReturnValue:, which handles the struct ABI for
+    # us correctly. methodSignatureForSelector: is the gateway that
+    # tells the runtime to use the forwarding path.
+    IME_FORWARDED_SELECTORS = ['firstRectForCharacterRange:actualRange:'].freeze
+    FIRST_RECT_SIG = '{CGRect={CGPoint=dd}{CGSize=dd}}@:{_NSRange=QQ}^{_NSRange=QQ}'.freeze
+
+    def method_signature_for_selector(self_ptr, sel)
+      name = sel_name_string(sel)
+      if name == 'firstRectForCharacterRange:actualRange:'
+        return ObjC::MSG_PTR_1.call(
+          ObjC.cls('NSMethodSignature'),
+          ObjC.sel('signatureWithObjCTypes:'),
+          Fiddle::Pointer[FIRST_RECT_SIG.b])
+      end
+      # Default: defer to whatever the runtime would have computed
+      # from the class's method table. class_getInstanceMethod walks
+      # the hierarchy so directly-implemented + inherited methods
+      # all resolve.
+      self_class = ObjC::MSG_PTR.call(self_ptr, ObjC.sel('class'))
+      method = ObjC::ClassGetInstanceMethod.call(self_class, sel)
+      return Fiddle::Pointer.new(0) if method.null?
+      enc = ObjC::MethodGetTypeEncoding.call(method)
+      ObjC::MSG_PTR_1.call(
+        ObjC.cls('NSMethodSignature'),
+        ObjC.sel('signatureWithObjCTypes:'),
+        enc)
+    end
+
+    def forward_invocation(_self_ptr, inv)
+      sel = ObjC::MSG_PTR.call(inv, ObjC.sel('selector'))
+      name = sel_name_string(sel)
+      return unless name == 'firstRectForCharacterRange:actualRange:'
+
+      rect = first_rect_for_marked_text_screen_coords
+      buf = Fiddle::Pointer.malloc(32, Fiddle::RUBY_FREE)
+      buf[0, 32] = rect.pack('d4')
+      ObjC::MSG_VOID_1.call(inv, ObjC.sel('setReturnValue:'), buf)
+    end
+
+    def responds_to_selector?(self_ptr, sel)
+      name = sel_name_string(sel)
+      return 1 if IME_FORWARDED_SELECTORS.include?(name)
+      self_class = ObjC::MSG_PTR.call(self_ptr, ObjC.sel('class'))
+      method = ObjC::ClassGetInstanceMethod.call(self_class, sel)
+      method.null? ? 0 : 1
+    end
+
+    def sel_name_string(sel)
+      ptr = ObjC::SelGetName.call(sel)
+      ptr.null? ? '' : ptr.to_s
+    end
+
+    # Compute the on-screen rect for the marked-text caret, used by
+    # the IME to anchor its candidate window. Returns 4 doubles
+    # [origin_x, origin_y, width, height] in screen coords. Origin
+    # is bottom-left (NSScreen convention, y from bottom).
+    #
+    # We anchor on the active pane's cursor (the marked text is
+    # drawn there, see draw_pane_content). When @marked_text is set,
+    # use its measured width so the candidate window aligns with the
+    # right edge of the composition; otherwise fall back to a single
+    # cell so the IME still has something sensible to anchor on.
+    def first_rect_for_marked_text_screen_coords
+      return [0.0, 0.0, 0.0, 0.0] unless @view && @window && @tabs && @tabs.any?
+      tab = current_tab
+      pane = tab&.active_pane
+      return [0.0, 0.0, 0.0, 0.0] unless pane
+
+      rect_info = tab.pane_tree.layout(0, 0, @cols, @rows).find { |r| r[:pane] == pane }
+      return [0.0, 0.0, 0.0, 0.0] unless rect_info
+
+      cell_w = @cell_width.to_f
+      cell_h = @cell_height.to_f
+      gy_off = grid_y_offset
+      pane_px = rect_info[:x] * cell_w
+      pane_py = gy_off + rect_info[:y] * cell_h
+      cursor  = pane.screen.cursor
+      mx_view = pane_px + cursor.col * cell_w
+      my_view = pane_py + cursor.row * cell_h
+
+      width = if @marked_text && !@marked_text.empty?
+                @marked_text.each_char.sum { |c| c.ord > 0x7F ? cell_w * 2 : cell_w }
+              else
+                cell_w
+              end
+
+      # View y is flipped (top-origin); NSWindow / NSScreen y is
+      # bottom-origin. The rect's BOTTOM in window coords sits at
+      # (view_frame_height − rect_bottom_in_view_coords).
+      vfh = view_frame_height
+      win_x = mx_view
+      win_y = vfh - (my_view + cell_h)
+
+      sx, sy = window_to_screen_point(win_x, win_y)
+      [sx, sy, width, cell_h]
+    end
+
+    # [NSWindow convertPointToScreen:] returns NSPoint (2 doubles).
+    # Same trick as event_location / dragging_location uses for the
+    # other NSPoint-returning calls — Fiddle can't model the return
+    # directly, so go through NSInvocation.
+    def window_to_screen_point(x, y)
+      sig = ObjC::MSG_PTR_1.call(
+        ObjC.cls('NSWindow'),
+        ObjC.sel('instanceMethodSignatureForSelector:'),
+        ObjC.sel('convertPointToScreen:'))
+      inv = ObjC::MSG_PTR_1.call(
+        ObjC.cls('NSInvocation'),
+        ObjC.sel('invocationWithMethodSignature:'), sig)
+      ObjC::MSG_VOID_1.call(inv, ObjC.sel('setSelector:'),
+                             ObjC.sel('convertPointToScreen:'))
+      arg = Fiddle::Pointer.malloc(16, Fiddle::RUBY_FREE)
+      arg[0, 16] = [x, y].pack('dd')
+      # setArgument:atIndex: signature is (id, SEL, void*, NSInteger).
+      # No existing reusable msgSend variant matches; compose inline.
+      set_arg_sig = ObjC.new_msg([ObjC::P, ObjC::P, ObjC::P, ObjC::L], ObjC::V)
+      set_arg_sig.call(inv, ObjC.sel('setArgument:atIndex:'), arg, 2)
+      ObjC::MSG_VOID_1.call(inv, ObjC.sel('invokeWithTarget:'), @window)
+      out = Fiddle::Pointer.malloc(16, Fiddle::RUBY_FREE)
+      ObjC::MSG_VOID_1.call(inv, ObjC.sel('getReturnValue:'), out)
+      out[0, 16].unpack('dd')
     end
 
     def timer_fired
