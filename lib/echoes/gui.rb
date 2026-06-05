@@ -1269,6 +1269,28 @@ module Echoes
             draw_y = case mc[:valign]
                       when 1 then y + block_h - text_h
                       when 2 then y + (block_h - text_h) / 2.0
+                      when 3
+                        # Baseline-align mode (Echoes extension). All
+                        # multicells on the same anchor row that share
+                        # the same `s=` end up with their baselines on
+                        # the same y, regardless of font / scale / n/d.
+                        # Target baseline sits at "last cell's natural
+                        # baseline within the block" — i.e. the bottom
+                        # row of the block, treated as if it were a
+                        # single body cell with @font's natural metrics.
+                        # Concretely: baseline_y = block_top +
+                        # block_h - cell_h + @font_default_ascender.
+                        # We solve for draw_y from "drawAtPoint sets
+                        # line-box top, baseline = top + ascender":
+                        #   draw_y = baseline_y - scaled_ascender.
+                        # Big and small spans pick different draw_y
+                        # values to land on the SAME baseline_y.
+                        # For tall scaled text whose ascender exceeds
+                        # block_h - cell_h, draw_y goes negative within
+                        # the block and the glyph top extends above —
+                        # which matches how a real baseline-shared row
+                        # with mixed sizes is supposed to look.
+                        y + block_h - @cell_height + @font_default_ascender - scaled_ascender
                       else y
                       end
 

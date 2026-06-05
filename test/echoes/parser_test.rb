@@ -228,6 +228,19 @@ class Echoes::ParserTest < Test::Unit::TestCase
     assert_equal(1, mc[:halign])
   end
 
+  test "OSC 66 valign accepts v=3 (Echoes baseline-align mode)" do
+    @parser.feed("\e]66;s=2:v=3;X\x07")
+    mc = @screen.grid[0][0].multicell
+    assert_equal(3, mc[:valign],
+                 "v=3 should land in the multicell hash so gui.rb's draw_y can hit the baseline branch")
+  end
+
+  test "OSC 66 valign clamps out-of-range values to 3" do
+    @parser.feed("\e]66;s=2:v=9;X\x07")
+    mc = @screen.grid[0][0].multicell
+    assert_equal(3, mc[:valign], "valign higher than 3 should clamp to 3 (new upper bound)")
+  end
+
   test "OSC 66 multicell with multibyte UTF-8 text" do
     @parser.feed("\e]66;s=2;\u{3042}\x07")  # あ
     cell = @screen.grid[0][0]

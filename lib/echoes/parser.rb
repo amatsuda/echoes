@@ -509,7 +509,7 @@ module Echoes
         when 'w' then params[:width]  = v.to_i.clamp(0, 7)
         when 'n' then params[:frac_n] = v.to_i.clamp(0, 15)
         when 'd' then params[:frac_d] = v.to_i.clamp(0, 15)
-        when 'v' then params[:valign] = v.to_i.clamp(0, 2)
+        when 'v' then params[:valign] = v.to_i.clamp(0, 3)
         when 'h' then params[:halign] = v.to_i.clamp(0, 2)
         when 'f'
           # Family name. Names with ':' aren't representable here
