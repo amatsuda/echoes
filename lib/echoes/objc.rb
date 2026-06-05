@@ -82,6 +82,14 @@ module Echoes
     # scheduledTimerWithTimeInterval:target:selector:userInfo:repeats:
     MSG_PTR_D_P_P_P_I = new_msg([P, P, D, P, P, P, I], P)
 
+    # draggingSession:endedAtPoint:operation: — NSDraggingSession*,
+    # NSPoint (2 doubles), NSDragOperation (NSUInteger -> long).
+    MSG_VOID_1_PT_L = new_msg([P, P, P, D, D, L], V)
+    # draggingSession:sourceOperationMaskForDraggingContext: —
+    # NSDraggingSession*, NSDraggingContext (NSInteger), returns
+    # NSDragOperation (NSUInteger).
+    MSG_RET_L_1L = new_msg([P, P, P, L], L)
+
     # NSRectFill C function
     NSRectFill = Fiddle::Function.new(APPKIT['NSRectFill'], [D, D, D, D], V)
 
@@ -99,6 +107,16 @@ module Echoes
     NSEventModifierFlagOption  = 1 << 19
     NSEventModifierFlagCommand    = 1 << 20
     NSEventModifierFlagNumericPad = 1 << 21
+
+    # NSDragOperation bitmask values. We only ever signal Move /
+    # None for tab drag; the file-drop path keeps using Copy.
+    NSDragOperationNone    = 0
+    NSDragOperationCopy    = 1
+    NSDragOperationMove    = 16
+
+    # Echoes-private pasteboard type for tab drag. Plain string;
+    # AppKit accepts arbitrary UTI-shaped identifiers.
+    EchoesPasteboardTypeTab = 'com.echoes.tab'
 
     # Selector cache
     SEL_CACHE = {}

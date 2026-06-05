@@ -374,3 +374,127 @@ class Echoes::GUISelectTabTest < Test::Unit::TestCase
     assert_equal 11, active(gui)
   end
 end
+
+class Echoes::GUITabDragHelpersTest < Test::Unit::TestCase
+  # Same allocate + ivar-injection pattern — these helpers are
+  # intentionally pure-state so the AppKit closures stay thin.
+  def gui
+    @gui ||= Echoes::GUI.allocate
+  end
+
+  # --- compute_drop_index ---
+
+  test "drop index is 0 for a cursor in the left half of tab 0" do
+    [0, 24, 49].each do |x|
+      assert_equal 0, gui.compute_drop_index(x, 100, 3),
+                   "x=#{x} should land before tab 0"
+    end
+  end
+
+  test "drop index is 1 for a cursor crossing the midpoint of tab 0" do
+    [50, 99, 100, 149].each do |x|
+      assert_equal 1, gui.compute_drop_index(x, 100, 3),
+                   "x=#{x} should land between tab 0 and tab 1"
+    end
+  end
+
+  test "drop index lands after the last tab once cursor passes its midpoint" do
+    assert_equal 3, gui.compute_drop_index(250, 100, 3)
+    assert_equal 3, gui.compute_drop_index(300, 100, 3) # clamped at num_tabs
+    assert_equal 3, gui.compute_drop_index(99999, 100, 3)
+  end
+
+  test "drop index handles num_tabs == 0 / tab_w == 0 gracefully" do
+    assert_equal 0, gui.compute_drop_index(42, 100, 0)
+    assert_equal 0, gui.compute_drop_index(42, 0, 3)
+  end
+
+  # --- transfer_tab ---
+
+  def make_ws(tabs, active: 0)
+    {tabs: tabs.map { |t| t }, active_tab: active}
+  end
+
+  test "transfer_tab same-window forward move (drop ahead of current slot)" do
+    ws = make_ws(%w[A B C D E], active: 0)
+    # Move A (idx 0) to position 3. After deletion, A inserts at 2.
+    assert gui.transfer_tab(ws, 0, ws, 3)
+    assert_equal %w[B C A D E], ws[:tabs]
+    assert_equal 2, ws[:active_tab]
+  end
+
+  test "transfer_tab same-window backward move (drop behind current slot)" do
+    ws = make_ws(%w[A B C D E], active: 3)
+    # Move D (idx 3) to position 0.
+    assert gui.transfer_tab(ws, 3, ws, 0)
+    assert_equal %w[D A B C E], ws[:tabs]
+    assert_equal 0, ws[:active_tab]
+  end
+
+  test "transfer_tab same-window drop on own slot is a no-op" do
+    ws = make_ws(%w[A B C], active: 1)
+    refute gui.transfer_tab(ws, 1, ws, 1)
+    assert_equal %w[A B C], ws[:tabs]
+    assert_equal 1, ws[:active_tab]
+  end
+
+  test "transfer_tab same-window drop just-after own slot is a no-op" do
+    # Dragging tab 1 and dropping at position 2 in the bar would land
+    # right after itself — net zero movement once deletion shifts.
+    ws = make_ws(%w[A B C], active: 1)
+    refute gui.transfer_tab(ws, 1, ws, 2)
+    assert_equal %w[A B C], ws[:tabs]
+  end
+
+  test "transfer_tab cross-window move appends to the target and updates active" do
+    src = make_ws(%w[A B C], active: 1)
+    dst = make_ws(%w[X Y], active: 0)
+    assert gui.transfer_tab(src, 1, dst, 2)
+    assert_equal %w[A C], src[:tabs]
+    assert_equal %w[X Y B], dst[:tabs]
+    assert_equal 2, dst[:active_tab], "dropped tab is now active in target"
+    # Source active was 1 (the moved tab). After deletion, size shrinks
+    # to 2, so clamping holds active_tab at 1.
+    assert_equal 1, src[:active_tab]
+  end
+
+  test "transfer_tab cross-window inserts at the requested position" do
+    src = make_ws(%w[A], active: 0)
+    dst = make_ws(%w[X Y Z], active: 1)
+    assert gui.transfer_tab(src, 0, dst, 0) # insert before X
+    assert_equal [], src[:tabs]
+    assert_equal %w[A X Y Z], dst[:tabs]
+    assert_equal 0, dst[:active_tab]
+    # Source active clamps down to 0 since the array is now empty.
+    assert_equal 0, src[:active_tab]
+  end
+
+  test "transfer_tab rejects out-of-range src_index" do
+    ws = make_ws(%w[A B C], active: 0)
+    refute gui.transfer_tab(ws, 9, ws, 0)
+    refute gui.transfer_tab(ws, -1, ws, 0)
+    assert_equal %w[A B C], ws[:tabs]
+  end
+
+  # --- token codec ---
+
+  test "encode_tab_drag_token formats as <view_ptr>:<index>" do
+    assert_equal "12345:2", gui.encode_tab_drag_token(12345, 2)
+  end
+
+  test "decode_tab_drag_token round-trips" do
+    str = gui.encode_tab_drag_token(99887766, 5)
+    assert_equal [99887766, 5], gui.decode_tab_drag_token(str)
+  end
+
+  test "decode_tab_drag_token rejects malformed input" do
+    [nil, "", "no-colon", ":just-index", "ptr-only:", "x:y",
+     "1:2:3", "0x1234:5"].each do |bad|
+      assert_nil gui.decode_tab_drag_token(bad), "should reject #{bad.inspect}"
+    end
+  end
+
+  test "decode_tab_drag_token rejects negative tab index" do
+    assert_nil gui.decode_tab_drag_token("123:-1")
+  end
+end

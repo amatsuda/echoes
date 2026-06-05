@@ -51,6 +51,9 @@ module Echoes
       @selection_anchor = nil
       @selection_end = nil
       @selection_word_anchor = nil
+      @drag_start_tab_index = nil
+      @drag_start_point = nil
+      @drag_insertion_index = nil
       @font_cache = {}
       @rgb_color_cache = {}
       @nsstring_cache = {}
@@ -143,6 +146,63 @@ module Echoes
       @tabs[@active_tab]
     end
 
+    # --- Tab drag-and-drop pure-state helpers ---
+    #
+    # All three live here (as opposed to inside the AppKit closures)
+    # so they're testable without standing up a real NSView. The
+    # closures call into these; the AppKit half stays a thin wrapper.
+
+    # Insertion index 0..num_tabs for a cursor at view-x. Splits each
+    # tab in half: cursor in the left half of tab i → insert before i;
+    # right half → insert before i+1. Clamped at both ends.
+    def compute_drop_index(x, tab_w, num_tabs)
+      return 0 if num_tabs <= 0 || tab_w <= 0
+      ((x + tab_w / 2.0) / tab_w).to_i.clamp(0, num_tabs)
+    end
+
+    # Splice a tab between window-state hashes. Updates the destination
+    # window's :active_tab to land on the dropped tab. For same-array
+    # moves, treats dst==src and dst==src+1 as no-ops (both yield no
+    # movement). Returns true on a real move, false on a no-op.
+    def transfer_tab(src_ws, src_index, dst_ws, dst_index)
+      same = src_ws.equal?(dst_ws)
+      return false if same && (dst_index == src_index || dst_index == src_index + 1)
+      src_tabs = src_ws[:tabs]
+      return false if src_index < 0 || src_index >= src_tabs.size
+
+      tab = src_tabs.delete_at(src_index)
+      # Same-array: removal shifts later positions down by 1.
+      dst_index -= 1 if same && src_index < dst_index
+
+      dst_tabs = dst_ws[:tabs]
+      dst_index = dst_index.clamp(0, dst_tabs.size)
+      dst_tabs.insert(dst_index, tab)
+
+      dst_ws[:active_tab] = dst_index
+      unless same
+        # Source window's active tab should stay in bounds.
+        src_ws[:active_tab] = src_ws[:active_tab].clamp(0, [src_tabs.size - 1, 0].max)
+      end
+      true
+    end
+
+    # Token format on the pasteboard for tab drag. Single-process app,
+    # so identity = view pointer + tab index at the time the drag
+    # started. Decoded into integer pair or nil for malformed input.
+    def encode_tab_drag_token(view_ptr, tab_index)
+      "#{view_ptr}:#{tab_index}"
+    end
+
+    def decode_tab_drag_token(str)
+      return nil if str.nil? || str.empty?
+      parts = str.split(':')
+      return nil unless parts.size == 2
+      vp = Integer(parts[0], 10) rescue nil
+      ti = Integer(parts[1], 10) rescue nil
+      return nil if vp.nil? || ti.nil? || ti < 0
+      [vp, ti]
+    end
+
     # Switch to a tab by 1-based slot number (Cmd+N shortcuts).
     # n=1..8 maps to that tab index; n=9 maps to the LAST tab
     # regardless of count, matching Safari / Chrome / iTerm2 /
@@ -188,6 +248,9 @@ module Echoes
       ws[:current_event] = @current_event
       ws[:selection_anchor] = @selection_anchor
       ws[:selection_end] = @selection_end
+      ws[:drag_start_tab_index] = @drag_start_tab_index
+      ws[:drag_start_point] = @drag_start_point
+      ws[:drag_insertion_index] = @drag_insertion_index
       ws[:rows] = @rows
       ws[:cols] = @cols
       ws[:focused] = @window_focused
@@ -207,6 +270,9 @@ module Echoes
       @current_event = ws[:current_event]
       @selection_anchor = ws[:selection_anchor]
       @selection_end = ws[:selection_end]
+      @drag_start_tab_index = ws[:drag_start_tab_index]
+      @drag_start_point     = ws[:drag_start_point]
+      @drag_insertion_index = ws[:drag_insertion_index]
       @rows = ws[:rows]
       @cols = ws[:cols]
       @window_focused = ws.fetch(:focused, true)
@@ -879,7 +945,46 @@ module Echoes
       @dragging_entered_closure = Fiddle::Closure::BlockCaller.new(
         Fiddle::TYPE_LONG,
         [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP]
-      ) { |_self, _cmd, _sender| 1 }  # NSDragOperationCopy
+      ) do |_self, _cmd, sender|
+        gui.activate_for_view(_self); gui.update_drag_target(sender)
+      rescue => e
+        gui.log_crash(e, context: 'draggingEntered')
+        1  # fall back to NSDragOperationCopy so file-URL drops still work
+      end
+
+      @dragging_updated_closure = Fiddle::Closure::BlockCaller.new(
+        Fiddle::TYPE_LONG,
+        [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP]
+      ) do |_self, _cmd, sender|
+        gui.activate_for_view(_self); gui.update_drag_target(sender)
+      rescue => e
+        gui.log_crash(e, context: 'draggingUpdated')
+        1
+      end
+
+      @dragging_exited_closure = Fiddle::Closure::BlockCaller.new(
+        Fiddle::TYPE_VOID,
+        [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP]
+      ) do |_self, _cmd, _sender|
+        gui.activate_for_view(_self); gui.clear_drag_target
+      rescue => e
+        gui.log_crash(e, context: 'draggingExited')
+      end
+
+      @dragging_session_source_op_mask_closure = Fiddle::Closure::BlockCaller.new(
+        Fiddle::TYPE_LONG,
+        [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_LONG]
+      ) { |_self, _cmd, _session, _ctx| ObjC::NSDragOperationMove }
+
+      @dragging_session_ended_closure = Fiddle::Closure::BlockCaller.new(
+        Fiddle::TYPE_VOID,
+        [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP,
+         Fiddle::TYPE_DOUBLE, Fiddle::TYPE_DOUBLE, Fiddle::TYPE_LONG]
+      ) do |_self, _cmd, _session, screen_x, screen_y, operation|
+        gui.tab_drag_ended(_self, screen_x, screen_y, operation)
+      rescue => e
+        gui.log_crash(e, context: 'draggingSessionEnded')
+      end
 
       @perform_drag_closure = Fiddle::Closure::BlockCaller.new(
         Fiddle::TYPE_INT,
@@ -965,7 +1070,11 @@ module Echoes
         'firstRectForCharacterRange:actualRange:'           => ['{CGRect={CGPoint=dd}{CGSize=dd}}@:{_NSRange=QQ}^{_NSRange=QQ}', @first_rect_closure],
         'characterIndexForPoint:'                           => ['Q@:{CGPoint=dd}', @char_index_closure],
         'draggingEntered:'                                  => ['Q@:@', @dragging_entered_closure],
+        'draggingUpdated:'                                  => ['Q@:@', @dragging_updated_closure],
+        'draggingExited:'                                   => ['v@:@', @dragging_exited_closure],
         'performDragOperation:'                             => ['c@:@', @perform_drag_closure],
+        'draggingSession:sourceOperationMaskForDraggingContext:' => ['Q@:@Q', @dragging_session_source_op_mask_closure],
+        'draggingSession:endedAtPoint:operation:'           => ['v@:@{CGPoint=dd}Q', @dragging_session_ended_closure],
       })
 
       # Add NSTextInputClient protocol conformance for IME
@@ -1853,10 +1962,15 @@ module Echoes
 
       if pos.nil?
         # Click in tab bar
-        click_x, = event_location(event_ptr)
+        click_x, click_y = event_location(event_ptr)
         tab_w = (@cell_width * @cols) / @tabs.size
         clicked_tab = (click_x / tab_w).to_i.clamp(0, @tabs.size - 1)
         @active_tab = clicked_tab
+        # Record drag intent — mouseDragged checks whether the cursor
+        # has moved past a small threshold and, if so, hands the
+        # gesture to AppKit's drag session.
+        @drag_start_tab_index = clicked_tab
+        @drag_start_point     = [click_x, click_y]
       elsif (flags & ObjC::NSEventModifierFlagCommand) != 0 && pos
         # Cmd+click: open hyperlink/URL if the cell has one; otherwise
         # in an embedded pane, recall the command at this prompt row
@@ -1917,9 +2031,28 @@ module Echoes
       ObjC::MSG_VOID_I.call(@view, ObjC.sel('setNeedsDisplay:'), 1)
     end
 
+    DRAG_THRESHOLD_PX = 4
+
     def mouse_dragged(event_ptr)
       tab = current_tab
       return unless tab
+
+      # Tab-drag intent: if the press landed on the tab bar AND the
+      # cursor has moved past a small threshold, hand the gesture to
+      # AppKit's drag session. Tested first because the threshold can
+      # fire while pos is still nil (cursor still inside the tab bar).
+      if @drag_start_tab_index
+        cx, cy = event_location(event_ptr)
+        sx, sy = @drag_start_point
+        if (cx - sx).abs > DRAG_THRESHOLD_PX || (cy - sy).abs > DRAG_THRESHOLD_PX
+          tab_index = @drag_start_tab_index
+          @drag_start_tab_index = nil
+          @drag_start_point     = nil
+          start_tab_drag(event_ptr, tab_index)
+          return
+        end
+      end
+
       pos = grid_position(event_ptr)
       return unless pos
 
@@ -1967,6 +2100,11 @@ module Echoes
     end
 
     def mouse_up(event_ptr)
+      # Clear tab-drag intent so a click-without-drag doesn't leave
+      # stale state for the next mouseDown.
+      @drag_start_tab_index = nil
+      @drag_start_point     = nil
+
       tab = current_tab
       return unless tab
       return if tab.screen.mouse_tracking == :off || tab.screen.mouse_tracking == :x10
@@ -2173,6 +2311,20 @@ module Echoes
 
     def perform_drag_operation(sender)
       pb = ObjC::MSG_PTR.call(sender, ObjC.sel('draggingPasteboard'))
+
+      # Our private tab-drag type takes precedence — the user is
+      # moving a tab, not pasting a file.
+      tab_type = ObjC.nsstring(ObjC::EchoesPasteboardTypeTab)
+      tab_type_array = ObjC::MSG_PTR_1.call(ObjC.cls('NSArray'),
+        ObjC.sel('arrayWithObject:'), tab_type)
+      avail = ObjC::MSG_PTR_1.call(pb, ObjC.sel('availableTypeFromArray:'),
+        tab_type_array)
+      unless avail.null?
+        token = ObjC::MSG_PTR_1.call(pb, ObjC.sel('stringForType:'), tab_type)
+        return handle_tab_drop(sender, ObjC.to_ruby_string(token))
+      end
+
+      # Fall through to the file-URL path.
       str = self.class.file_paths_from_pasteboard(pb)
       return false if str.nil?
 
@@ -2187,6 +2339,71 @@ module Echoes
       true
     rescue Errno::EIO, IOError
       false
+    end
+
+    # Resolve a tab-drag token, look up source & target window-states,
+    # splice via transfer_tab, and close the source window if its
+    # last tab moved away. Both windows redraw on success.
+    def handle_tab_drop(sender, token)
+      parsed = decode_tab_drag_token(token)
+      return false unless parsed
+      src_view_ptr, src_index = parsed
+
+      src_ws = @view_to_ws[src_view_ptr]
+      target_ws = @view_to_ws[@view.to_i]
+      return false unless src_ws && target_ws
+
+      # Compute insertion index from the destination view's cursor —
+      # the same calculation update_drag_target did during hover. We
+      # recompute rather than trusting @drag_insertion_index because
+      # the user may have crossed back outside the bar between the
+      # last move event and the drop.
+      dx, dy_window = dragging_location(sender)
+      dy = view_frame_height - dy_window
+      tbh = tab_bar_height
+      bar_y = tab_bar_y
+      if tbh > 0 && dy >= bar_y && dy < bar_y + tbh
+        tab_w = (@cell_width * @cols).to_f / @tabs.size
+        dst_index = compute_drop_index(dx, tab_w, @tabs.size)
+      else
+        # Drop landed in the grid area of the target window — treat as
+        # append. (Tear-out outside any window is handled separately
+        # by the source's endedAtPoint callback.)
+        dst_index = target_ws[:tabs].size
+      end
+
+      moved = transfer_tab(src_ws, src_index, target_ws, dst_index)
+      clear_drag_target
+      # Source-side stash was set by start_tab_drag; the gesture is
+      # resolved, so clear it.
+      src_ws.delete(:dragging_tab_index)
+      return true unless moved
+
+      # target_ws is the live current-view ws (we set it from
+      # @view_to_ws[@view.to_i] above). transfer_tab updated the
+      # saved-state form (ws[:active_tab]); we still need to mirror
+      # it into the live @active_tab ivar so the on-screen active
+      # tab actually follows the dropped tab. Without this, the
+      # window keeps showing whatever was active before the drop.
+      @active_tab = target_ws[:active_tab]
+
+      # If source emptied, close that window. close_current_window
+      # operates on the currently-active view, so switch to the
+      # source view first, then switch back.
+      if src_ws[:tabs].empty? && src_ws[:nsview] && src_view_ptr != @view.to_i
+        save_window_state
+        load_window_state(src_ws)
+        close_current_window
+        load_window_state(target_ws)
+      end
+
+      # Redraw both views. The target view is @view; mark the source
+      # view's NSView too (no-op if it was just closed above).
+      ObjC::MSG_VOID_I.call(@view, ObjC.sel('setNeedsDisplay:'), 1)
+      if src_ws != target_ws && src_ws[:nsview] && !src_ws[:tabs].empty?
+        ObjC::MSG_VOID_I.call(src_ws[:nsview], ObjC.sel('setNeedsDisplay:'), 1)
+      end
+      true
     end
 
     def self.file_paths_from_pasteboard(pb)
@@ -2245,9 +2462,10 @@ module Echoes
         0.0, 0.0, win_width, win_height
       )
 
-      # Register for file drag-and-drop
-      drag_types = ObjC::MSG_PTR_1.call(ObjC.cls('NSArray'), ObjC.sel('arrayWithObject:'), ObjC::NSPasteboardTypeFileURL)
-      ObjC::MSG_VOID_1.call(new_view, ObjC.sel('registerForDraggedTypes:'), drag_types)
+      # Register for file drag-and-drop and the Echoes tab-drag type
+      # so the window accepts both Finder file drops and tabs dragged
+      # from any other Echoes window.
+      register_drag_types(new_view)
 
       # Connect view to window and show it. makeKeyAndOrderFront: triggers a
       # focus_lost handler on the prior key window that may call
@@ -2288,6 +2506,9 @@ module Echoes
       @current_event = nil
       @selection_anchor = nil
       @selection_end = nil
+      @drag_start_tab_index = nil
+      @drag_start_point = nil
+      @drag_insertion_index = nil
       @window_focused = true
 
       # Register window state
@@ -2606,69 +2827,265 @@ module Echoes
       total_w = @cell_width * @cols
       tab_w = total_w / @tabs.size
 
-      # Tab bar background
+      # Bar background — slightly wider than tabs.size * tab_w so the
+      # gap on the right (from integer division) is covered.
       ObjC::MSG_VOID.call(@tab_bg, ObjC.sel('setFill'))
       ObjC::NSRectFill.call(0.0, ty, total_w + @cell_width, tbh)
 
-      # Vertically center titles in the bar.
-      title_y = ty + (tbh - @tab_font_line_height) / 2.0
+      ns_para = build_tab_paragraph_style
+      @tabs.each_with_index do |tab, i|
+        paint_one_tab(tab, i * tab_w, ty, tab_w, tbh, i == @active_tab, ns_para)
+      end
+      ObjC.release(ns_para)
 
-      accent_color = make_color(*@active_profile.cursor_color)
-      accent_h     = 2.0
-      accent_inset = @cell_width * 0.5
+      # Insertion marker: a thin vertical accent strip where the
+      # in-flight tab would land if dropped now. Set in
+      # update_drag_target while a tab drag is hovering over the bar.
+      if @drag_insertion_index
+        marker_w = 2.0
+        marker_x = (@drag_insertion_index * tab_w) - (marker_w / 2.0)
+        accent_color = make_color(*@active_profile.cursor_color)
+        ObjC::MSG_VOID.call(accent_color, ObjC.sel('setFill'))
+        ObjC::NSRectFill.call(marker_x, ty, marker_w, tbh)
+      end
+    end
 
-      # Truncating-tail paragraph style so titles wider than the tab
-      # render with a trailing "…" instead of overlapping their
-      # neighbors. Built once per draw (paragraph style is mutable
-      # and shared across the loop's attrs dicts).
+    # Truncating-tail + center-aligned paragraph style — created once
+    # per draw and shared across every tab's attributes dict. Caller
+    # owns the +1 retain count and must release.
+    def build_tab_paragraph_style
       ns_para = ObjC::MSG_PTR.call(ObjC.cls('NSMutableParagraphStyle'), ObjC.sel('alloc'))
       ns_para = ObjC::MSG_PTR.call(ns_para, ObjC.sel('init'))
       ObjC::MSG_VOID_L.call(ns_para, ObjC.sel('setLineBreakMode:'), NSLineBreakByTruncatingTail)
       ObjC::MSG_VOID_L.call(ns_para, ObjC.sel('setAlignment:'),     NSTextAlignmentCenter)
+      ns_para
+    end
+
+    # Paint one tab at (x, y) in the current graphics context: bg
+    # fill, truncated/centered label, and a bottom accent strip when
+    # active. Used both by draw_tab_bar (within the live bar) and by
+    # tab_drag_image (against an NSImage's locked-focus context).
+    # The per-tab bg fill overdraws the bar-wide fill for the live
+    # case — harmless, same color — and stands in for it for the
+    # drag-image case where there's no bar.
+    def paint_one_tab(tab, x, y, tab_w, tbh, is_active, ns_para)
+      ObjC::MSG_VOID.call(@tab_bg, ObjC.sel('setFill'))
+      ObjC::NSRectFill.call(x, y, tab_w, tbh)
 
       pad    = @cell_width * 0.5
-      rect_w = tab_w - 2 * pad
-      rect_w = 0.0 if rect_w < 0
+      rect_w = [tab_w - 2 * pad, 0.0].max
+      title_y = y + (tbh - @tab_font_line_height) / 2.0
 
-      @tabs.each_with_index do |tab, i|
-        x         = i * tab_w
-        is_active = (i == @active_tab)
+      ns_label = ObjC.nsstring(tab.title)
+      ns_attrs = ObjC.nsdict({
+        ObjC::NSFontAttributeName => @tab_font,
+        ObjC::NSForegroundColorAttributeName => is_active ? @tab_fg_active : @tab_fg_inactive,
+        ObjC::NSParagraphStyleAttributeName  => ns_para,
+      })
+      # NSAttributedString draw (vs NSString) — only this path honors
+      # the paragraph style's center alignment + truncating-tail mode.
+      # See the NSStringDrawing alignment notes earlier in this file.
+      attr_str = ObjC::MSG_PTR.call(ObjC.cls('NSAttributedString'), ObjC.sel('alloc'))
+      attr_str = ObjC::MSG_PTR_2.call(attr_str,
+        ObjC.sel('initWithString:attributes:'), ns_label, ns_attrs)
+      ObjC::MSG_VOID_RECT_L_1.call(attr_str,
+        ObjC.sel('drawWithRect:options:context:'),
+        x + pad, title_y, rect_w, @tab_font_line_height,
+        NSStringDrawingUsesLineFragmentOrigin | NSStringDrawingTruncatesLastVisibleLine,
+        Fiddle::Pointer.new(0))
+      ObjC.release(attr_str)
 
-        ns_label = ObjC.nsstring(tab.title)
-        ns_attrs = ObjC.nsdict({
-          ObjC::NSFontAttributeName => @tab_font,
-          ObjC::NSForegroundColorAttributeName => is_active ? @tab_fg_active : @tab_fg_inactive,
-          ObjC::NSParagraphStyleAttributeName  => ns_para,
-        })
-        # Build an NSAttributedString rather than passing the dict to
-        # NSString's draw methods — the NSString-based draw APIs honor
-        # font + color but silently ignore paragraph-style alignment,
-        # which is why earlier attempts left the truncated text
-        # drifted toward one edge instead of centered. NSAttributedString
-        # drawWithRect:options:context: routes through the canonical
-        # typesetter and respects the alignment + truncating-tail mode.
-        attr_str = ObjC::MSG_PTR.call(ObjC.cls('NSAttributedString'), ObjC.sel('alloc'))
-        attr_str = ObjC::MSG_PTR_2.call(attr_str,
-          ObjC.sel('initWithString:attributes:'), ns_label, ns_attrs)
-        ObjC::MSG_VOID_RECT_L_1.call(attr_str,
-          ObjC.sel('drawWithRect:options:context:'),
-          x + pad, title_y, rect_w, @tab_font_line_height,
-          NSStringDrawingUsesLineFragmentOrigin | NSStringDrawingTruncatesLastVisibleLine,
-          Fiddle::Pointer.new(0))
-        ObjC.release(attr_str)
+      if is_active
+        accent_color = make_color(*@active_profile.cursor_color)
+        accent_h     = 2.0
+        accent_inset = @cell_width * 0.5
+        ObjC::MSG_VOID.call(accent_color, ObjC.sel('setFill'))
+        ObjC::NSRectFill.call(x + accent_inset, y + tbh - accent_h,
+                               tab_w - 2 * accent_inset, accent_h)
+      end
+    end
 
-        # Thin accent strip flush to the bottom of the bar marks
-        # the active tab — replaces the previous heavier full-cell
-        # background fill. Inset on each side so it reads as the
-        # tab's own marker rather than a continuous line.
-        if is_active
-          ObjC::MSG_VOID.call(accent_color, ObjC.sel('setFill'))
-          ObjC::NSRectFill.call(x + accent_inset, ty + tbh - accent_h,
-                                 tab_w - 2 * accent_inset, accent_h)
-        end
+    # Build and kick off an AppKit drag session for tab_index. The
+    # session is identified on the pasteboard via our private
+    # `com.echoes.tab` type carrying a `<view_ptr>:<tab_index>` token,
+    # so the destination's performDragOperation: can resolve the
+    # source window-state and splice the tab.
+    def start_tab_drag(event_ptr, tab_index)
+      return unless @view && tab_index >= 0 && tab_index < @tabs.size
+      tbh = tab_bar_height
+      return if tbh <= 0
+      tab_w = (@cell_width * @cols).to_f / @tabs.size
+      ty    = tab_bar_y
+
+      token = encode_tab_drag_token(@view.to_i, tab_index)
+
+      pb_item = ObjC::MSG_PTR.call(ObjC.cls('NSPasteboardItem'), ObjC.sel('alloc'))
+      pb_item = ObjC::MSG_PTR.call(pb_item, ObjC.sel('init'))
+      # setString:forType: returns BOOL — we ignore the return.
+      ObjC::MSG_PTR_2.call(pb_item, ObjC.sel('setString:forType:'),
+                            ObjC.nsstring(token),
+                            ObjC.nsstring(ObjC::EchoesPasteboardTypeTab))
+
+      drag_item = ObjC::MSG_PTR.call(ObjC.cls('NSDraggingItem'), ObjC.sel('alloc'))
+      drag_item = ObjC::MSG_PTR_1.call(drag_item, ObjC.sel('initWithPasteboardWriter:'),
+                                        pb_item)
+
+      image = tab_drag_image(tab_index)
+      ObjC::MSG_VOID_RECT_1.call(drag_item, ObjC.sel('setDraggingFrame:contents:'),
+                                  tab_index * tab_w, ty, tab_w, tbh,
+                                  image || Fiddle::Pointer.new(0))
+
+      items = ObjC::MSG_PTR_1.call(ObjC.cls('NSArray'),
+                                    ObjC.sel('arrayWithObject:'), drag_item)
+
+      # AppKit owns the gesture from here until endedAtPoint:operation:.
+      ObjC::MSG_PTR_3.call(@view,
+                            ObjC.sel('beginDraggingSessionWithItems:event:source:'),
+                            items, event_ptr, @view)
+
+      # Stash on the source window-state so the source-side
+      # endedAtPoint:operation: callback (which fires on this view
+      # when the session ends) knows which tab was dragged — needed
+      # for the tear-out path that has to remove it from @tabs.
+      ws = @view_to_ws[@view.to_i]
+      ws[:dragging_tab_index] = tab_index if ws
+
+      # Our alloc+init gave us +1; the drag session / pasteboard /
+      # array retain internally for their own lifetimes. Drop ours.
+      ObjC.release(pb_item)
+      ObjC.release(drag_item)
+      ObjC.release(image) if image
+    end
+
+    # Called from draggingEntered:/draggingUpdated: on the destination
+    # view. Inspects the dragging pasteboard, computes a drop-index
+    # if the cursor is hovering over the tab bar, and returns the
+    # NSDragOperation we'd accept on drop. Triggers a redraw so the
+    # insertion-marker line reflects the latest cursor position.
+    def update_drag_target(sender)
+      pb = ObjC::MSG_PTR.call(sender, ObjC.sel('draggingPasteboard'))
+      type = ObjC.nsstring(ObjC::EchoesPasteboardTypeTab)
+      has_tab_type = !ObjC::MSG_PTR_1.call(pb, ObjC.sel('availableTypeFromArray:'),
+        ObjC::MSG_PTR_1.call(ObjC.cls('NSArray'), ObjC.sel('arrayWithObject:'), type)
+      ).null?
+
+      unless has_tab_type
+        # Not our type — fall back to the file-drop behavior so Finder
+        # drags keep working.
+        clear_drag_target
+        return ObjC::NSDragOperationCopy
       end
 
-      ObjC.release(ns_para)
+      dx, dy_window = dragging_location(sender)
+      vfh   = view_frame_height
+      dy    = vfh - dy_window
+      tbh   = tab_bar_height
+      bar_y = tab_bar_y
+      if tbh <= 0 || dy < bar_y || dy >= bar_y + tbh
+        # Cursor isn't over the tab bar — refuse the drop so AppKit
+        # shows the "no entry" cursor and the user knows to aim
+        # for the bar. (Tear-out path handles drops OUTSIDE the
+        # window via the source-side endedAtPoint callback.)
+        clear_drag_target
+        return ObjC::NSDragOperationNone
+      end
+
+      tab_w = (@cell_width * @cols).to_f / @tabs.size
+      @drag_insertion_index = compute_drop_index(dx, tab_w, @tabs.size)
+      ObjC::MSG_VOID_I.call(@view, ObjC.sel('setNeedsDisplay:'), 1)
+      ObjC::NSDragOperationMove
+    end
+
+    def clear_drag_target
+      return unless @drag_insertion_index
+      @drag_insertion_index = nil
+      ObjC::MSG_VOID_I.call(@view, ObjC.sel('setNeedsDisplay:'), 1) if @view
+    end
+
+    # Pull NSPoint out of [sender draggingLocation] via NSInvocation —
+    # same trick as event_location uses for NSEvent.locationInWindow,
+    # because Fiddle can't model a 2-double return directly.
+    def dragging_location(sender)
+      sender_class = ObjC::MSG_PTR.call(sender, ObjC.sel('class'))
+      sig = ObjC::MSG_PTR_1.call(sender_class,
+        ObjC.sel('instanceMethodSignatureForSelector:'),
+        ObjC.sel('draggingLocation'))
+      inv = ObjC::MSG_PTR_1.call(ObjC.cls('NSInvocation'),
+        ObjC.sel('invocationWithMethodSignature:'), sig)
+      ObjC::MSG_VOID_1.call(inv, ObjC.sel('setSelector:'), ObjC.sel('draggingLocation'))
+      ObjC::MSG_VOID_1.call(inv, ObjC.sel('invokeWithTarget:'), sender)
+      buf = Fiddle::Pointer.malloc(16, Fiddle::RUBY_FREE)
+      ObjC::MSG_VOID_1.call(inv, ObjC.sel('getReturnValue:'), buf)
+      buf[0, 16].unpack('dd')
+    end
+
+    # Source-side callback fired when AppKit's drag session ends.
+    # operation != NSDragOperationNone means some destination
+    # accepted the drop (handle_tab_drop already moved the tab) —
+    # nothing to do here. operation == NSDragOperationNone means
+    # the user dropped outside any drop target, which is our tear-
+    # out signal: spawn a new window around the dragged tab and
+    # remove it from the source window.
+    def tab_drag_ended(source_view_ptr, screen_x, screen_y, operation)
+      src_ws = @view_to_ws[source_view_ptr.to_i]
+      return unless src_ws
+
+      tab_index = src_ws.delete(:dragging_tab_index)
+      return unless operation == ObjC::NSDragOperationNone
+      return unless tab_index && tab_index >= 0 && tab_index < src_ws[:tabs].size
+
+      tab = src_ws[:tabs].delete_at(tab_index)
+      src_ws[:active_tab] = src_ws[:active_tab].clamp(
+        0, [src_ws[:tabs].size - 1, 0].max)
+
+      # Switch @view to the source so open_window_with_tab's
+      # save_window_state captures source frame (we read its size
+      # to position the new window).
+      if @view.to_i != source_view_ptr.to_i
+        save_window_state
+        load_window_state(src_ws)
+      end
+
+      # Open the new window FIRST so close_current_window (if we
+      # need it) sees a non-empty @window_states and doesn't
+      # terminate the app on a single-tab single-window tear-out.
+      open_window_with_tab(tab, at_screen_point: [screen_x, screen_y])
+
+      if src_ws[:tabs].empty?
+        # @view now points at the new window; flip back to source
+        # and close it.
+        save_window_state
+        load_window_state(src_ws)
+        close_current_window
+      end
+    rescue StandardError => e
+      log_crash(e, context: 'tab_drag_ended')
+    end
+
+    # Render a tab snapshot to an NSImage at the tab's live size.
+    # Passed as the `contents` of an NSDraggingItem so the user sees
+    # the actual tab travel under the cursor during a drag. Returns
+    # the NSImage with a +1 retain count; AppKit's drag session
+    # retains it internally for the session's lifetime.
+    def tab_drag_image(tab_index)
+      return nil if tab_index < 0 || tab_index >= @tabs.size
+      tbh = tab_bar_height
+      return nil if tbh <= 0
+      tab_w = (@cell_width * @cols).to_f / @tabs.size
+
+      image = ObjC::MSG_PTR.call(ObjC.cls('NSImage'), ObjC.sel('alloc'))
+      image = ObjC::MSG_PTR_2D.call(image, ObjC.sel('initWithSize:'), tab_w, tbh)
+
+      ObjC::MSG_VOID.call(image, ObjC.sel('lockFocus'))
+      begin
+        ns_para = build_tab_paragraph_style
+        paint_one_tab(@tabs[tab_index], 0.0, 0.0, tab_w, tbh,
+                      tab_index == @active_tab, ns_para)
+        ObjC.release(ns_para)
+      ensure
+        ObjC::MSG_VOID.call(image, ObjC.sel('unlockFocus'))
+      end
+      image
     end
 
     def grid_position(event_ptr)
@@ -3291,8 +3708,6 @@ module Echoes
     # standard tab/pane/window-state pipeline so the window
     # auto-closes when the child program exits.
     def open_external_window(argv:, display_index:, fullscreen:)
-      save_window_state
-
       screens = ObjC::MSG_PTR.call(ObjC.cls('NSScreen'), ObjC.sel('screens'))
       count = ObjC::MSG_RET_L.call(screens, ObjC.sel('count'))
       return if display_index < 0 || display_index >= count
@@ -3311,30 +3726,66 @@ module Echoes
       tab.title = File.basename(argv.first.to_s)
       tab.panes.each { |pn| wire_screen_handlers(pn) }
 
-      # Borderless mask (0) for fullscreen; default chrome otherwise.
       style_mask = fullscreen ? 0 : ObjC::NSWindowStyleMaskDefault
+      level      = fullscreen ? 25 : nil  # NSStatusWindowLevel
+      build_window_around_tabs(tabs: [tab], active: 0,
+        frame: [sx, sy, sw, sh], style_mask: style_mask,
+        title: tab.title, level: level)
+    end
+
+    # Tear-out: build a new window around an EXISTING tab (already
+    # has live PTY / panes) and place it so its top-left lands near
+    # the cursor drop point.
+    def open_window_with_tab(tab, at_screen_point:)
+      # Inherit the source window's content size so the moved tab
+      # doesn't get re-laid-out at a different size mid-PTY-session.
+      _, _, sw, sh = nsrect_via_invocation(@window, 'frame')
+
+      # Screen / visibleFrame for clamping. Position the new window so
+      # its TOP-LEFT lands at the drop point — AppKit window origin
+      # is bottom-left in screen coords, so subtract height for y.
+      drop_x, drop_y = at_screen_point
+      origin_x = drop_x
+      origin_y = drop_y - sh
+      src_screen = ObjC::MSG_PTR.call(@window, ObjC.sel('screen'))
+      if src_screen && !src_screen.null?
+        vfx, vfy, vfw, vfh = nsrect_via_invocation(src_screen, 'visibleFrame')
+        origin_x = origin_x.clamp(vfx, vfx + vfw - [sw, vfw].min)
+        origin_y = origin_y.clamp(vfy, vfy + vfh - [sh, vfh].min)
+      end
+
+      build_window_around_tabs(tabs: [tab], active: 0,
+        frame: [origin_x, origin_y, sw, sh],
+        style_mask: ObjC::NSWindowStyleMaskDefault,
+        title: tab.title)
+    end
+
+    # Shared NSWindow / NSView / state-registration scaffolding for
+    # every code path that births a new Echoes window — programmatic
+    # open (open_external_window) and tab tear-out (open_window_with_tab).
+    # Caller passes already-built Tab(s); we don't construct or rewire
+    # them, so this works for both fresh-spawned PTYs and live tabs
+    # moved over from another window.
+    def build_window_around_tabs(tabs:, active:, frame:, style_mask:,
+                                  title: nil, level: nil)
+      save_window_state
+
+      sx, sy, sw, sh = frame
       new_window = ObjC::MSG_PTR.call(ObjC.cls('NSWindow'), ObjC.sel('alloc'))
       new_window = ObjC::MSG_PTR_RECT_L_L_I.call(
         new_window, ObjC.sel('initWithContentRect:styleMask:backing:defer:'),
         sx, sy, sw, sh, style_mask, ObjC::NSBackingStoreBuffered, 0
       )
-      ObjC::MSG_VOID_1.call(new_window, ObjC.sel('setTitle:'), ObjC.nsstring(tab.title))
+      ObjC::MSG_VOID_1.call(new_window, ObjC.sel('setTitle:'),
+                             ObjC.nsstring(title || Echoes.config.window_title))
       ObjC::MSG_VOID_L.call(new_window, ObjC.sel('setCollectionBehavior:'), 1 << 7)
       ObjC::MSG_VOID_I.call(new_window, ObjC.sel('setAcceptsMouseMovedEvents:'), 1)
-      if fullscreen
-        # NSMainMenuWindowLevel + 1 = 25 = NSStatusWindowLevel; floats
-        # above the menu bar so the presentation truly fills the
-        # screen even without going through AppKit's fullscreen
-        # transition.
-        ObjC::MSG_VOID_L.call(new_window, ObjC.sel('setLevel:'), 25)
-      end
+      ObjC::MSG_VOID_L.call(new_window, ObjC.sel('setLevel:'), level) if level
 
       new_view = ObjC::MSG_PTR.call(@view_class, ObjC.sel('alloc'))
       new_view = ObjC::MSG_PTR_RECT.call(new_view, ObjC.sel('initWithFrame:'),
                                           0.0, 0.0, sw, sh)
-      drag_types = ObjC::MSG_PTR_1.call(ObjC.cls('NSArray'), ObjC.sel('arrayWithObject:'),
-                                         ObjC::NSPasteboardTypeFileURL)
-      ObjC::MSG_VOID_1.call(new_view, ObjC.sel('registerForDraggedTypes:'), drag_types)
+      register_drag_types(new_view)
 
       ObjC::MSG_VOID_1.call(new_window, ObjC.sel('setContentView:'), new_view)
       ObjC::MSG_VOID_1.call(new_window, ObjC.sel('makeKeyAndOrderFront:'), @app)
@@ -3351,8 +3802,8 @@ module Echoes
 
       @window = new_window
       @view = new_view
-      @tabs = [tab]
-      @active_tab = 0
+      @tabs = tabs
+      @active_tab = active
       @search_mode = false
       @search_query = +""
       @search_matches = []
@@ -3365,12 +3816,26 @@ module Echoes
       @selection_anchor = nil
       @selection_end = nil
       @selection_word_anchor = nil
+      @drag_start_tab_index = nil
+      @drag_start_point = nil
+      @drag_insertion_index = nil
       @window_focused = true
 
       ws = {}
       @window_states << ws
       @view_to_ws[@view.to_i] = ws
       save_window_state
+    end
+
+    # Register both the file-URL drag type (existing paste-on-drop
+    # behavior) and our private tab-drag type on a fresh view, so the
+    # window can be both a Finder drop target and a tab drop target.
+    def register_drag_types(view)
+      arr = ObjC::MSG_PTR.call(ObjC.cls('NSMutableArray'), ObjC.sel('array'))
+      ObjC::MSG_VOID_1.call(arr, ObjC.sel('addObject:'), ObjC::NSPasteboardTypeFileURL)
+      ObjC::MSG_VOID_1.call(arr, ObjC.sel('addObject:'),
+                             ObjC.nsstring(ObjC::EchoesPasteboardTypeTab))
+      ObjC::MSG_VOID_1.call(view, ObjC.sel('registerForDraggedTypes:'), arr)
     end
 
     def capture_pane_to_png(pane, path)

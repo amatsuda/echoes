@@ -98,6 +98,7 @@ bundle exec exe/echoes -t  # TTY mode
 | Cmd+Shift+] / Cmd+Shift+[ | Next / previous tab                     |
 | Cmd+1 … Cmd+8             | Jump to tab 1 … 8                       |
 | Cmd+9                     | Jump to the last tab                    |
+| drag tab in the bar       | Reorder, move to another window, or tear out to a new window |
 | Cmd++ / Cmd+- / Cmd+0     | Bigger / smaller / reset font           |
 | Cmd+F                     | Find                                    |
 | Cmd+G / Cmd+Shift+G       | Find next / previous                    |
