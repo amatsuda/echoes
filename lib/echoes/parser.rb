@@ -506,7 +506,13 @@ module Echoes
         next unless v
         case k
         when 's' then params[:scale]  = v.to_i.clamp(1, 7)
-        when 'w' then params[:width]  = v.to_i.clamp(0, 7)
+        # `w=` was capped at 7 to follow the Kitty multicell spec, but
+        # the explicit-width path is the only practical way to do
+        # server-side slide-level centering (block spans the row, halign=2
+        # centers text within it). Raise the cap so a 30-wide title block
+        # at scale=5 (block_w = 150 cells) is representable; sane decks
+        # don't approach this. The lower bound (non-negative) is kept.
+        when 'w' then params[:width]  = [v.to_i, 0].max
         when 'n' then params[:frac_n] = v.to_i.clamp(0, 15)
         when 'd' then params[:frac_d] = v.to_i.clamp(0, 15)
         when 'v' then params[:valign] = v.to_i.clamp(0, 3)
