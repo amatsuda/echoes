@@ -66,7 +66,7 @@ class Echoes::InstallerTest < Test::Unit::TestCase
 
   test "install skips bundles that don't exist in the source" do
     FileUtils.remove_entry(File.join(@source, 'EchoesEmbed.app'))
-    out, err = capture_stdio do
+    _out, err = capture_stdio do
       Echoes::Installer.install(source_root: @source, target_dir: @target)
     end
     assert Dir.exist?(File.join(@target, 'Echoes.app'))

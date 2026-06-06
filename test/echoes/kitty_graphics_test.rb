@@ -386,10 +386,10 @@ class Echoes::KittyGraphicsTest < Test::Unit::TestCase
   def with_svg_renderer_stub(stub)
     require 'echoes/svg_renderer'
     real = Echoes::SvgRenderer.method(:rasterize)
-    Echoes::SvgRenderer.define_singleton_method(:rasterize, &stub)
+    TestHelpers.replace_singleton_method(Echoes::SvgRenderer, :rasterize, &stub)
     yield
   ensure
-    Echoes::SvgRenderer.define_singleton_method(:rasterize, &real) if real
+    TestHelpers.replace_singleton_method(Echoes::SvgRenderer, :rasterize, &real) if real
   end
 
   test "path-only SVG renders through the CG fast path end-to-end" do
@@ -414,12 +414,12 @@ class Echoes::KittyGraphicsTest < Test::Unit::TestCase
     cg_called = false
     wk_called = false
     cg_real = Echoes::SvgCgRenderer.method(:rasterize)
-    Echoes::SvgCgRenderer.define_singleton_method(:rasterize) do |bytes, width:, height:|
+    TestHelpers.replace_singleton_method(Echoes::SvgCgRenderer, :rasterize) do |bytes, width:, height:|
       cg_called = true
       cg_real.call(bytes, width: width, height: height)   # nil on <text>
     end
     sr_real = Echoes::SvgRenderer.method(:rasterize)
-    Echoes::SvgRenderer.define_singleton_method(:rasterize) do |bytes, width:, height:|
+    TestHelpers.replace_singleton_method(Echoes::SvgRenderer, :rasterize) do |bytes, width:, height:|
       fast = Echoes::SvgCgRenderer.rasterize(bytes, width: width, height: height)
       next fast if fast
       wk_called = true
@@ -431,8 +431,8 @@ class Echoes::KittyGraphicsTest < Test::Unit::TestCase
       Echoes::KittyGraphics.handle_chunk(@state, "a=T,s=10,v=10,i=71", b64(svg),
                                          screen: @screen, writer: @writer)
     ensure
-      Echoes::SvgCgRenderer.define_singleton_method(:rasterize, &cg_real)
-      Echoes::SvgRenderer.define_singleton_method(:rasterize, &sr_real)
+      TestHelpers.replace_singleton_method(Echoes::SvgCgRenderer, :rasterize, &cg_real)
+      TestHelpers.replace_singleton_method(Echoes::SvgRenderer, :rasterize, &sr_real)
     end
 
     assert cg_called, "CG fast path should have been attempted first"
@@ -571,15 +571,18 @@ end
 
 # Lightweight monkey-patch so dispatch tests can inject decoded
 # images without going through the AppKit-backed PNG decoder.
+# Uses TestHelpers.replace_singleton_method (test_helper.rb) so the swaps don't
+# trip "method redefined" warnings — the helper removes the old
+# entry before the new one lands.
 module Echoes::KittyGraphics
   def self.stub_decoder(mapping)
     real = method(:decode_image)
-    define_singleton_method(:decode_image) do |bytes, _format, _opts = {}, screen: nil|
+    TestHelpers.replace_singleton_method(self, :decode_image) do |bytes, _format, _opts = {}, screen: nil|
       mapping[bytes]
     end
     yield
   ensure
-    define_singleton_method(:decode_image) do |bytes, format, opts = {}, screen: nil|
+    TestHelpers.replace_singleton_method(self, :decode_image) do |bytes, format, opts = {}, screen: nil|
       real.call(bytes, format, opts, screen: screen)
     end
   end
@@ -589,10 +592,10 @@ module Echoes::KittyGraphics
   # which branch the format dispatch took.
   def self.with_decoder(replacement)
     real = method(:decode_image)
-    define_singleton_method(:decode_image, &replacement)
+    TestHelpers.replace_singleton_method(self, :decode_image, &replacement)
     yield
   ensure
-    define_singleton_method(:decode_image) do |bytes, format, opts = {}, screen: nil|
+    TestHelpers.replace_singleton_method(self, :decode_image) do |bytes, format, opts = {}, screen: nil|
       real.call(bytes, format, opts, screen: screen)
     end
   end

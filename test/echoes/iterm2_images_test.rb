@@ -181,10 +181,10 @@ class Echoes::Iterm2ImagesTest < Test::Unit::TestCase
   def with_svg_renderer_stub(stub)
     require 'echoes/svg_renderer'
     real = Echoes::SvgRenderer.method(:rasterize)
-    Echoes::SvgRenderer.define_singleton_method(:rasterize, &stub)
+    TestHelpers.replace_singleton_method(Echoes::SvgRenderer, :rasterize, &stub)
     yield
   ensure
-    Echoes::SvgRenderer.define_singleton_method(:rasterize, &real) if real
+    TestHelpers.replace_singleton_method(Echoes::SvgRenderer, :rasterize, &real) if real
   end
 
   # --- end-to-end through the CG fast path (no SvgRenderer stub) ---
@@ -216,7 +216,7 @@ class Echoes::Iterm2ImagesTest < Test::Unit::TestCase
     cg_called = false
     wk_called = false
     cg_real = Echoes::SvgCgRenderer.method(:rasterize)
-    Echoes::SvgCgRenderer.define_singleton_method(:rasterize) do |bytes, width:, height:|
+    TestHelpers.replace_singleton_method(Echoes::SvgCgRenderer, :rasterize) do |bytes, width:, height:|
       cg_called = true
       cg_real.call(bytes, width: width, height: height)  # returns nil (bails on <text>)
     end
@@ -225,7 +225,7 @@ class Echoes::Iterm2ImagesTest < Test::Unit::TestCase
     # WebKit-path attempt without actually spinning up WKWebView.
     # We re-implement the fast-path-first / fallback dispatch.
     sr_real = Echoes::SvgRenderer.method(:rasterize)
-    Echoes::SvgRenderer.define_singleton_method(:rasterize) do |bytes, width:, height:|
+    TestHelpers.replace_singleton_method(Echoes::SvgRenderer, :rasterize) do |bytes, width:, height:|
       fast = Echoes::SvgCgRenderer.rasterize(bytes, width: width, height: height)
       next fast if fast
       wk_called = true
@@ -237,8 +237,8 @@ class Echoes::Iterm2ImagesTest < Test::Unit::TestCase
       osc_rest = "File=inline=1;width=10px;height=10px:#{b64(svg)}"
       assert Echoes::Iterm2Images.handle(osc_rest, screen: @screen)
     ensure
-      Echoes::SvgCgRenderer.define_singleton_method(:rasterize, &cg_real)
-      Echoes::SvgRenderer.define_singleton_method(:rasterize, &sr_real)
+      TestHelpers.replace_singleton_method(Echoes::SvgCgRenderer, :rasterize, &cg_real)
+      TestHelpers.replace_singleton_method(Echoes::SvgRenderer, :rasterize, &sr_real)
     end
 
     assert cg_called, "CG fast path should have been attempted first"

@@ -1544,13 +1544,13 @@ class Echoes::ParserTest < Test::Unit::TestCase
     require "echoes/iterm2_images"
     seen = []
     Echoes::Iterm2Images.singleton_class.send(:alias_method, :_orig_handle, :handle)
-    Echoes::Iterm2Images.define_singleton_method(:handle) do |rest, screen:, writer:|
+    TestHelpers.replace_singleton_method(Echoes::Iterm2Images, :handle) do |rest, screen:, writer:|
       seen << rest.dup
     end
     begin
       @parser.feed("\e]1337;File=inline=1:AAAA\a")
     ensure
-      Echoes::Iterm2Images.singleton_class.send(:alias_method, :handle, :_orig_handle)
+      TestHelpers.replace_singleton_alias(Echoes::Iterm2Images, :handle, :_orig_handle)
       Echoes::Iterm2Images.singleton_class.send(:remove_method, :_orig_handle)
     end
     assert_equal ["File=inline=1:AAAA"], seen
@@ -1562,13 +1562,13 @@ class Echoes::ParserTest < Test::Unit::TestCase
     require "echoes/kitty_graphics"
     seen = []
     Echoes::KittyGraphics.singleton_class.send(:alias_method, :_orig_hc, :handle_chunk)
-    Echoes::KittyGraphics.define_singleton_method(:handle_chunk) do |state, meta, payload, screen:, writer:|
+    TestHelpers.replace_singleton_method(Echoes::KittyGraphics, :handle_chunk) do |state, meta, payload, screen:, writer:|
       seen << [meta.dup, payload.dup]
     end
     begin
       @parser.feed("\e_Ga=T,f=100,i=1;AAAA\e\\")
     ensure
-      Echoes::KittyGraphics.singleton_class.send(:alias_method, :handle_chunk, :_orig_hc)
+      TestHelpers.replace_singleton_alias(Echoes::KittyGraphics, :handle_chunk, :_orig_hc)
       Echoes::KittyGraphics.singleton_class.send(:remove_method, :_orig_hc)
     end
     assert_equal 1, seen.size
@@ -1580,13 +1580,13 @@ class Echoes::ParserTest < Test::Unit::TestCase
     require "echoes/kitty_graphics"
     seen = []
     Echoes::KittyGraphics.singleton_class.send(:alias_method, :_orig_hc, :handle_chunk)
-    Echoes::KittyGraphics.define_singleton_method(:handle_chunk) do |state, meta, payload, screen:, writer:|
+    TestHelpers.replace_singleton_method(Echoes::KittyGraphics, :handle_chunk) do |state, meta, payload, screen:, writer:|
       seen << meta.dup
     end
     begin
       @parser.feed("\e_Ga=T;\a")
     ensure
-      Echoes::KittyGraphics.singleton_class.send(:alias_method, :handle_chunk, :_orig_hc)
+      TestHelpers.replace_singleton_alias(Echoes::KittyGraphics, :handle_chunk, :_orig_hc)
       Echoes::KittyGraphics.singleton_class.send(:remove_method, :_orig_hc)
     end
     assert_equal ["a=T"], seen
@@ -1596,13 +1596,13 @@ class Echoes::ParserTest < Test::Unit::TestCase
     require "echoes/kitty_graphics"
     seen = []
     Echoes::KittyGraphics.singleton_class.send(:alias_method, :_orig_hc, :handle_chunk)
-    Echoes::KittyGraphics.define_singleton_method(:handle_chunk) do |*_, **_|
+    TestHelpers.replace_singleton_method(Echoes::KittyGraphics, :handle_chunk) do |*_, **_|
       seen << :called
     end
     begin
       @parser.feed("\e_X-something-else\e\\")
     ensure
-      Echoes::KittyGraphics.singleton_class.send(:alias_method, :handle_chunk, :_orig_hc)
+      TestHelpers.replace_singleton_alias(Echoes::KittyGraphics, :handle_chunk, :_orig_hc)
       Echoes::KittyGraphics.singleton_class.send(:remove_method, :_orig_hc)
     end
     assert_empty seen

@@ -24,7 +24,7 @@ class Echoes::PreferencesTest < Test::Unit::TestCase
     key = unique_key
     Echoes::Preferences.set_double(key, 42.0)
     Echoes::Preferences.delete(key)
-    assert_equal -1.0, Echoes::Preferences.fetch_double(key, default: -1.0)
+    assert_equal(-1.0, Echoes::Preferences.fetch_double(key, default: -1.0))
   end
 
   def test_zero_is_distinguishable_from_missing
