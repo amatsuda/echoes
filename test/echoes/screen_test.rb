@@ -370,6 +370,17 @@ class Echoes::ScreenTest < Test::Unit::TestCase
     assert_equal false, mc[:flip_v]
   end
 
+  test "put_multicell anchor captures the current paint alpha" do
+    # The OSC 7772 cell-alpha path needs the multicell anchor cell to
+    # carry @attrs.alpha so the GUI's multicell draw can apply it to
+    # the fg colour. Without this, OSC 66 paragraphs (the dominant
+    # body-text emit path) bypass the fade entirely.
+    @screen.set_paint_alpha(0.4)
+    @screen.put_multicell("A", scale: 2, width: 0, frac_n: 0, frac_d: 0,
+                         valign: 0, halign: 0)
+    assert_in_delta 0.4, @screen.grid[0][0].alpha
+  end
+
   test "put_multicell discards block larger than screen" do
     @screen.put_multicell("A", scale: 6, width: 2, frac_n: 0, frac_d: 0, valign: 0, halign: 0)
     # 6*2=12 cols > 10, should be discarded

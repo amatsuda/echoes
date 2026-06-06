@@ -1391,9 +1391,16 @@ module Echoes
               ObjC.release(regular)
             end
 
+            # OSC 7772 cell-alpha on a multicell — applied to the fg in
+            # exactly the same way the put_char path does, so OSC 66
+            # paragraphs (the dominant body-text path) honour the fade
+            # too. The anchor cell captures alpha at write time via
+            # copy_from in place_multicell_block.
+            mc_fg_color = cell.alpha < 1.0 ? make_color_with_alpha(fg_color, cell.alpha) : fg_color
+
             draw_attrs = {
               ObjC::NSFontAttributeName => scaled_font,
-              ObjC::NSForegroundColorAttributeName => fg_color,
+              ObjC::NSForegroundColorAttributeName => mc_fg_color,
             }
             if cell.underline
               draw_attrs[ObjC::NSUnderlineStyleAttributeName] = ObjC.nsnumber_int(1)
