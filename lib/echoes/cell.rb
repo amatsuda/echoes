@@ -2,7 +2,7 @@
 
 module Echoes
   class Cell
-    attr_accessor :char, :fg, :bg, :bold, :italic, :underline, :underline_color, :inverse, :faint, :strikethrough, :blink, :concealed, :width, :multicell, :hyperlink
+    attr_accessor :char, :fg, :bg, :bold, :italic, :underline, :underline_color, :inverse, :faint, :strikethrough, :blink, :concealed, :width, :multicell, :hyperlink, :alpha
 
     def initialize(char = " ", fg: nil, bg: nil, bold: false, underline: false, inverse: false, width: 1)
       @char = char
@@ -15,8 +15,13 @@ module Echoes
       @faint = false
       @strikethrough = false
       @width = width
+      @alpha = 1.0
     end
 
+    # SGR `\e[0m` clears style — but alpha is an OSC 7772 paint
+    # modifier, not an SGR attribute, so the reset leaves it alone.
+    # Otherwise a nested colour run inside a fading region would snap
+    # back to opaque the moment its leading SGR-reset fires.
     def reset!
       @char = " "
       @fg = nil
@@ -49,6 +54,7 @@ module Echoes
       @blink = other.blink
       @concealed = other.concealed
       @hyperlink = other.hyperlink
+      @alpha = other.alpha
     end
   end
 end

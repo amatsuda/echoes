@@ -1468,6 +1468,32 @@ class Echoes::ParserTest < Test::Unit::TestCase
     end
   end
 
+  test "OSC 7772 cell-alpha sets the screen's paint alpha and stamps subsequent cells" do
+    @parser.feed("\e]7772;cell-alpha;0.4\aXY")
+    assert_in_delta 0.4, @screen.instance_variable_get(:@attrs).alpha
+    assert_in_delta 0.4, @screen.grid[0][0].alpha
+    assert_in_delta 0.4, @screen.grid[0][1].alpha
+  end
+
+  test "OSC 7772 cell-alpha clamps out-of-range floats to [0.0, 1.0]" do
+    @parser.feed("\e]7772;cell-alpha;1.7\a")
+    assert_in_delta 1.0, @screen.instance_variable_get(:@attrs).alpha
+    @parser.feed("\e]7772;cell-alpha;-0.5\a")
+    assert_in_delta 0.0, @screen.instance_variable_get(:@attrs).alpha
+  end
+
+  test "OSC 7772 cell-alpha survives a CSI 0m SGR reset (alpha is not an SGR attr)" do
+    @parser.feed("\e]7772;cell-alpha;0.3\a\e[0mA")
+    assert_in_delta 0.3, @screen.grid[0][0].alpha,
+                    "SGR-reset must not clear OSC-set paint alpha"
+  end
+
+  test "OSC 7772 cell-alpha with garbage value leaves alpha untouched" do
+    @parser.feed("\e]7772;cell-alpha;0.5\a")
+    @parser.feed("\e]7772;cell-alpha;not-a-number\a")
+    assert_in_delta 0.5, @screen.instance_variable_get(:@attrs).alpha
+  end
+
   # --- OSC 9 / 777 (notifications) ---
 
   test "OSC 9 invokes notification_handler with nil title and the rest as message" do

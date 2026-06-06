@@ -672,6 +672,20 @@ module Echoes
         if @screen.respond_to?(:show_pointer_handler) && @screen.show_pointer_handler
           @screen.show_pointer_handler.call
         end
+      when 'cell-alpha'
+        # OSC 7772 `cell-alpha;<float>` — set the paint alpha applied to
+        # subsequent put_char cells. Drives fade-in / fade-out animations
+        # from a child process. Lives outside SGR so an inline `\e[0m`
+        # inside the faded region doesn't snap alpha back to opaque.
+        # Unparseable values (no Float, empty) silently no-op.
+        raw = (args || '').strip
+        if @screen.respond_to?(:set_paint_alpha) && !raw.empty?
+          begin
+            @screen.set_paint_alpha(Float(raw))
+          rescue ArgumentError, TypeError
+            # garbage in; leave alpha untouched
+          end
+        end
       end
     end
 

@@ -1509,8 +1509,16 @@ module Echoes
             elsif cell.faint
               fg_color = make_color_with_alpha(fg_color, 0.5)
             end
+            # OSC 7772 cell-alpha — translucent text against whatever's
+            # below (slide bg fill, screen bg). Sits AFTER faint so a
+            # CSI faint run inside a half-opacity fade compounds: 0.5
+            # faint × 0.4 alpha = 0.2 effective. Background fill stays
+            # opaque in v1, so text-on-bg fades only the glyph.
+            if cell.alpha < 1.0
+              fg_color = make_color_with_alpha(fg_color, cell.alpha)
+            end
 
-            sig = [base_font.to_i, fg_color.to_i, cell.underline, cell.strikethrough]
+            sig = [base_font.to_i, fg_color.to_i, cell.underline, cell.strikethrough, cell.alpha]
             if run_sig != sig
               flush_run.call
               run_sig     = sig

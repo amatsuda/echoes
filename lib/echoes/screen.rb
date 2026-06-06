@@ -88,6 +88,16 @@ module Echoes
       '|' => "\u{2260}", '}' => "\u{00A3}", '~' => "\u{00B7}",
     }.freeze
 
+    # Set the current paint alpha (0.0 = transparent, 1.0 = opaque) so
+    # subsequent `put_char` / `put_multicell` cells inherit it via
+    # `@attrs`. Driven by OSC 7772 `cell-alpha;<float>` from a child
+    # process (e.g. przn's fade animation). Lives outside SGR so a
+    # CSI 0m reset inside the faded region doesn't snap alpha back to
+    # opaque mid-paragraph.
+    def set_paint_alpha(v)
+      @attrs.alpha = v.to_f.clamp(0.0, 1.0)
+    end
+
     def put_char(c)
       if c.bytesize == 1
         if @single_shift
