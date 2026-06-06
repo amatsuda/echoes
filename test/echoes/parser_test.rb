@@ -1447,6 +1447,27 @@ class Echoes::ParserTest < Test::Unit::TestCase
     end
   end
 
+  test "OSC 7772 hide-pointer invokes the handler" do
+    fired = 0
+    @screen.hide_pointer_handler = -> { fired += 1 }
+    @parser.feed("\e]7772;hide-pointer\a")
+    assert_equal 1, fired
+  end
+
+  test "OSC 7772 show-pointer invokes the handler" do
+    fired = 0
+    @screen.show_pointer_handler = -> { fired += 1 }
+    @parser.feed("\e]7772;show-pointer\a")
+    assert_equal 1, fired
+  end
+
+  test "OSC 7772 hide-pointer / show-pointer without handlers are no-ops" do
+    assert_nothing_raised do
+      @parser.feed("\e]7772;hide-pointer\a")
+      @parser.feed("\e]7772;show-pointer\a")
+    end
+  end
+
   # --- OSC 9 / 777 (notifications) ---
 
   test "OSC 9 invokes notification_handler with nil title and the rest as message" do

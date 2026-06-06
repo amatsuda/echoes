@@ -3641,6 +3641,21 @@ module Echoes
       screen.notification_handler = ->(title, message) { post_notification(pane, title, message) }
       screen.display_info_handler = -> { display_info_json(pane) }
       screen.open_window_handler  = ->(args) { open_window_from_osc(pane, args) }
+      # OSC 7772 hide-pointer / show-pointer — same hide-or-show effect as
+      # the user's Cmd+Shift+P toggle, but invokable from a child program
+      # (e.g. a presentation tool that wants the cursor gone for the
+      # duration of a talk). Guarded by @pointer_hidden so they stay
+      # idempotent and don't unbalance NSCursor's ref-counted hide/unhide.
+      screen.hide_pointer_handler = -> {
+        next if @pointer_hidden
+        ObjC::MSG_VOID.call(ObjC.cls('NSCursor'), ObjC.sel('hide'))
+        @pointer_hidden = true
+      }
+      screen.show_pointer_handler = -> {
+        next unless @pointer_hidden
+        ObjC::MSG_VOID.call(ObjC.cls('NSCursor'), ObjC.sel('unhide'))
+        @pointer_hidden = false
+      }
     end
 
     # Post a macOS notification for an in-pane OSC 9 / OSC 777

@@ -1016,7 +1016,8 @@ module Echoes
 
     attr_accessor :clipboard_handler, :palette_handler, :glyph_measurer,
                   :capture_handler, :notification_handler,
-                  :display_info_handler, :open_window_handler
+                  :display_info_handler, :open_window_handler,
+                  :hide_pointer_handler, :show_pointer_handler
 
     def set_clipboard(text)
       @clipboard_handler&.call(:set, text)

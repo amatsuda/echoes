@@ -664,6 +664,14 @@ module Echoes
         if @screen.respond_to?(:open_window_handler) && @screen.open_window_handler
           @screen.open_window_handler.call(args || '')
         end
+      when 'hide-pointer'
+        if @screen.respond_to?(:hide_pointer_handler) && @screen.hide_pointer_handler
+          @screen.hide_pointer_handler.call
+        end
+      when 'show-pointer'
+        if @screen.respond_to?(:show_pointer_handler) && @screen.show_pointer_handler
+          @screen.show_pointer_handler.call
+        end
       end
     end
 
