@@ -1271,8 +1271,136 @@ module Echoes
           x1 = (fx + fw).round
           y0 = fy.round
           y1 = (fy + fh).round
-          ObjC::NSRectFill.call(x0.to_f, y0.to_f, (x1 - x0).to_f, (y1 - y0).to_f)
+          # Within a row the bg pre-pass below already coalesces adjacent
+          # same-colour cells into one rect, so internal x-seams are
+          # gone. Across rows, though, every drawn row is still its own
+          # rect — and in OSC 7772 capture the PDF viewer anti-aliases
+          # each rect's bottom edge, producing faint horizontal lines
+          # between rows of a multi-line code block. Overdraw the
+          # bottom by 0.5 px so the next row's fill paints over the
+          # anti-aliased edge. Top isn't extended — the row above
+          # already covered our top edge with its own 0.5-px extension.
+          ObjC::NSRectFill.call(x0.to_f, y0.to_f, (x1 - x0).to_f, (y1 - y0).to_f + 0.5)
         end
+
+        # Pre-pass: coalesce adjacent same-colour cell backgrounds into
+        # one rect per run, EMITTED BEFORE the text loop so the row's
+        # bg fills land in the PDF stream first (text draws on top).
+        #
+        # Why: per-cell snap_fills tile pixel-perfect on screen, but
+        # OSC 7772 capture goes through `dataWithPDFInsideRect:`, which
+        # records every NSRectFill as a separate vector path. PDF
+        # viewers anti-alias each path's edges independently, and N
+        # adjacent same-colour rects (each glyph of a code block, each
+        # cell of a search highlight, …) end up with faint seam lines
+        # between every pair — visible as a grid through the dim-gray
+        # bg in exported decks. One rect per run has no internal
+        # boundaries, so no seams.
+        #
+        # Handles both regular cells and multicell anchors. A run
+        # extends only when the next cell shares (top_y, bot_y, colour)
+        # AND is x-adjacent — multicell anchors that span 2 rows still
+        # coalesce with each other (code-block glyphs at scale=2 all
+        # have block_h = 2 × @cell_height) but won't fold into a 1-row
+        # regular-cell run beside them.
+        # Column indices are tracked as integers (start_c, next_c) and
+        # converted to pixels only at flush. `@cell_width` is fractional
+        # (font measurement), so `px + (c_prev + mc_cols) * cw` and
+        # `px + c_prev * cw + mc_cols * cw` can differ by a float ULP —
+        # which is enough to break the coalesce mid-row and leave a
+        # vertical seam between two same-colour rects.
+        bg_run_start_c = nil
+        bg_run_next_c  = nil   # exclusive — the column an x-adjacent cell would start at
+        bg_run_top_y   = nil
+        bg_run_bot_y   = nil
+        bg_run_color   = nil
+        flush_bg_run = lambda do
+          break if bg_run_start_c.nil?
+          start_x = px + bg_run_start_c * @cell_width
+          end_x   = px + bg_run_next_c  * @cell_width
+          ObjC::MSG_VOID.call(bg_run_color, ObjC.sel('setFill'))
+          snap_fill.call(start_x, bg_run_top_y,
+                         end_x - start_x,
+                         bg_run_bot_y - bg_run_top_y)
+          bg_run_start_c = nil
+          bg_run_next_c  = nil
+          bg_run_top_y   = nil
+          bg_run_bot_y   = nil
+          bg_run_color   = nil
+        end
+
+        row.each_with_index do |cell, c|
+          next if cell.width == 0 || cell.multicell == :cont
+
+          # Column count + vertical extent for this cell. Multicell
+          # anchors carry their own cols × rows; regular cells span
+          # 1 column (or 2 for full-width chars) and one cell of height.
+          if cell.multicell.is_a?(Hash)
+            mc = cell.multicell
+            width_c = mc[:cols]
+            top_y   = y
+            bot_y   = y + mc[:rows] * @cell_height
+          else
+            width_c = (cell.width == 2 ? 2 : 1)
+            top_y   = y
+            bot_y   = y + @cell_height
+          end
+
+          # Mirror the kind+colour priority from the main loop's
+          # snap_fill block so the pre-pass paints exactly the same
+          # rectangles it used to — only coalesced.
+          cell_bg_val = cell.bg
+          cell_fg_val = cell.fg
+          if cell.inverse
+            cell_fg_val, cell_bg_val = cell_bg_val, cell_fg_val
+          end
+          has_bg_pre = !cell_bg_val.nil? || cell.inverse
+
+          selected_pre = is_active && cell_selected?(src, c)
+          is_match_pre = is_active && @search_mode && search_match_at?(src, c)
+          is_current_match_pre = is_active && @search_mode && current_search_match_at?(src, c)
+          if copy_mode&.active && copy_mode.selecting?
+            sel_start, sel_end = [copy_mode.selection_start, copy_mode.selection_end].sort_by { |p| [p[0], p[1]] }
+            cm_abs_row = scrollback.size + r - pane.scroll_offset
+            if cm_abs_row >= scrollback.size + sel_start[0] && cm_abs_row <= scrollback.size + sel_end[0]
+              cm_row = cm_abs_row - scrollback.size
+              if cm_row == sel_start[0] && cm_row == sel_end[0]
+                selected_pre = c >= sel_start[1] && c <= sel_end[1]
+              elsif cm_row == sel_start[0]
+                selected_pre = c >= sel_start[1]
+              elsif cm_row == sel_end[0]
+                selected_pre = c <= sel_end[1]
+              else
+                selected_pre = true
+              end
+            end
+          end
+
+          fill_color =
+            if is_current_match_pre then @search_current_color
+            elsif is_match_pre      then @search_match_color
+            elsif selected_pre      then @selection_color
+            elsif has_bg_pre
+              default_bg_pre = cell.inverse ? @default_fg : @default_bg
+              resolve_color(cell_bg_val, default_bg_pre)
+            end
+
+          extends_run = !bg_run_start_c.nil? && fill_color &&
+                        fill_color.to_i == bg_run_color.to_i &&
+                        top_y == bg_run_top_y &&
+                        bot_y == bg_run_bot_y &&
+                        c == bg_run_next_c     # integer-column adjacency
+          flush_bg_run.call unless extends_run
+
+          if fill_color
+            bg_run_start_c ||= c
+            bg_run_color   ||= fill_color
+            bg_run_top_y   ||= top_y
+            bg_run_bot_y   ||= bot_y
+            bg_run_next_c    = c + width_c
+          end
+        end
+        flush_bg_run.call
 
         # Text-run accumulator. We batch consecutive cells with
         # matching style into one drawAtPoint call so the font
@@ -1352,13 +1480,11 @@ module Echoes
             block_w = mc[:cols] * @cell_width
             block_h = mc[:rows] * @cell_height
 
-            if selected
-              ObjC::MSG_VOID.call(@selection_color, ObjC.sel('setFill'))
-              snap_fill.call(x, y, block_w, block_h)
-            elsif has_bg
-              ObjC::MSG_VOID.call(bg_color, ObjC.sel('setFill'))
-              snap_fill.call(x, y, block_w, block_h)
-            end
+            # Bg fill for this multicell anchor was emitted in the
+            # row's pre-pass above (coalesced with adjacent anchors
+            # that share block_h / colour) so we don't tile per-glyph
+            # rects in OSC 7772 captures — that's where code-block
+            # vertical seams used to come from.
 
             if mc[:sixel]
               draw_sixel_image(mc[:sixel], x, y, block_w, block_h)
@@ -1488,19 +1614,12 @@ module Echoes
             x = px + c * @cell_width
             cell_w = cell.width == 2 ? @cell_width * 2 : @cell_width
 
-            if is_current_match
-              ObjC::MSG_VOID.call(@search_current_color, ObjC.sel('setFill'))
-              snap_fill.call(x, y, cell_w, @cell_height)
-            elsif is_match
-              ObjC::MSG_VOID.call(@search_match_color, ObjC.sel('setFill'))
-              snap_fill.call(x, y, cell_w, @cell_height)
-            elsif selected
-              ObjC::MSG_VOID.call(@selection_color, ObjC.sel('setFill'))
-              snap_fill.call(x, y, cell_w, @cell_height)
-            elsif has_bg
-              ObjC::MSG_VOID.call(bg_color, ObjC.sel('setFill'))
-              snap_fill.call(x, y, cell_w, @cell_height)
-            end
+            # Cell-bg fills are emitted in the row's pre-pass above
+            # (one coalesced rect per same-colour run) so PDF capture
+            # doesn't accumulate per-cell seams. Selection / search /
+            # has_bg / inverse are still computed locally because the
+            # text-emission path below reads them for blank-cell run
+            # breaks, concealed-text masking, and fg/bg colour choice.
 
             if cell.char == " " && !has_bg && !selected && !is_match
               flush_run.call
