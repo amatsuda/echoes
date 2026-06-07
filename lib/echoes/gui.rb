@@ -77,8 +77,11 @@ module Echoes
 
     def run
       setup_app
-      create_fonts
       create_view_class
+      # Each window owns its own retained NSFont set so Cmd+/-
+      # in one doesn't release fonts another is still using.
+      # create_fonts runs inside open_new_window (and any other
+      # new-window path) rather than once globally here.
       open_new_window
       setup_timer
       start_app
@@ -254,6 +257,21 @@ module Echoes
       ws[:rows] = @rows
       ws[:cols] = @cols
       ws[:focused] = @window_focused
+      # Font + derived cell metrics are per-window so Cmd+/- zooms
+      # the active window only, leaving other Echoes windows alone.
+      ws[:font_size] = @font_size
+      ws[:font] = @font
+      ws[:bold_font] = @bold_font
+      ws[:tab_font] = @tab_font
+      ws[:cell_width] = @cell_width
+      ws[:cell_height] = @cell_height
+      ws[:font_default_line_height] = @font_default_line_height
+      ws[:font_default_ascender] = @font_default_ascender
+      ws[:font_default_family] = @font_default_family
+      ws[:tab_font_line_height] = @tab_font_line_height
+      ws[:font_cache] = @font_cache
+      ws[:italic_font_cache] = @italic_font_cache
+      ws[:font_y_offset_cache] = @font_y_offset_cache
     end
 
     private def load_window_state(ws)
@@ -276,11 +294,47 @@ module Echoes
       @rows = ws[:rows]
       @cols = ws[:cols]
       @window_focused = ws.fetch(:focused, true)
+      # Per-window font + cell metrics. ws.fetch with the current
+      # ivar as the default keeps things safe if a freshly-built
+      # window state hasn't gone through its first save yet (which
+      # in practice doesn't happen — build_window_around_tabs calls
+      # save_window_state before any load — but the defensive fetch
+      # is cheap and avoids nil cascades if that invariant slips).
+      @font_size = ws.fetch(:font_size, @font_size)
+      @font      = ws.fetch(:font, @font)
+      @bold_font = ws.fetch(:bold_font, @bold_font)
+      @tab_font  = ws.fetch(:tab_font, @tab_font)
+      @cell_width  = ws.fetch(:cell_width, @cell_width)
+      @cell_height = ws.fetch(:cell_height, @cell_height)
+      @font_default_line_height = ws.fetch(:font_default_line_height, @font_default_line_height)
+      @font_default_ascender    = ws.fetch(:font_default_ascender, @font_default_ascender)
+      @font_default_family      = ws.fetch(:font_default_family, @font_default_family)
+      @tab_font_line_height     = ws.fetch(:tab_font_line_height, @tab_font_line_height)
+      @font_cache          = ws.fetch(:font_cache, @font_cache)
+      @italic_font_cache   = ws.fetch(:italic_font_cache, @italic_font_cache)
+      @font_y_offset_cache = ws.fetch(:font_y_offset_cache, @font_y_offset_cache)
+    end
+
+    # Drop the +1 each window's lifecycle held on @font / @bold_font /
+    # @tab_font and on any cached fonts that path retained at fetch
+    # time. Called from close_current_window — must run before the
+    # ws hash gets unhooked so we can still pull the pointers off it.
+    private def release_window_fonts(ws)
+      ObjC.release(ws[:font])      if ws[:font]
+      ObjC.release(ws[:bold_font]) if ws[:bold_font]
+      ObjC.release(ws[:tab_font])  if ws[:tab_font]
+      ws[:font_cache]&.each_value { |f| ObjC.release(f) }
+      ws[:italic_font_cache]&.each_value { |f| ObjC.release(f) }
     end
 
     private def close_current_window
       closing_view = @view
       ws = @view_to_ws[closing_view.to_i]
+      # Release this window's per-window font retains so the NSFont
+      # objects can deallocate when no other window references them.
+      # NSFont is uniqued by AppKit, so other open windows holding
+      # their own retains on the same instance are unaffected.
+      release_window_fonts(ws) if ws
       @view_to_ws.delete(closing_view.to_i)
       @window_states.delete(ws)
       ObjC::MSG_VOID_1.call(@window, ObjC.sel('orderOut:'), Fiddle::Pointer.new(0))
@@ -522,6 +576,12 @@ module Echoes
       @font = ObjC.retain(create_nsfont(@font_size))
       @bold_font = ObjC.retain(create_bold_nsfont(@font))
       @tab_font = ObjC.retain(create_nsfont(tab_font_size))
+      # Each window owns its own caches — clearing the ivars here
+      # leaves whatever the previous window captured via
+      # save_window_state intact under ws_prev[...]. The previous
+      # caches are still reachable through that window's state.
+      @font_cache = {}
+      @italic_font_cache = {}
       @font_y_offset_cache = {}
       update_cell_metrics
     end
@@ -2591,6 +2651,11 @@ module Echoes
       end
     end
 
+    # Cmd+/- (and "Reset Font Size") only affects the active window.
+    # Font + derived metrics live on the per-window state hash now,
+    # so other Echoes windows keep whatever size they had. The
+    # persisted Preferences value still tracks the last change so
+    # newly-opened windows next session start at that size.
     def update_font(new_size, persist: true)
       @font_size = new_size
       Preferences.set_double(:font_size, new_size) if persist
@@ -2610,14 +2675,12 @@ module Echoes
       @italic_font_cache = {}
       update_cell_metrics
 
-      @window_states.each do |ws|
-        load_window_state(ws)
-        win_width = @cell_width * @cols
-        win_height = tab_bar_height + @cell_height * @rows
-        ObjC::MSG_VOID_2D.call(@window, ObjC.sel('setContentSize:'), win_width, win_height)
-        ObjC::MSG_VOID_I.call(@view, ObjC.sel('setNeedsDisplay:'), 1)
-        save_window_state
-      end
+      return unless @window
+      win_width  = @cell_width * @cols
+      win_height = tab_bar_height + @cell_height * @rows
+      ObjC::MSG_VOID_2D.call(@window, ObjC.sel('setContentSize:'), win_width, win_height)
+      ObjC::MSG_VOID_I.call(@view, ObjC.sel('setNeedsDisplay:'), 1)
+      save_window_state
     end
 
     def perform_drag_operation(sender)
@@ -2738,6 +2801,13 @@ module Echoes
 
     def open_new_window
       save_window_state
+      # Allocate a fresh @font / @bold_font / @tab_font set (and reset
+      # the per-window font caches) so this window owns its own retain.
+      # On Cmd+N at runtime the previous window keeps its existing
+      # retains via the ws hash; we leak the GUI ivar references but
+      # the previous ws still holds them. update_font's release path
+      # only affects this window from here on.
+      create_fonts
 
       # Create tab
       tab = Tab.new(command: @command, rows: @rows, cols: @cols, embedded: embedded_mode?)
@@ -4095,6 +4165,8 @@ module Echoes
     def build_window_around_tabs(tabs:, active:, frame:, style_mask:,
                                   title: nil, level: nil)
       save_window_state
+      # Fresh per-window font retains (see open_new_window for the why).
+      create_fonts
 
       sx, sy, sw, sh = frame
       new_window = ObjC::MSG_PTR.call(ObjC.cls('NSWindow'), ObjC.sel('alloc'))
