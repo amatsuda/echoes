@@ -54,6 +54,7 @@ module Echoes
       @drag_start_tab_index = nil
       @drag_start_point = nil
       @drag_insertion_index = nil
+      @last_cursor_row = nil
       @font_cache = {}
       @rgb_color_cache = {}
       @nsstring_cache = {}
@@ -254,6 +255,7 @@ module Echoes
       ws[:drag_start_tab_index] = @drag_start_tab_index
       ws[:drag_start_point] = @drag_start_point
       ws[:drag_insertion_index] = @drag_insertion_index
+      ws[:last_cursor_row] = @last_cursor_row
       ws[:rows] = @rows
       ws[:cols] = @cols
       ws[:focused] = @window_focused
@@ -291,6 +293,7 @@ module Echoes
       @drag_start_tab_index = ws[:drag_start_tab_index]
       @drag_start_point     = ws[:drag_start_point]
       @drag_insertion_index = ws[:drag_insertion_index]
+      @last_cursor_row      = ws[:last_cursor_row]
       @rows = ws[:rows]
       @cols = ws[:cols]
       @window_focused = ws.fetch(:focused, true)
@@ -2251,8 +2254,6 @@ module Echoes
 
       need_redraw = true if blink_toggled
 
-      full_redraw = @bell_flash > 0 || blink_toggled
-
       # DEC private mode 2026 (synchronized output): when a TUI has
       # opened a sync window with `\e[?2026h`, hold the redraw — even
       # though we've already mutated the cell grid — until the
@@ -2268,19 +2269,35 @@ module Echoes
       if need_redraw
         ObjC::MSG_VOID_1.call(@window, ObjC.sel('setTitle:'), ObjC.nsstring(tab.title))
 
-        if full_redraw || dead&.any? || !tab.pane_tree.single_pane?
+        if @bell_flash > 0 || dead&.any? || !tab.pane_tree.single_pane?
+          # Bell flash covers the whole window; layout changes need
+          # the full repaint. Multi-pane single-cursor-blink would
+          # need per-pane cursor-rect invalidation — left as a
+          # follow-up; the common single-pane case is the hot one.
           tab.panes.each { |p| p.screen.clear_dirty }
           ObjC::MSG_VOID_I.call(@view, ObjC.sel('setNeedsDisplay:'), 1)
         else
-          # Single pane optimization: collect dirty rows before clearing
+          # Single pane fast path: invalidate only the rows that
+          # actually changed. Cursor blink (and cursor-only moves
+          # like arrow keys, which don't mutate any cell content so
+          # Screen never marks the row dirty) piggy-back on the
+          # cursor's current row, plus the previous row when the
+          # cursor jumped between ticks so the old position gets
+          # painted over instead of leaving a stale cursor behind.
           screen = active_pane.screen
           dirty = screen.dirty_rows
           screen.clear_dirty
-          dirty << screen.cursor.row
+          cur_row = screen.cursor.row
+          dirty << cur_row
+          dirty << @last_cursor_row if @last_cursor_row && @last_cursor_row != cur_row
           invalidate_dirty_rows(dirty)
         end
-      elsif full_redraw
-        ObjC::MSG_VOID_I.call(@view, ObjC.sel('setNeedsDisplay:'), 1)
+
+        # Cursor was just drawn (or will be on the upcoming
+        # AppKit drawRect: tick) at its current position. Stash the
+        # row so the NEXT per-row invalidation knows which old row
+        # to repaint when the cursor moves.
+        @last_cursor_row = active_pane.screen.cursor.row if active_pane
       end
 
       save_window_state
@@ -2890,6 +2907,7 @@ module Echoes
       @drag_start_tab_index = nil
       @drag_start_point = nil
       @drag_insertion_index = nil
+      @last_cursor_row = nil
       @window_focused = true
 
       # Register window state
@@ -4243,6 +4261,7 @@ module Echoes
       @drag_start_tab_index = nil
       @drag_start_point = nil
       @drag_insertion_index = nil
+      @last_cursor_row = nil
       @window_focused = true
 
       ws = {}
