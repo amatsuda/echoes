@@ -210,29 +210,24 @@ module Echoes
         end
         mc_cols = [mc_cols, 1].max
         place_multicell_block(text, mc_cols, mc_rows, scale, frac_n, frac_d, valign, halign, family, flip_h, flip_v)
-      elsif family && @glyph_measurer && @cell_pixel_width && @cell_pixel_width > 0
-        # Reserve exactly `scale × source_chars` cells — the same
-        # cell-grid count the auto-width branch produces — even when a
-        # family is specified. The host's font measurement (via
-        # @glyph_measurer / -[NSString sizeWithAttributes:]) varies
-        # subtly across fonts even for monospace text: CJK fallback
-        # glyphs can advance slightly more or less than 2 × M, and a
-        # font's space-advance differs from @cell_width. Using the
-        # measured cell count made code-block backgrounds
-        # non-rectangular: a line with CJK content measured wider
-        # than a pure-Latin line of the same display_width, and a
-        # line of all-whitespace pad collapsed below cell-grid.
-        # Treating the family-set path as cell-grid-aligned keeps the
-        # bg block rectangular and matches the renderer's
-        # display_width pad math; per-glyph kerning and proportional
-        # widths still happen at draw time, just clamped to the same
-        # column the auto-width path would have used.
-        source_chars = text.each_grapheme_cluster.sum { |g| char_width(g) }
-        mc_cols = [scale * source_chars, 1].max
-        place_multicell_block(text, mc_cols, mc_rows, scale, frac_n, frac_d, valign, halign, family, flip_h, flip_v)
       else
-        # Auto width: each grapheme gets its own block (monospace
-        # assumption — fine for the configured terminal font).
+        # Per-grapheme placement, whether or not a family is set.
+        #
+        # Each grapheme becomes its own multicell anchor at the
+        # cell-grid count `scale × char_width(g)`. Erase semantics
+        # then key on the grapheme as the atomic unit, so a smaller
+        # multicell placed on a continuation row (e.g. `<at y=14>`
+        # under an `<at y=13>` at scale 2) erases only the
+        # graphemes whose cells are actually claimed — the rest of
+        # the original string stays visible. This matches the
+        # monospace path's "partial-overlap is fine" feel for
+        # proportional families too, at the cost of dropping
+        # inter-grapheme kerning (each grapheme draws via its own
+        # drawAtPoint, so the OpenType shaper no longer sees
+        # neighbouring glyphs). Within-grapheme kerning — ligatures
+        # in fonts that ship them, combining marks, complex
+        # scripts — still works because a grapheme cluster is
+        # still one drawAtPoint.
         text.each_grapheme_cluster do |grapheme|
           cw = char_width(grapheme)
           mc_cols = scale * cw
