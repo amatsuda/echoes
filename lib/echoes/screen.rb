@@ -1453,10 +1453,15 @@ module Echoes
       anchor_row = @cursor.row
       anchor_col = @cursor.col
 
-      # Erase any existing multicells in the block area
+      # Erase any existing multicells in the block area. `partial: true`
+      # tells erase_multicell_at to only clear individual `:cont` cells
+      # when they belong to an anchor on a *different* row — adjacent-row
+      # placements (e.g. two `<at>` blocks at y=13 and y=14, scale 2)
+      # then only claim the cells they overlap, leaving the upper
+      # anchor alive to keep painting its full glyph rect.
       mc_rows.times do |dr|
         mc_cols.times do |dc|
-          erase_multicell_at(anchor_row + dr, anchor_col + dc)
+          erase_multicell_at(anchor_row + dr, anchor_col + dc, partial: true)
         end
       end
 
@@ -1484,7 +1489,7 @@ module Echoes
       @cursor.col += mc_cols
     end
 
-    def erase_multicell_at(row, col)
+    def erase_multicell_at(row, col, partial: false)
       cell = @grid[row][col]
       return unless cell.multicell
 
@@ -1497,6 +1502,26 @@ module Echoes
           end
         end
       elsif cell.multicell == :cont
+        if partial
+          # The new placement is only claiming a continuation cell of
+          # an older multicell. If the older anchor sits on a different
+          # row from the cell being claimed, leave the anchor and its
+          # other continuations alive — the GUI will keep painting the
+          # old multicell's full glyph rect, and the new placement's
+          # own drawAtPoint will overdraw the pixels it owns. Without
+          # this, an `<at y=14>` placed under an `<at y=13>` at scale 2
+          # would nuke the entire upper string, since cells on row 14
+          # are `:cont` of the upper string's anchor at row 13.
+          #
+          # If the anchor IS on the same row (lateral overlap inside
+          # one row), the new placement is genuinely replacing the
+          # old, so we fall through to the full-erase trace below.
+          ar_ac = find_multicell_anchor(row, col)
+          if ar_ac && ar_ac[0] != row
+            cell.reset!
+            return
+          end
+        end
         # Find the anchor by scanning up and left
         find_multicell_anchor(row, col)&.then do |ar, ac|
           erase_multicell_at(ar, ac)

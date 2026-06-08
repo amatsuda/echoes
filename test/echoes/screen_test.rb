@@ -381,6 +381,89 @@ class Echoes::ScreenTest < Test::Unit::TestCase
     assert_in_delta 0.4, @screen.grid[0][0].alpha
   end
 
+  sub_test_case "partial-erase on adjacent-row multicell placements" do
+    setup do
+      @screen = Echoes::Screen.new(rows: 5, cols: 20)
+      @screen.cell_pixel_width = 12.0
+      # Stub the host measurer so the family-set-halign-0 branch
+      # treats this string as a whole-string proportional anchor
+      # (the case the bug occurs on).
+      @screen.glyph_measurer = ->(text, _f, scale, _fn, _fd) { text.length * 12.0 * scale }
+    end
+
+    test "lower multicell only claims its own cells; upper anchor stays alive" do
+      # Upper: whole-string anchor at (0, 0), 8 chars × scale 2 = 16
+      # cols × 2 rows. Conts span (0, 1..15) and (1, 0..15).
+      @screen.move_cursor(0, 0)
+      @screen.put_multicell("12345678", scale: 2, width: 0, frac_n: 0, frac_d: 0,
+                            valign: 0, halign: 0, family: "Helvetica")
+      # Lower: 3 chars at (1, 0), 6 cols × 2 rows.
+      @screen.move_cursor(1, 0)
+      @screen.put_multicell("abc", scale: 2, width: 0, frac_n: 0, frac_d: 0,
+                            valign: 0, halign: 0, family: "Helvetica")
+
+      upper = @screen.grid[0][0]
+      assert_kind_of(Hash, upper.multicell,
+                     "upper anchor must survive a partial overlap on its cont row")
+      assert_equal("12345678", upper.char)
+      assert_equal(16, upper.multicell[:cols])
+
+      lower = @screen.grid[1][0]
+      assert_kind_of(Hash, lower.multicell)
+      assert_equal("abc", lower.char)
+      assert_equal(6, lower.multicell[:cols])
+
+      # Cells the lower anchor genuinely claimed are :cont of the
+      # lower placement (it owns row 1 cols 0..5).
+      (1..5).each do |col|
+        assert_equal(:cont, @screen.grid[1][col].multicell,
+                     "row 1 col #{col} should belong to the lower placement")
+      end
+      # Cells beyond the lower's reach stay :cont of the upper anchor's
+      # original rect — its drawAtPoint still paints those pixels.
+      (6..15).each do |col|
+        assert_equal(:cont, @screen.grid[1][col].multicell,
+                     "row 1 col #{col} should still be :cont of the upper anchor")
+      end
+    end
+
+    test "same-row placement fully erases the prior multicell (full-erase branch)" do
+      @screen.move_cursor(0, 0)
+      @screen.put_multicell("12345678", scale: 2, width: 0, frac_n: 0, frac_d: 0,
+                            valign: 0, halign: 0, family: "Helvetica")
+      # Second placement at the same row but offset by 4 cols. Its rect
+      # covers cells (0, 4..9) which include the upper's :cont cells on
+      # the SAME row as the upper anchor (row 0). Same-row → full erase.
+      @screen.move_cursor(0, 4)
+      @screen.put_multicell("xy", scale: 2, width: 0, frac_n: 0, frac_d: 0,
+                            valign: 0, halign: 0, family: "Helvetica")
+
+      assert_nil(@screen.grid[0][0].multicell,
+                 "the upper anchor cell should be fully erased — same-row replacement")
+      # The new anchor is what's left at (0, 4).
+      assert_kind_of(Hash, @screen.grid[0][4].multicell)
+      assert_equal("xy", @screen.grid[0][4].char)
+    end
+
+    test "put_char into a continuation still full-erases (no regression for the SGR-write path)" do
+      # Establish a wide multicell anchor.
+      @screen.move_cursor(0, 0)
+      @screen.put_multicell("12345678", scale: 2, width: 0, frac_n: 0, frac_d: 0,
+                            valign: 0, halign: 0, family: "Helvetica")
+      # Now write a plain char into one of its :cont cells via put_char.
+      # put_char calls erase_multicell_at WITHOUT `partial:`, so the
+      # full-erase branch should fire — the whole upper string is
+      # replaced by the new single character (today's behaviour, kept).
+      @screen.move_cursor(0, 5)
+      @screen.put_char("X")
+
+      # The upper anchor's hash must be gone.
+      assert_nil(@screen.grid[0][0].multicell,
+                 "put_char into a cont must trigger full erase of the upper multicell")
+      assert_equal("X", @screen.grid[0][5].char)
+    end
+  end
+
   test "put_multicell discards block larger than screen" do
     @screen.put_multicell("A", scale: 6, width: 2, frac_n: 0, frac_d: 0, valign: 0, halign: 0)
     # 6*2=12 cols > 10, should be discarded
