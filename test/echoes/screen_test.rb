@@ -411,34 +411,30 @@ class Echoes::ScreenTest < Test::Unit::TestCase
     assert_equal(4, @screen.cursor.col)
   end
 
-  test "put_multicell with family + halign==0 lays out per-grapheme so partial overlaps stay granular" do
-    # Even with a family, the halign-not-set branch falls through to
-    # the same per-grapheme placement the auto-width branch uses.
-    # Reason: erase semantics treat the multicell as the atomic unit,
-    # so one big proportional anchor covering the whole string would
-    # vanish entirely the moment another anchor's rect overlapped any
-    # single one of its cont cells (e.g. an `<at y=14>` placed under
-    # an `<at y=13>` at scale 2). Per-grapheme keeps the overlap
-    # localised to whichever graphemes' cells are actually claimed,
-    # at the cost of dropping inter-grapheme kerning.
+  test "put_multicell with family but no halign reserves cell-grid columns, ignoring measure" do
+    # Even with a family + glyph_measurer wired, the halign-not-set
+    # branch lays out at `scale × source_chars` — the same cell-grid
+    # count the auto-width branch produces. The host's font measure
+    # varies by font (CJK fallback advance, space-advance ≠ M-advance,
+    # …) and using it directly made code-block bg blocks
+    # non-rectangular: lines with CJK measured wider than pure-Latin
+    # lines of the same display_width. Cell-grid keeps the bg
+    # rectangular and matches the renderer's display_width pad math.
+    # Body-text paths that need proportional cells set halign instead
+    # (see the halign != 0 branch).
     @screen.cell_pixel_width = 8.0
     @screen.glyph_measurer = ->(text, _family, _scale, _frac_n, _frac_d) { text.length * 12.0 }
 
     @screen.put_multicell("Hello", scale: 2, width: 0, frac_n: 0, frac_d: 0,
                           valign: 0, halign: 0, family: "Noto Serif")
 
-    # 5 graphemes × 2 cells (scale=2 × char_width=1) each → 5 anchors at
-    # cols 0, 2, 4, 6, 8. Each carries the family so the GUI drawAtPoint
-    # picks the right font; each is a single 2-cell × 2-row block.
-    %w[H e l l o].each_with_index do |g, i|
-      col = i * 2
-      anchor = @screen.grid[0][col]
-      assert_equal(g,              anchor.char)
-      assert_equal(2,              anchor.multicell[:cols])
-      assert_equal(2,              anchor.multicell[:rows])
-      assert_equal("Noto Serif",   anchor.multicell[:family])
-      assert_equal(:cont,          @screen.grid[0][col + 1].multicell, "col #{col + 1} should be a continuation")
-    end
+    anchor = @screen.grid[0][0]
+    assert_equal("Hello", anchor.char, "anchor stores the whole string, not per-grapheme")
+    assert_equal(10, anchor.multicell[:cols])
+    assert_equal(2,  anchor.multicell[:rows])
+    assert_equal("Noto Serif", anchor.multicell[:family])
+    assert_equal(:cont, @screen.grid[0][1].multicell)
+    assert_equal(:cont, @screen.grid[0][9].multicell)
     assert_equal(10, @screen.cursor.col)
   end
 
