@@ -411,10 +411,17 @@ class Echoes::ScreenTest < Test::Unit::TestCase
     assert_equal(4, @screen.cursor.col)
   end
 
-  test "put_multicell with family + glyph_measurer renders one block of measured width" do
-    # Stub measurer: 12px per character (regardless of scale/family).
-    # Cell width on this screen is the default 8.0px, so "Hello"
-    # should measure 60px → ceil(60/8) = 8 cells.
+  test "put_multicell with family but no halign reserves cell-grid columns, ignoring measure" do
+    # Even with a family + glyph_measurer wired, the halign-not-set
+    # branch lays out at `scale × source_chars` — the same cell-grid
+    # count the auto-width branch produces. The host's font measure
+    # varies by font (CJK fallback advance, space-advance ≠ M-advance,
+    # …) and using it directly made code-block bg blocks
+    # non-rectangular: lines with CJK measured wider than pure-Latin
+    # lines of the same display_width. Cell-grid keeps the bg
+    # rectangular and matches the renderer's display_width pad math.
+    # Body-text paths that need proportional cells set halign instead
+    # (see the halign != 0 branch).
     @screen.cell_pixel_width = 8.0
     @screen.glyph_measurer = ->(text, _family, _scale, _frac_n, _frac_d) { text.length * 12.0 }
 
@@ -423,12 +430,12 @@ class Echoes::ScreenTest < Test::Unit::TestCase
 
     anchor = @screen.grid[0][0]
     assert_equal("Hello", anchor.char, "anchor stores the whole string, not per-grapheme")
-    assert_equal(8, anchor.multicell[:cols])
-    assert_equal(2, anchor.multicell[:rows])
+    assert_equal(10, anchor.multicell[:cols])
+    assert_equal(2,  anchor.multicell[:rows])
     assert_equal("Noto Serif", anchor.multicell[:family])
     assert_equal(:cont, @screen.grid[0][1].multicell)
-    assert_equal(:cont, @screen.grid[0][7].multicell)
-    assert_equal(8, @screen.cursor.col)
+    assert_equal(:cont, @screen.grid[0][9].multicell)
+    assert_equal(10, @screen.cursor.col)
   end
 
   test "put_multicell with family but no glyph_measurer falls back to per-grapheme" do

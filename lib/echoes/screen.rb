@@ -211,16 +211,24 @@ module Echoes
         mc_cols = [mc_cols, 1].max
         place_multicell_block(text, mc_cols, mc_rows, scale, frac_n, frac_d, valign, halign, family, flip_h, flip_v)
       elsif family && @glyph_measurer && @cell_pixel_width && @cell_pixel_width > 0
-        # Proportional fonts have variable glyph widths, so reserving
-        # `char_width(grapheme) * scale` cells per grapheme leaves big
-        # letters (Noto Serif "H" at 2×) overflowing into the next
-        # cell and small letters ("l") under-filling theirs. Ask the
-        # host to measure the whole text in the requested font and
-        # reserve enough cells for the entire block, drawn as one
-        # unit by the renderer's existing string-draw path.
-        measured_px = @glyph_measurer.call(text, family, scale, frac_n, frac_d).to_f
-        mc_cols = (measured_px / @cell_pixel_width).ceil
-        mc_cols = [mc_cols, 1].max
+        # Reserve exactly `scale × source_chars` cells — the same
+        # cell-grid count the auto-width branch produces — even when a
+        # family is specified. The host's font measurement (via
+        # @glyph_measurer / -[NSString sizeWithAttributes:]) varies
+        # subtly across fonts even for monospace text: CJK fallback
+        # glyphs can advance slightly more or less than 2 × M, and a
+        # font's space-advance differs from @cell_width. Using the
+        # measured cell count made code-block backgrounds
+        # non-rectangular: a line with CJK content measured wider
+        # than a pure-Latin line of the same display_width, and a
+        # line of all-whitespace pad collapsed below cell-grid.
+        # Treating the family-set path as cell-grid-aligned keeps the
+        # bg block rectangular and matches the renderer's
+        # display_width pad math; per-glyph kerning and proportional
+        # widths still happen at draw time, just clamped to the same
+        # column the auto-width path would have used.
+        source_chars = text.each_grapheme_cluster.sum { |g| char_width(g) }
+        mc_cols = [scale * source_chars, 1].max
         place_multicell_block(text, mc_cols, mc_rows, scale, frac_n, frac_d, valign, halign, family, flip_h, flip_v)
       else
         # Auto width: each grapheme gets its own block (monospace
