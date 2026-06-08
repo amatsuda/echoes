@@ -3815,9 +3815,35 @@ module Echoes
         effective_scale *= frac_n.to_f / frac_d.to_f
       end
       font = ObjC.retain(create_nsfont(@font_size * effective_scale, family: family))
-      ns = ObjC.nsstring(text)
       attrs = ObjC.nsdict(ObjC::NSFontAttributeName => font)
-      width = ObjC::MSG_RET_D_1.call(ns, ObjC.sel('sizeWithAttributes:'), attrs)
+
+      # Decompose: whitespace gets counted as ONE TERMINAL CELL per char
+      # (multiplied by effective scale), non-whitespace gets measured by
+      # the font.
+      #
+      # Why: every font's space-advance differs from @cell_width — even
+      # "monospace" fonts often have space < M (PlemolJP35 Console NF is
+      # the smoking gun here), and proportional fonts (Helvetica) have a
+      # very narrow space. The family-measured branch in put_multicell
+      # divides measured_px by @cell_pixel_width to pick mc_cols; if the
+      # font's space measures narrower than one cell, a 12-cell trailing
+      # pad collapses into 3 cells and the bg block of any line with
+      # padding renders shorter than the longest line — non-rectangular
+      # code blocks. Treating whitespace as exactly one cell respects the
+      # cell-grid layout the renderer is targeting while letting visible
+      # glyphs keep their proportional / kerned widths.
+      ws_count = text.scan(/[ \t]/).size
+      non_ws   = text.gsub(/[ \t]/, '')
+
+      non_ws_w = if non_ws.empty?
+                   0.0
+                 else
+                   ns = ObjC.nsstring(non_ws)
+                   ObjC::MSG_RET_D_1.call(ns, ObjC.sel('sizeWithAttributes:'), attrs)
+                 end
+
+      width = non_ws_w + ws_count * @cell_width * effective_scale
+
       ObjC.release(font)
       width
     end
