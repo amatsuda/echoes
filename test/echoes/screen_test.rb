@@ -445,22 +445,49 @@ class Echoes::ScreenTest < Test::Unit::TestCase
       assert_equal("xy", @screen.grid[0][4].char)
     end
 
-    test "put_char into a continuation still full-erases (no regression for the SGR-write path)" do
+    test "put_char into a same-row continuation full-erases the upper multicell" do
       # Establish a wide multicell anchor.
       @screen.move_cursor(0, 0)
       @screen.put_multicell("12345678", scale: 2, width: 0, frac_n: 0, frac_d: 0,
                             valign: 0, halign: 0, family: "Helvetica")
-      # Now write a plain char into one of its :cont cells via put_char.
-      # put_char calls erase_multicell_at WITHOUT `partial:`, so the
-      # full-erase branch should fire — the whole upper string is
-      # replaced by the new single character (today's behaviour, kept).
+      # Plain char on a :cont cell sitting on the SAME row as the anchor:
+      # the multicell's glyph rect is being broken horizontally, so the
+      # whole anchor is replaced by the new single character (same-row
+      # branch of partial-erase falls through to full-erase).
       @screen.move_cursor(0, 5)
       @screen.put_char("X")
 
-      # The upper anchor's hash must be gone.
       assert_nil(@screen.grid[0][0].multicell,
-                 "put_char into a cont must trigger full erase of the upper multicell")
+                 "same-row put_char into a cont must trigger full erase of the upper multicell")
       assert_equal("X", @screen.grid[0][5].char)
+    end
+
+    test "put_char into a different-row continuation leaves the upper anchor alive" do
+      # Full-screen multicell anchor (the kitty background image case):
+      # 16 cols × 4 rows anchored at (0, 0). cont cells span the rest
+      # of the rect.
+      @screen.move_cursor(0, 0)
+      @screen.put_multicell(" ", scale: 1, width: 0, frac_n: 0, frac_d: 0,
+                            valign: 0, halign: 0, family: nil)
+      # Inject a bigger rect manually — put_multicell with scale 1 only
+      # claims one cell; for the bug we need a multi-row rect.
+      @screen.grid[0][0].multicell = { cols: 16, rows: 4, scale: 1, frac_n: 0,
+                                       frac_d: 0, valign: 0, halign: 0,
+                                       family: nil, flip_h: false, flip_v: false }
+      (0..3).each { |r| (0..15).each { |c| next if r == 0 && c == 0; @screen.grid[r][c].multicell = :cont } }
+
+      # Now plain text writes (the page-indicator path) land on row 3 —
+      # which is a :cont of a DIFFERENT row's anchor.
+      @screen.move_cursor(3, 10)
+      @screen.put_char("X")
+
+      anchor = @screen.grid[0][0]
+      assert_kind_of(Hash, anchor.multicell,
+                     "background multicell anchor must survive plain text writes on its cont rows")
+      assert_equal(16, anchor.multicell[:cols])
+      assert_equal("X", @screen.grid[3][10].char)
+      assert_nil(@screen.grid[3][10].multicell,
+                 "the overwritten cell drops out of the multicell")
     end
   end
 

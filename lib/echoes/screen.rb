@@ -147,7 +147,13 @@ module Echoes
         end
       end
 
-      erase_multicell_at(@cursor.row, @cursor.col)
+      # `partial: true` so writing a plain char into a cell that's `:cont`
+      # of a larger multicell (e.g. text overlaying a full-screen kitty
+      # background image) only clears that single cell, instead of
+      # cascading up to the anchor and wiping the whole rect — which
+      # would also nuke any later text multicell anchors sitting inside
+      # the same rect.
+      erase_multicell_at(@cursor.row, @cursor.col, partial: true)
 
       if @insert_mode
         row = @grid[@cursor.row]
