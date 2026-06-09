@@ -462,6 +462,50 @@ class Echoes::ScreenTest < Test::Unit::TestCase
       assert_equal("X", @screen.grid[0][5].char)
     end
 
+    test "put_kitty_image inside a bg multicell leaves the bg anchor and prior text anchors alive" do
+      # The repro: a slide with a theme bg image (full-screen kitty
+      # multicell at (0, 0)), a heading, a paragraph, then an `<img>`
+      # placed below. Pre-fix put_kitty_image full-erased the first
+      # :cont cell of the bg, cascading up to the bg anchor and wiping
+      # the entire 80x30 rect — taking the heading + paragraph anchors
+      # placed before the `<img>` with it.
+      screen = Echoes::Screen.new(rows: 30, cols: 80)
+      screen.cell_pixel_width = 12.0
+      screen.cell_pixel_height = 24.0
+      screen.glyph_measurer = ->(text, _f, scale, _fn, _fd) { text.length * 12.0 * scale }
+      # Bg image at (0, 0), full screen.
+      screen.move_cursor(0, 0)
+      screen.put_kitty_image(rgba: "\x00" * 8, width: 2, height: 2,
+                             cells_w: 80, cells_h: 30, suppress_cursor: true,
+                             image_id: 1, z_index: -1)
+      # Heading anchor at row 2 — halign=2 keeps "Title" as a single
+      # whole-string anchor (the codepath an OSC 66 `h=2` heading uses).
+      screen.move_cursor(2, 10)
+      screen.put_multicell("Title", scale: 2, width: 0, frac_n: 0, frac_d: 0,
+                            valign: 0, halign: 2, family: nil)
+      # Now place a second kitty image at (10, 30) over the bg's cont
+      # cells. Must NOT wipe the bg anchor or the Title anchor.
+      screen.move_cursor(10, 30)
+      screen.put_kitty_image(rgba: "\x00" * 8, width: 2, height: 2,
+                             cells_w: 8, cells_h: 4, suppress_cursor: true,
+                             image_id: 2, z_index: 0)
+
+      bg = screen.grid[0][0]
+      assert_kind_of(Hash, bg.multicell,
+                     "bg image anchor must survive a smaller kitty image placed inside its rect")
+      assert_equal(80, bg.multicell[:cols])
+
+      title = screen.grid[2][10]
+      assert_kind_of(Hash, title.multicell,
+                     "Title anchor placed before the <img> must survive the <img> placement")
+      assert_equal("Title", title.char)
+
+      img2 = screen.grid[10][30]
+      assert_kind_of(Hash, img2.multicell)
+      assert_equal(8, img2.multicell[:cols])
+      assert_equal(4, img2.multicell[:rows])
+    end
+
     test "put_char into a different-row continuation leaves the upper anchor alive" do
       # Full-screen multicell anchor (the kitty background image case):
       # 16 cols × 4 rows anchored at (0, 0). cont cells span the rest

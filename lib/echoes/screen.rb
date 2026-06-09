@@ -305,9 +305,15 @@ module Echoes
       reservable_rows = [mc_rows, @rows - anchor_row].min
       return if reservable_cols < 1 || reservable_rows < 1
 
+      # `partial: true` so a kitty image placed on top of an existing
+      # full-screen background image's :cont cells (different row from
+      # that bg's anchor) only claims its own rect, instead of
+      # cascading up to the bg anchor and wiping the whole 80x30 — which
+      # would also nuke any text multicell anchors already placed inside
+      # the bg's rect (the slide title, body paragraphs above the <img>).
       reservable_rows.times do |dr|
         reservable_cols.times do |dc|
-          erase_multicell_at(anchor_row + dr, anchor_col + dc)
+          erase_multicell_at(anchor_row + dr, anchor_col + dc, partial: true)
         end
       end
 
@@ -394,10 +400,13 @@ module Echoes
       anchor_row = @cursor.row
       anchor_col = @cursor.col
 
-      # Erase existing cells in the block area
+      # Erase existing cells in the block area. `partial: true` for the
+      # same reason as put_kitty_image: a sixel placed inside an existing
+      # full-screen multicell (e.g. a bg image) must only claim its own
+      # rect, not cascade up to the bg anchor and wipe everything.
       mc_rows.times do |dr|
         mc_cols.times do |dc|
-          erase_multicell_at(anchor_row + dr, anchor_col + dc)
+          erase_multicell_at(anchor_row + dr, anchor_col + dc, partial: true)
         end
       end
 
