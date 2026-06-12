@@ -354,6 +354,39 @@ class Echoes::ScreenTest < Test::Unit::TestCase
     assert_equal(2, @screen.cursor.col)
   end
 
+  test "put_multicell wrap clears the previous multicell's vertical extent" do
+    # A scale-4 multicell anchored at (0, 0) claims rows 0..3. If a
+    # second multicell wraps off the right edge, advancing the cursor
+    # by a single row would land it on row 1 — *inside* the first
+    # multicell's vertical claim, so the two would overlap. Wrap should
+    # instead skip past the tallest multicell on the current row.
+    screen = Echoes::Screen.new(rows: 30, cols: 20)
+    screen.cell_pixel_width = 12.0
+    screen.glyph_measurer = ->(text, _f, scale, _, _) { text.length * 12.0 * scale }
+
+    # Place a scale-4 multicell at (0, 0). With 4 chars × scale 4 = 16
+    # cells, it claims (0..3, 0..15) → cursor lands at (0, 16).
+    screen.put_multicell("text", scale: 4, width: 0, frac_n: 0, frac_d: 0,
+                         valign: 0, halign: 0)
+    assert_kind_of(Hash, screen.grid[0][0].multicell)
+    assert_equal(4, screen.grid[0][0].multicell[:rows])
+    assert_equal(16, screen.cursor.col)
+
+    # Second multicell: scale 2 per-grapheme. "mo" fits in the remaining
+    # cells (16, 17, 18, 19), then the next grapheme wraps. The wrapped
+    # placement should land on row 4 (past the first multicell's
+    # vertical claim), not row 1 — that would overlap the title.
+    screen.put_multicell("mor", scale: 2, width: 0, frac_n: 0, frac_d: 0,
+                         valign: 0, halign: 0)
+    assert_kind_of(Hash, screen.grid[0][0].multicell,
+                   "first multi-row multicell anchor must still be alive after wrap")
+    # The wrap target row: scan row 1..N for the next Hash anchor that
+    # the wrapped placement landed on.
+    landed_row = (0...30).find { |r| screen.grid[r][0].multicell.is_a?(Hash) && r > 0 }
+    assert_equal(4, landed_row,
+                 "wrapped placement should land on row 4 (past the scale-4 title's row claim)")
+  end
+
   test "put_multicell stores flip_h / flip_v on the multicell anchor" do
     @screen.put_multicell("A", scale: 2, width: 0, frac_n: 0, frac_d: 0,
                          valign: 0, halign: 0, flip_h: true, flip_v: false)

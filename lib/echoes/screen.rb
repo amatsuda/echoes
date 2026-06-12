@@ -1490,10 +1490,25 @@ module Echoes
       # Discard if block is larger than screen
       return if mc_cols > @cols || mc_rows > @rows
 
-      # Wrap if it doesn't fit on current line
+      # Wrap if it doesn't fit on current line. A single `line_feed` is
+      # fine for single-row content but lands the wrapped placement
+      # INSIDE a previous multi-row multicell's vertical claim — e.g. a
+      # wrapped h1 segment after a scale-4 plain-text segment ends up
+      # at row + 1 instead of row + 4, overlapping the title text. Scan
+      # the current row for the tallest multicell anchor and `line_feed`
+      # enough times to clear it, so the wrapped placement starts
+      # cleanly on the row past the previous content's vertical extent.
       if @cursor.col + mc_cols > @cols
+        max_extent = 1
+        base_row = @cursor.row
+        @cols.times do |col|
+          cell = @grid[base_row][col]
+          if cell.multicell.is_a?(Hash)
+            max_extent = [max_extent, cell.multicell[:rows]].max
+          end
+        end
         @cursor.col = 0
-        line_feed
+        max_extent.times { line_feed }
       end
 
       # Scroll if block doesn't fit vertically from cursor
