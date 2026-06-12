@@ -16,6 +16,29 @@ module Echoes
     # bitmap cache and the placement share the same object so a
     # later a=d ;d=I … can delete by image id without re-decoding).
     attr_reader :placements
+    # Optional `->(placement) {…}` callback set by the GUI in
+    # wire_screen_handlers. Runs once per placement just before it
+    # leaves @placements — used to release the retained
+    # NSBitmapImageRep on animated images so the underlying GIF
+    # bytes can deallocate. nil-safe; Screen itself has no AppKit
+    # knowledge.
+    attr_accessor :placement_disposer
+
+    # Drop placements matching the block (or all, when no block) —
+    # running the disposer on each one first so any per-placement
+    # cleanup (animated rep release) happens before the entry goes
+    # away. Single funnel for every placement-removal site so we
+    # never forget the disposer.
+    def dispose_placements!(&filter)
+      if filter
+        keep, drop = @placements.partition { |p| !filter.call(p) }
+        drop.each { |p| @placement_disposer&.call(p) }
+        @placements = keep
+      else
+        @placements.each { |p| @placement_disposer&.call(p) }
+        @placements.clear
+      end
+    end
 
     def self.scrollback_limit
       Echoes.config.scrollback_limit
@@ -257,10 +280,24 @@ module Echoes
     # The renderer is format-agnostic: it just blits `multicell.sixel`'s
     # RGBA into the reserved cell rect, so we reuse that storage key
     # rather than introducing a parallel `:image` key.
-    def put_kitty_image(rgba:, width:, height:, cells_w: nil, cells_h: nil,
+    def put_kitty_image(image: nil, rgba: nil, width: nil, height: nil,
+                         cells_w: nil, cells_h: nil,
                          px_x_offset: 0, px_y_offset: 0,
                          suppress_cursor: false, image_id: nil, z_index: 0)
-      return if rgba.nil? || width <= 0 || height <= 0
+      # Two callsite shapes are supported. New callers (the
+      # decoder dispatchers in kitty_graphics.rb / iterm2_images.rb)
+      # pass `image:` carrying either {rgba:, width:, height:} for
+      # static images or the animated-image hash from
+      # AppKitPng.animated_image_from. Older callers pass the
+      # individual rgba/width/height kwargs — we wrap them.
+      image ||= {rgba: rgba, width: width, height: height} if rgba
+      return unless image
+      width  = image[:width].to_i
+      height = image[:height].to_i
+      return if width <= 0 || height <= 0
+      # Static images carry rgba; animated images carry the
+      # NSBitmapImageRep instead. Either is acceptable.
+      return if image[:rgba].nil? && !image[:animated]
       return if @cell_pixel_width.to_f <= 0 || @cell_pixel_height.to_f <= 0
 
       mc_cols = cells_w && cells_w > 0 ? cells_w : (width  / @cell_pixel_width ).ceil
@@ -359,7 +396,7 @@ module Echoes
         x_off:      px_x_offset.to_i,
         y_off:      px_y_offset.to_i,
         z_index:    z_index.to_i,
-        image:      {rgba: rgba, width: width, height: height},
+        image:      image,
       }
 
       unless suppress_cursor
@@ -549,7 +586,7 @@ module Echoes
         (0...@cursor.row).each { |r| clear_row(r); @line_wrapped[r] = false; mark_dirty(r) }
       when 2
         (0...@rows).each { |r| clear_row(r); @line_wrapped[r] = false }
-        @placements.clear
+        dispose_placements!
         mark_all_dirty
       when 3
         @scrollback.clear
@@ -654,7 +691,7 @@ module Echoes
     def shift_placements(delta)
       return if @placements.empty?
       @placements.each { |p| p[:anchor_row] += delta }
-      @placements.reject! { |p| p[:anchor_row] + p[:cell_rows] <= 0 }
+      dispose_placements! { |p| p[:anchor_row] + p[:cell_rows] <= 0 }
     end
 
     def scroll_down(n = 1)

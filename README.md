@@ -69,7 +69,10 @@ bundle exec exe/echoes -t  # TTY mode
   `<filter>`, gradients, `<use>`, etc. fall through transparently
   to a WKWebView backend (slower first paint, but full CSS / SVG
   surface). JavaScript is disabled and external resources blocked
-  on both paths.
+  on both paths. **Animated GIFs play** — frame iteration via the
+  retained `NSBitmapImageRep`, with per-image timing driven off
+  the existing 60 Hz timer and only the image's row range marked
+  dirty per frame.
 - **Desktop notifications** — OSC 9 (`\e]9;message\a`, iTerm2 style)
   and OSC 777 (`\e]777;notify;title;message\a`, VTE style) deliver
   to the macOS Notification Center.

@@ -190,6 +190,11 @@ module Echoes
     NSParagraphStyleAttributeName      = appkit_const('NSParagraphStyleAttributeName')
     NSPasteboardTypeString         = appkit_const('NSPasteboardTypeString')
     NSPasteboardTypeFileURL        = appkit_const('NSPasteboardTypeFileURL')
+    # NSBitmapImageRep frame-iteration property keys — used by the
+    # animated-GIF path to step through frames on a retained rep.
+    NSImageCurrentFrame            = appkit_const('NSImageCurrentFrame')
+    NSImageFrameCount              = appkit_const('NSImageFrameCount')
+    NSImageCurrentFrameDuration    = appkit_const('NSImageCurrentFrameDuration')
 
     # CoreGraphics framework
     COREGRAPHICS = Fiddle.dlopen('/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics')

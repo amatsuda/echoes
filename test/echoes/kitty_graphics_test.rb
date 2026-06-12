@@ -120,6 +120,31 @@ class Echoes::KittyGraphicsTest < Test::Unit::TestCase
     assert_includes @writes.first, 'OK'
   end
 
+  test "animated image hash from decoder reaches the screen unchanged" do
+    image_bytes = StubScreen::TINY_PNG_BYTES
+    fake_rep = Object.new
+    animated = {
+      animated: true,
+      rep: fake_rep,
+      width: 40,
+      height: 40,
+      frame_count: 4,
+      frame_durations: [0.05, 0.05, 0.05, 0.05],
+      current_frame: 0,
+      cg_image: nil,
+      last_advance_monotonic_s: nil,
+    }
+    Echoes::KittyGraphics.stub_decoder(image_bytes => animated) do
+      Echoes::KittyGraphics.handle_chunk(@state, "a=T,i=42,f=100",
+                                         b64(image_bytes),
+                                         screen: @screen, writer: @writer)
+    end
+    img = @screen.images[0][:image]
+    assert img[:animated], "screen should see the animated flag"
+    assert_equal 4, img[:frame_count]
+    assert_equal fake_rep, img[:rep]
+  end
+
   test "z= flows through to put_kitty_image as z_index" do
     image_bytes = StubScreen::TINY_PNG_BYTES
     Echoes::KittyGraphics.stub_decoder(image_bytes => {rgba: 'X', width: 1, height: 1}) do
@@ -554,13 +579,28 @@ class Echoes::KittyGraphicsTest < Test::Unit::TestCase
     def cell_pixel_height; 16.0 end
 
     def respond_to?(meth, *)
-      meth == :put_kitty_image || meth == :placements || super
+      meth == :put_kitty_image || meth == :placements ||
+        meth == :dispose_placements! || super
     end
 
-    def put_kitty_image(rgba:, width:, height:, cells_w:, cells_h:,
+    # Mirror Screen#dispose_placements! so the a=d / erase paths
+    # behave the same against this stub. No animated-rep work
+    # because there's no GUI wiring set up.
+    def dispose_placements!(&filter)
+      if filter
+        @placements = @placements.reject(&filter)
+      else
+        @placements.clear
+      end
+    end
+
+    def put_kitty_image(image: nil, rgba: nil, width: nil, height: nil,
+                         cells_w:, cells_h:,
                          px_x_offset: 0, px_y_offset: 0,
                          suppress_cursor:, image_id: nil, z_index: 0)
-      @images << {rgba: rgba, width: width, height: height,
+      image ||= {rgba: rgba, width: width, height: height} if rgba
+      @images << {rgba: image[:rgba], width: image[:width], height: image[:height],
+                   image: image,
                    cells_w: cells_w, cells_h: cells_h,
                    px_x_offset: px_x_offset, px_y_offset: px_y_offset,
                    suppress_cursor: suppress_cursor,

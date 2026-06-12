@@ -5,6 +5,7 @@ require 'shellwords'
 require 'socket'
 require 'uri'
 require 'json'
+require_relative 'animation_ticker'
 
 module Echoes
   class GUI
@@ -2241,6 +2242,13 @@ module Echoes
       tab = current_tab
       return unless tab
 
+      # Advance animated images in the active tab's panes. Background
+      # tabs pause naturally — their placements only get visited
+      # again when the user switches to them, and the elapsed-time
+      # check means they resume at the right frame instead of
+      # fast-forwarding.
+      need_redraw = true if advance_animated_placements(tab)
+
       # Check bell on active pane
       active_pane = tab.active_pane
       if active_pane&.screen&.bell
@@ -2301,6 +2309,43 @@ module Echoes
       end
 
       save_window_state
+    end
+
+    # Walk every animated image in `tab`'s panes and bump its
+    # current_frame index when enough wall-clock time has passed.
+    # Mutates the image hash in place (frame index + last-advance
+    # timestamp + clear cached cg_image so the next blit re-extracts
+    # from the rep) and pushes the placement's row range onto
+    # screen.dirty_rows so the existing single-pane fast path
+    # invalidates just those strips. Returns true when at least one
+    # advance happened — caller folds that into need_redraw.
+    private def advance_animated_placements(tab)
+      now = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+      advanced = false
+      tab.panes.each do |pane|
+        screen = pane.screen
+        screen.placements.each do |pl|
+          img = pl[:image]
+          next unless img && img[:animated]
+          img[:last_advance_monotonic_s] ||= now
+          elapsed  = now - img[:last_advance_monotonic_s]
+          duration = img[:frame_durations][img[:current_frame]]
+          next unless AnimationTicker.should_advance?(elapsed, duration)
+
+          img[:current_frame] = AnimationTicker.next_frame_index(
+            img[:current_frame], img[:frame_count])
+          img[:last_advance_monotonic_s] = now
+          img[:cg_image] = nil
+
+          first = pl[:anchor_row]
+          last  = pl[:anchor_row] + pl[:cell_rows] - 1
+          (first..last).each do |r|
+            screen.mark_dirty(r) if r >= 0 && r < screen.rows
+          end
+          advanced = true
+        end
+      end
+      advanced
     end
 
     def invalidate_dirty_rows(dirty_rows)
@@ -3136,20 +3181,34 @@ module Echoes
     # rebuild the bitmap context.
     def blit_kitty_placement(pl, px, py, pane_rows)
       img = pl[:image]
-      return unless img && img[:rgba] && img[:width].to_i > 0 && img[:height].to_i > 0
+      return unless img && img[:width].to_i > 0 && img[:height].to_i > 0
+      return unless img[:animated] || img[:rgba]
       return if pl[:anchor_row] + pl[:cell_rows] <= 0   # fully scrolled off above
       return if pl[:anchor_row] >= pane_rows             # below visible
 
       unless img[:cg_image]
-        rgba_ptr = Fiddle::Pointer.to_ptr(img[:rgba])
-        cs = ObjC::CGColorSpaceCreateDeviceRGB.call
-        ctx = ObjC::CGBitmapContextCreate.call(
-          rgba_ptr, img[:width], img[:height], 8, img[:width] * 4, cs,
-          ObjC::KCGImageAlphaPremultipliedLast
-        )
-        img[:cg_image] = ObjC::CGBitmapContextCreateImage.call(ctx)
-        ObjC::CGContextRelease.call(ctx)
-        ObjC::CGColorSpaceRelease.call(cs)
+        if img[:animated]
+          # The retained NSBitmapImageRep carries every frame; just
+          # park it on the current one and pull its CGImage. The
+          # timer nilling img[:cg_image] on frame advance is what
+          # triggers this re-fetch — between advances the cached
+          # CGImage stays valid for redraws.
+          rep = img[:rep]
+          return if rep.nil? || rep.null?
+          ObjC::MSG_VOID_2.call(rep, ObjC.sel('setProperty:withValue:'),
+            ObjC::NSImageCurrentFrame, ObjC.nsnumber_int(img[:current_frame]))
+          img[:cg_image] = ObjC::MSG_PTR.call(rep, ObjC.sel('CGImage'))
+        else
+          rgba_ptr = Fiddle::Pointer.to_ptr(img[:rgba])
+          cs = ObjC::CGColorSpaceCreateDeviceRGB.call
+          ctx = ObjC::CGBitmapContextCreate.call(
+            rgba_ptr, img[:width], img[:height], 8, img[:width] * 4, cs,
+            ObjC::KCGImageAlphaPremultipliedLast
+          )
+          img[:cg_image] = ObjC::CGBitmapContextCreateImage.call(ctx)
+          ObjC::CGContextRelease.call(ctx)
+          ObjC::CGColorSpaceRelease.call(cs)
+        end
       end
       cg_image = img[:cg_image]
       return if cg_image.null?
@@ -3889,6 +3948,19 @@ module Echoes
       screen.notification_handler = ->(title, message) { post_notification(pane, title, message) }
       screen.display_info_handler = -> { display_info_json(pane) }
       screen.open_window_handler  = ->(args) { open_window_from_osc(pane, args) }
+      # Release the retained NSBitmapImageRep when an animated
+      # placement leaves @placements (Kitty a=d, erase-in-display,
+      # scroll-off). Static placements have no rep — the closure
+      # short-circuits on the :animated flag.
+      screen.placement_disposer = ->(pl) {
+        img = pl[:image]
+        next unless img && img[:animated]
+        rep = img[:rep]
+        if rep && !rep.null?
+          ObjC.release(rep)
+          img[:rep] = nil
+        end
+      }
       # OSC 7772 hide-pointer / show-pointer — same hide-or-show effect as
       # the user's Cmd+Shift+P toggle, but invokable from a child program
       # (e.g. a presentation tool that wants the cursor gone for the

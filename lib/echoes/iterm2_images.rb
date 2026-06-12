@@ -50,9 +50,7 @@ module Echoes
 
       cells_w, cells_h = compute_cell_dimensions(params, image, screen)
       screen.put_kitty_image(
-        rgba:    image[:rgba],
-        width:   image[:width],
-        height:  image[:height],
+        image:   image,
         cells_w: cells_w,
         cells_h: cells_h,
       )

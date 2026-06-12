@@ -116,6 +116,28 @@ class Echoes::Iterm2ImagesTest < Test::Unit::TestCase
     assert_empty @screen.images
   end
 
+  test "handle forwards an animated image hash through to the screen" do
+    fake_rep = Object.new   # the test never touches this; just needs to be non-nil
+    animated = {
+      animated: true,
+      rep: fake_rep,
+      width: 64,
+      height: 64,
+      frame_count: 3,
+      frame_durations: [0.1, 0.1, 0.1],
+      current_frame: 0,
+      cg_image: nil,
+      last_advance_monotonic_s: nil,
+    }
+    Echoes::Iterm2Images.stub_decoder { |_| animated }
+    osc_rest = "File=inline=1:#{b64('GIFBYTES')}"
+    assert Echoes::Iterm2Images.handle(osc_rest, screen: @screen)
+    img = @screen.images.first[:image]
+    assert img[:animated], "animated flag should reach the screen"
+    assert_equal 3, img[:frame_count]
+    assert_equal fake_rep, img[:rep]
+  end
+
   test "handle bails on malformed base64 payload" do
     Echoes::Iterm2Images.stub_decoder do |_|
       flunk "decoder shouldn't see malformed input"
@@ -261,9 +283,11 @@ class Echoes::Iterm2ImagesTest < Test::Unit::TestCase
     def cell_pixel_width;  8.0  end
     def cell_pixel_height; 16.0 end
 
-    def put_kitty_image(rgba:, width:, height:, cells_w: nil, cells_h: nil, **)
-      @images << {rgba: rgba, width: width, height: height,
-                  cells_w: cells_w, cells_h: cells_h}
+    def put_kitty_image(image: nil, rgba: nil, width: nil, height: nil,
+                        cells_w: nil, cells_h: nil, **)
+      image ||= {rgba: rgba, width: width, height: height} if rgba
+      @images << {rgba: image[:rgba], width: image[:width], height: image[:height],
+                  image: image, cells_w: cells_w, cells_h: cells_h}
     end
   end
 end

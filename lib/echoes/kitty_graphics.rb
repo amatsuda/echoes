@@ -142,12 +142,12 @@ module Echoes
         upper  = sel == sel.upcase && !sel.empty?
         case sel.downcase
         when 'a', ''
-          screen.placements.clear if screen.respond_to?(:placements)
+          screen.dispose_placements! if screen.respond_to?(:dispose_placements!)
           state[:cache].clear if upper
         when 'i', 'n'
           if target && !target.empty?
-            if screen.respond_to?(:placements)
-              screen.placements.reject! { |pl| pl[:image_id] == target }
+            if screen.respond_to?(:dispose_placements!)
+              screen.dispose_placements! { |pl| pl[:image_id] == target }
             end
             state[:cache].delete(target) if upper
           end
@@ -329,9 +329,7 @@ module Echoes
       raw_id = opts['i'].to_s
       raw_id = opts['I'].to_s if raw_id.empty?
       screen.put_kitty_image(
-        rgba:             image[:rgba],
-        width:            image[:width],
-        height:           image[:height],
+        image:            image,
         cells_w:          (opts['c'] && !opts['c'].empty?) ? opts['c'].to_i : nil,
         cells_h:          (opts['r'] && !opts['r'].empty?) ? opts['r'].to_i : nil,
         # Sub-cell pixel offsets for fine alignment. The kitty spec

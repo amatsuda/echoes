@@ -80,10 +80,64 @@ module Echoes
         height = ObjC::MSG_RET_L.call(rep, ObjC.sel('pixelsHigh'))
         return nil if width <= 0 || height <= 0
 
+        # Multi-frame (animated GIF, APNG, etc.) — return an
+        # animated image hash keyed by the retained rep, leaving
+        # CGImage extraction to the renderer per frame.
+        animated = animated_image_from(rep, width, height)
+        return animated if animated
+
         cgimage = ObjC::MSG_PTR.call(rep, ObjC.sel('CGImage'))
         return nil if cgimage.null?
 
         cgimage_to_rgba(cgimage, width, height)
+      end
+
+      # GIF frames spec a 0 ms duration to mean "browser default"
+      # (typically 100 ms). Treat any non-positive or absurdly
+      # small value as 100 ms so the renderer doesn't busy-loop at
+      # 60 Hz on a pathological GIF.
+      MIN_FRAME_DURATION_S = 0.1
+
+      # Returns the animated-image hash when `rep` has more than
+      # one frame, or nil for static images.
+      def animated_image_from(rep, width, height)
+        count_num = ObjC::MSG_PTR_1.call(
+          rep, ObjC.sel('valueForProperty:'), ObjC::NSImageFrameCount)
+        return nil if count_num.null?
+        frame_count = ObjC::MSG_RET_L.call(count_num, ObjC.sel('integerValue'))
+        return nil if frame_count <= 1
+
+        # Pre-read every frame's duration once at decode time so
+        # the per-tick advance stays a pure Ruby comparison — no
+        # AppKit round-trip just to ask "how long is this frame?".
+        durations = Array.new(frame_count) do |i|
+          ObjC::MSG_VOID_2.call(rep, ObjC.sel('setProperty:withValue:'),
+            ObjC::NSImageCurrentFrame, ObjC.nsnumber_int(i))
+          dur_num = ObjC::MSG_PTR_1.call(rep, ObjC.sel('valueForProperty:'),
+            ObjC::NSImageCurrentFrameDuration)
+          d = dur_num.null? ? 0.0 :
+              ObjC::MSG_RET_D.call(dur_num, ObjC.sel('doubleValue'))
+          d <= 0.001 ? MIN_FRAME_DURATION_S : d
+        end
+
+        # Park at frame 0 for the first paint, and bump the rep's
+        # retain so it survives across timer ticks (the local
+        # ns_data autorelease pool would otherwise reap it).
+        ObjC::MSG_VOID_2.call(rep, ObjC.sel('setProperty:withValue:'),
+          ObjC::NSImageCurrentFrame, ObjC.nsnumber_int(0))
+        ObjC.retain(rep)
+
+        {
+          animated: true,
+          rep: rep,
+          width: width,
+          height: height,
+          frame_count: frame_count,
+          frame_durations: durations,
+          current_frame: 0,
+          cg_image: nil,
+          last_advance_monotonic_s: nil,
+        }
       end
 
       # Draw a CGImage into a fresh premultiplied-RGBA8 bitmap context
