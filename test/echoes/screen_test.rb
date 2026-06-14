@@ -354,6 +354,25 @@ class Echoes::ScreenTest < Test::Unit::TestCase
     assert_equal(2, @screen.cursor.col)
   end
 
+  test "place_multicell_block marks all occupied rows dirty (so GUI repaints them)" do
+    # Regression: place_multicell_block used to skip mark_dirty entirely,
+    # so when a paint tick landed mid-parse — between, say, the title
+    # multicell and the body multicells — the GUI only repainted the
+    # rows the EARLIER cells had dirtied (e.g. via put_char). Later
+    # multicell rows stayed un-dirty and never repainted, producing the
+    # "occasional incomplete rendering" the user saw on slide
+    # transitions. Every row the multicell claims must end up in
+    # @dirty_rows so the next paint tick covers it.
+    @screen.dirty_rows.clear
+    @screen.put_multicell("A", scale: 3, width: 0, frac_n: 0, frac_d: 0,
+                         valign: 0, halign: 0)
+    # Scale 3 → 3 rows tall, anchored at row 0 → claims rows 0, 1, 2.
+    (0..2).each do |r|
+      assert @screen.dirty_rows.include?(r),
+             "place_multicell_block must mark row #{r} (within its vertical extent) as dirty"
+    end
+  end
+
   test "put_multicell wrap clears the previous multicell's vertical extent" do
     # A scale-4 multicell anchored at (0, 0) claims rows 0..3. If a
     # second multicell wraps off the right edge, advancing the cursor

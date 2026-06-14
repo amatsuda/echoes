@@ -1553,6 +1553,15 @@ module Echoes
         end
       end
 
+      # Push every occupied row into @dirty_rows so the GUI's per-row
+      # invalidation picks up the placement. Without this, a paint tick
+      # that fires between two multicell placements (e.g. the title
+      # finished, the body just starting) would invalidate the title
+      # rows (dirtied via earlier put_char / clear) but leave the body
+      # rows un-dirty and unpainted — the "occasional incomplete
+      # rendering" symptom on slide transitions.
+      mc_rows.times { |dr| mark_dirty(anchor_row + dr) }
+
       @cursor.col += mc_cols
     end
 
