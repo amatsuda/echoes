@@ -46,7 +46,16 @@ module Echoes
       # "No value for $TERM and no -T specified".
       ENV['TERM']      ||= Echoes.config.term
 
-      helper_env = {'ECHOES_HELPER_NO_RC' => no_rc ? '1' : nil}
+      # Drop rbenv version pins so commands the helper's REPL spawns
+      # do their own `.ruby-version` lookup per cwd instead of
+      # inheriting Echoes' frozen RBENV_VERSION. The helper itself
+      # launches via RbConfig.ruby below, which bypasses the shim,
+      # so nothing will re-export these into the helper's env.
+      helper_env = {
+        'ECHOES_HELPER_NO_RC' => no_rc ? '1' : nil,
+        'RBENV_VERSION' => nil,
+        'RBENV_DIR' => nil,
+      }
       @master, slave = PTY.open
       # Bidirectional JSON-line control pipes. Helper reads requests on
       # fd 3 and writes responses/events on fd 4.

@@ -65,11 +65,24 @@ module Echoes
           ENV['TERM'] = Echoes.config.term
           ENV['LANG'] ||= 'en_US.UTF-8'
           ENV['LC_CTYPE'] = 'UTF-8'
+          # rbenv's `ruby` shim sets RBENV_VERSION (and RBENV_DIR)
+          # before exec'ing the real interpreter, freezing the Ruby
+          # version for the whole child-process subtree. A descendant
+          # that `cd`s into a directory with a `.ruby-version` file
+          # then never gets to consult it (RBENV_VERSION wins). Scrub
+          # the pins so child shells resolve fresh per cwd.
+          ENV.delete('RBENV_VERSION')
+          ENV.delete('RBENV_DIR')
           # `command` may be a String (shell-parsed by /bin/sh) or an
           # Array of [argv0, *args] (execve directly, no shell). The
           # array form is what the OSC 7772 ;open-window handler
           # uses so user-supplied argv isn't subject to shell quoting.
           spawn_args = command.is_a?(Array) ? command : [command]
+          # If the child IS a Ruby script (e.g. rubish), invoking its
+          # `#!/usr/bin/env ruby` shebang would hit the shim again and
+          # re-export RBENV_VERSION, undoing the scrub above. Rewrite
+          # the invocation to use the absolute Ruby binary directly.
+          spawn_args = bypass_rbenv_shim_for_ruby_script(spawn_args)
           @pty_read, @pty_write, @pty_pid = spawn_with_pty(spawn_args, env, rows, cols)
         end
         @parser = Parser.new(@screen, writer: ->(s) { @pty_write.write(s) rescue nil })
@@ -888,6 +901,44 @@ module Echoes
     # whole startup path tcsetattr-safe.
     DARWIN_TIOCSCTTY = 0x20007461
     DARWIN_TIOCSPGRP = 0x80047476
+
+    # If `spawn_args` resolves to a Ruby script (shebang contains
+    # "ruby"), rewrite it to `[RbConfig.ruby, script_path, *rest]`
+    # so the launch goes straight to the interpreter binary, skipping
+    # the rbenv `ruby` shim that would otherwise re-export
+    # RBENV_VERSION into the child's environment. For non-Ruby
+    # executables (zsh, bash, compiled binaries) leave argv alone.
+    # Multi-token Strings (parsed by /bin/sh) are also left alone —
+    # we'd have to reimplement shell parsing to know what argv0 is.
+    def bypass_rbenv_shim_for_ruby_script(spawn_args)
+      prog = spawn_args.first
+      return spawn_args unless prog
+      return spawn_args if prog.match?(/[\s"']/)
+
+      path = resolve_executable_path(prog)
+      return spawn_args unless path
+
+      shebang = File.open(path, 'rb') { |f| f.gets(256) } rescue nil
+      return spawn_args unless shebang&.start_with?('#!') && shebang.include?('ruby')
+
+      ruby = RbConfig.ruby
+      return spawn_args unless ruby && File.executable?(ruby)
+
+      [ruby, path, *spawn_args[1..]]
+    end
+
+    def resolve_executable_path(prog)
+      if prog.include?('/')
+        return prog if File.file?(prog) && File.executable?(prog)
+        return nil
+      end
+      ENV['PATH'].to_s.split(File::PATH_SEPARATOR).each do |dir|
+        next if dir.empty?
+        candidate = File.join(dir, prog)
+        return candidate if File.file?(candidate) && File.executable?(candidate)
+      end
+      nil
+    end
 
     def spawn_with_pty(spawn_args, env, rows, cols)
       master, slave = PTY.open

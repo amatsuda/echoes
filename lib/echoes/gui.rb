@@ -31,6 +31,16 @@ module Echoes
       # spawn inherit these via the normal env-inheritance path.
       ENV['TERM_PROGRAM']         = 'Echoes'
       ENV['TERM_PROGRAM_VERSION'] = Echoes::VERSION
+      # Pin RUBY to the absolute interpreter path Echoes itself is
+      # running on. The rubish launcher (and similar wrappers) honor
+      # `$RUBY` as an explicit interpreter override, so when it's
+      # set they exec that binary directly and skip the rbenv `ruby`
+      # shim — which would otherwise re-export RBENV_VERSION into
+      # the child's environment, defeating the .ruby-version lookup
+      # we want descendants to be able to do per cwd. Don't clobber
+      # an explicit user override.
+      require 'rbconfig'
+      ENV['RUBY'] ||= RbConfig.ruby
       @rows = rows
       @cols = cols
       # Persisted font size wins over the config default; both wrappers
@@ -4164,6 +4174,11 @@ module Echoes
       env['USER']  ||= (ENV['LOGNAME'] || `id -un 2>/dev/null`.chomp)
       env['LANG']  ||= 'en_US.UTF-8'
       env['TERM']  ||= Echoes.config.term
+      # See pane.rb: don't propagate rbenv's version pin into a
+      # snapshot a child would otherwise inherit, or the child's
+      # `.ruby-version` lookup short-circuits.
+      env.delete('RBENV_VERSION')
+      env.delete('RBENV_DIR')
       env
     end
 

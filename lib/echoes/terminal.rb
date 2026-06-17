@@ -14,6 +14,11 @@ module Echoes
       @command = command
       @screen = Screen.new(rows: @rows, cols: @cols)
       @parser = Parser.new(@screen, writer: ->(s) { @write_io&.write(s) rescue nil })
+      # See gui.rb: pin $RUBY so wrappers like rubish's launcher use
+      # this interpreter directly and skip the rbenv shim that would
+      # otherwise re-export RBENV_VERSION into the child shell.
+      require 'rbconfig'
+      ENV['RUBY'] ||= RbConfig.ruby
     end
 
     def run
