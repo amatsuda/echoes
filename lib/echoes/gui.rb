@@ -66,6 +66,8 @@ module Echoes
       @drag_start_point = nil
       @drag_insertion_index = nil
       @last_cursor_row = nil
+      @auto_scroll_direction = nil
+      @auto_scroll_col = nil
       @font_cache = {}
       @rgb_color_cache = {}
       @nsstring_cache = {}
@@ -267,6 +269,8 @@ module Echoes
       ws[:drag_start_point] = @drag_start_point
       ws[:drag_insertion_index] = @drag_insertion_index
       ws[:last_cursor_row] = @last_cursor_row
+      ws[:auto_scroll_direction] = @auto_scroll_direction
+      ws[:auto_scroll_col] = @auto_scroll_col
       ws[:rows] = @rows
       ws[:cols] = @cols
       ws[:focused] = @window_focused
@@ -305,6 +309,8 @@ module Echoes
       @drag_start_point     = ws[:drag_start_point]
       @drag_insertion_index = ws[:drag_insertion_index]
       @last_cursor_row      = ws[:last_cursor_row]
+      @auto_scroll_direction = ws[:auto_scroll_direction]
+      @auto_scroll_col       = ws[:auto_scroll_col]
       @rows = ws[:rows]
       @cols = ws[:cols]
       @window_focused = ws.fetch(:focused, true)
@@ -2259,6 +2265,25 @@ module Echoes
       # fast-forwarding.
       need_redraw = true if advance_animated_placements(tab)
 
+      # Auto-scroll history when the user is drag-selecting past the
+      # top (or bottom) of the visible grid. mouse_dragged sets the
+      # direction when the cursor leaves the grid; the gesture-end
+      # in mouse_up clears it. One row per tick = 60 rows/s which
+      # feels responsive without being uncontrollably fast.
+      if @auto_scroll_direction
+        case @auto_scroll_direction
+        when :up
+          new_offset = (tab.scroll_offset + 1).clamp(0, tab.screen.scrollback.size)
+        when :down
+          new_offset = (tab.scroll_offset - 1).clamp(0, tab.screen.scrollback.size)
+        end
+        if new_offset != tab.scroll_offset
+          tab.scroll_offset = new_offset
+          apply_auto_scroll_selection(tab)
+          need_redraw = true
+        end
+      end
+
       # Check bell on active pane
       active_pane = tab.active_pane
       if active_pane&.screen&.bell
@@ -2496,6 +2521,33 @@ module Echoes
         end
       end
 
+      # Auto-scroll while drag-selecting past the top (or bottom) of
+      # the grid. Detect this BEFORE grid_position's nil bail so the
+      # cursor moving above the visible area engages history scroll
+      # rather than just freezing the selection. Only active while a
+      # selection drag is in progress.
+      if @selection_anchor && !@selection_word_anchor &&
+         tab.screen.mouse_tracking == :off
+        x, y_in_window = event_location(event_ptr)
+        y      = view_frame_height - y_in_window
+        gy_off = grid_y_offset
+        grid_y = y - gy_off
+        col    = (x / @cell_width).to_i.clamp(0, @cols - 1)
+        if grid_y < 0
+          @auto_scroll_direction = :up
+          @auto_scroll_col       = col
+          apply_auto_scroll_selection(tab)
+          return
+        elsif grid_y >= @rows * @cell_height
+          @auto_scroll_direction = :down
+          @auto_scroll_col       = col
+          apply_auto_scroll_selection(tab)
+          return
+        else
+          @auto_scroll_direction = nil
+        end
+      end
+
       pos = grid_position(event_ptr)
       return unless pos
 
@@ -2507,6 +2559,20 @@ module Echoes
       else
         @selection_end = pos
       end
+      ObjC::MSG_VOID_I.call(@view, ObjC.sel('setNeedsDisplay:'), 1)
+    end
+
+    # Pin @selection_end at the topmost (when scrolling up) or
+    # bottommost (when scrolling down) visible row, using the last
+    # known column from mouse_dragged. Recomputed every timer tick
+    # while the auto-scroll is active so the selection visually
+    # extends as new history rolls in.
+    private def apply_auto_scroll_selection(tab)
+      screen = tab.screen
+      scrollback_size = screen.scrollback.size
+      visible_row = @auto_scroll_direction == :up ? 0 : (@rows - 1)
+      abs_row = scrollback_size - tab.scroll_offset + visible_row
+      @selection_end = [abs_row, @auto_scroll_col || 0]
       ObjC::MSG_VOID_I.call(@view, ObjC.sel('setNeedsDisplay:'), 1)
     end
 
@@ -2547,6 +2613,10 @@ module Echoes
       # stale state for the next mouseDown.
       @drag_start_tab_index = nil
       @drag_start_point     = nil
+      # Stop auto-scrolling history into the selection — the gesture
+      # is over.
+      @auto_scroll_direction = nil
+      @auto_scroll_col       = nil
 
       tab = current_tab
       return unless tab
@@ -2963,6 +3033,8 @@ module Echoes
       @drag_start_point = nil
       @drag_insertion_index = nil
       @last_cursor_row = nil
+      @auto_scroll_direction = nil
+      @auto_scroll_col = nil
       @window_focused = true
 
       # Register window state
@@ -4349,6 +4421,8 @@ module Echoes
       @drag_start_point = nil
       @drag_insertion_index = nil
       @last_cursor_row = nil
+      @auto_scroll_direction = nil
+      @auto_scroll_col = nil
       @window_focused = true
 
       ws = {}
