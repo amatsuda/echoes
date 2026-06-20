@@ -31,16 +31,16 @@ module Echoes
       # spawn inherit these via the normal env-inheritance path.
       ENV['TERM_PROGRAM']         = 'Echoes'
       ENV['TERM_PROGRAM_VERSION'] = Echoes::VERSION
-      # Pin RUBY to the absolute interpreter path Echoes itself is
-      # running on. The rubish launcher (and similar wrappers) honor
-      # `$RUBY` as an explicit interpreter override, so when it's
-      # set they exec that binary directly and skip the rbenv `ruby`
-      # shim — which would otherwise re-export RBENV_VERSION into
-      # the child's environment, defeating the .ruby-version lookup
-      # we want descendants to be able to do per cwd. Don't clobber
-      # an explicit user override.
+      # Pin ECHOES_RUBY to the absolute interpreter path Echoes itself
+      # is running on. The rubish launcher (and similar wrappers) honor
+      # this as an explicit interpreter override, so when it's set
+      # they exec that binary directly and skip the rbenv `ruby` shim
+      # — which would otherwise re-export RBENV_VERSION into the
+      # child's environment, defeating the .ruby-version lookup we
+      # want descendants to be able to do per cwd. Don't clobber an
+      # explicit user override.
       require 'rbconfig'
-      ENV['RUBY'] ||= RbConfig.ruby
+      ENV['ECHOES_RUBY'] ||= RbConfig.ruby
       @rows = rows
       @cols = cols
       # Persisted font size wins over the config default; both wrappers
