@@ -391,9 +391,32 @@ module Echoes
       Echoes.config.tab_position == :bottom ? @cell_height * @rows : 0.0
     end
 
+    # The process is a `ruby`, so without help it shows up as "ruby"
+    # in ps/top and, when launched as `exe/echoes` rather than through
+    # Echoes.app, in Activity Monitor, the Dock and Cmd+Tab too.
+    # setproctitle covers ps (and leaves $0 alone, which rubish uses to
+    # locate itself); the LaunchServices display name covers the GUI
+    # side. _LSSetApplicationInformationItem is private but long-stable
+    # (Chromium names its helper processes with it), so a failure only
+    # leaves the old name.
+    private def set_process_name(name)
+      Process.setproctitle(name)
+      ls = Fiddle.dlopen('/System/Library/Frameworks/CoreServices.framework/CoreServices')
+      get_asn = Fiddle::Function.new(ls['_LSGetCurrentApplicationASN'], [], Fiddle::TYPE_VOIDP)
+      set_item = Fiddle::Function.new(ls['_LSSetApplicationInformationItem'],
+                                      [Fiddle::TYPE_INT, Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP,
+                                       Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP], Fiddle::TYPE_INT)
+      display_name_key = Fiddle::Pointer.new(ls['_kLSDisplayNameKey']).ptr
+      asn = get_asn.call
+      # -2 = kLSDefaultSessionID
+      set_item.call(-2, asn, display_name_key, ObjC.nsstring(name), nil) unless asn.null?
+    rescue Fiddle::DLError
+    end
+
     def setup_app
       @app = ObjC::MSG_PTR.call(ObjC.cls('NSApplication'), ObjC.sel('sharedApplication'))
       ObjC::MSG_VOID_I.call(@app, ObjC.sel('setActivationPolicy:'), 0)
+      set_process_name('Echoes')
       disable_press_and_hold
       # Disable native NSWindow tabbing so Cmd+N always spawns a real
       # new window. Default macOS behavior in fullscreen is to fold
