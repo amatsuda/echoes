@@ -659,3 +659,18 @@ class Echoes::GUINotificationThrottleTest < Test::Unit::TestCase
   end
 end
 
+class Echoes::GUIUrlTrimTest < Test::Unit::TestCase
+  test "trim_url drops trailing prose punctuation" do
+    assert_equal 'https://x.y/z', Echoes::GUI.trim_url('https://x.y/z.')
+    assert_equal 'https://x.y/z', Echoes::GUI.trim_url('https://x.y/z,')
+    assert_equal 'https://x.y/z', Echoes::GUI.trim_url('https://x.y/z").')
+    assert_equal 'https://x.y/z', Echoes::GUI.trim_url('https://x.y/z)')
+    assert_equal 'https://x.y/z', Echoes::GUI.trim_url('https://x.y/z).')
+  end
+
+  test "trim_url keeps balanced brackets and inner punctuation" do
+    assert_equal 'https://en.wikipedia.org/wiki/Foo_(bar)', Echoes::GUI.trim_url('https://en.wikipedia.org/wiki/Foo_(bar)')
+    assert_equal 'https://en.wikipedia.org/wiki/Foo_(bar)', Echoes::GUI.trim_url('https://en.wikipedia.org/wiki/Foo_(bar).')
+    assert_equal 'https://x.y/a?b=c,d', Echoes::GUI.trim_url('https://x.y/a?b=c,d')
+  end
+end

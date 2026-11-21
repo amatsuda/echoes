@@ -3929,11 +3929,28 @@ module Echoes
       text = row.map(&:char).join
       text.scan(URL_REGEX) do |url|
         start = Regexp.last_match.begin(0)
+        url = self.class.trim_url(url)
         if col >= start && col < start + url.length
           return url
         end
       end
       nil
+    end
+
+    # `\S+` swallows the punctuation that follows a URL in prose:
+    # "see https://x.y/z." or "(https://x.y/z)". Drop trailing
+    # sentence punctuation and quotes, and a closing bracket that
+    # has no opening one inside the URL (Wikipedia-style links keep
+    # theirs).
+    def self.trim_url(url)
+      url = url.sub(/[.,;:!?'"]+\z/, '')
+      loop do
+        last = url[-1]
+        open = { ')' => '(', ']' => '[', '}' => '{' }[last]
+        break unless open && url.count(open) < url.count(last)
+        url = url[0...-1].sub(/[.,;:!?'"]+\z/, '')
+      end
+      url
     end
 
     # Schemes a Cmd+click may hand to NSWorkspace. An OSC 8 link's
