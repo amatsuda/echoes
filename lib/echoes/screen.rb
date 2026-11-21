@@ -862,8 +862,11 @@ module Echoes
 
     def restore_cursor
       if @saved_cursor
-        @cursor.row = @saved_cursor[:row]
-        @cursor.col = @saved_cursor[:col]
+        # The window may have shrunk since the save (vim saves at row
+        # 45, the user resizes to 24 rows, then `\e[?1049l`), so the
+        # saved position can point past the grid.
+        @cursor.row = clamp_row(@saved_cursor[:row])
+        @cursor.col = clamp_col(@saved_cursor[:col])
         @attrs.copy_from(@saved_cursor[:attrs])
         @origin_mode = @saved_cursor[:origin_mode]
         @auto_wrap = @saved_cursor[:auto_wrap]

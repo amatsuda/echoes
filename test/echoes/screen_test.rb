@@ -1362,3 +1362,26 @@ class Echoes::ScreenCombiningFloodTest < Test::Unit::TestCase
     assert_equal "á", screen.grid[0][0].char[0, 2]
   end
 end
+
+class Echoes::ScreenRestoreAfterResizeTest < Test::Unit::TestCase
+  test "restoring a cursor saved before the window shrank clamps it to the grid" do
+    screen = Echoes::Screen.new(rows: 50, cols: 80)
+    parser = Echoes::Parser.new(screen)
+    parser.feed("\e[45;70H\e[?1049h")   # vim-style: save cursor + alt screen
+    screen.resize(24, 40)
+    parser.feed("\e[?1049lx")            # back to main screen, then print
+    assert_equal 23, screen.cursor.row
+    assert_equal 'x', screen.grid[23][39].char
+  end
+
+  test "DECRC after a shrink clamps too" do
+    screen = Echoes::Screen.new(rows: 10, cols: 10)
+    screen.cursor.row = 9
+    screen.cursor.col = 9
+    screen.save_cursor
+    screen.resize(5, 5)
+    screen.restore_cursor
+    screen.put_char('y')
+    assert_equal 'y', screen.grid[4][4].char
+  end
+end
