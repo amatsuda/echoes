@@ -1327,9 +1327,16 @@ module Echoes
       ObjC::MSG_VOID.call(pool, ObjC.sel('drain'))
     end
 
+    # How far above a dirty strip a multi-row anchor is looked for.
+    MAX_MULTICELL_ROWS = 16
+
     def draw_pane_content(pane, px, py, dirty_min_y, dirty_max_y, is_active)
       screen = pane.screen
       scrollback = screen.scrollback
+      # Scrollback can shrink under a scrolled-back view (alternate
+      # screen, ED 3); an offset past its size indexed negative rows
+      # and left the pane blank until the next key.
+      pane.scroll_offset = pane.scroll_offset.clamp(0, scrollback.size)
       visible_start = scrollback.size - pane.scroll_offset
       pane_rows = screen.rows
       pane_cols = screen.cols
@@ -2414,10 +2421,21 @@ module Echoes
           screen = active_pane.screen
           dirty = screen.dirty_rows
           screen.clear_dirty
-          cur_row = screen.cursor.row
-          dirty << cur_row
-          dirty << @last_cursor_row if @last_cursor_row && @last_cursor_row != cur_row
-          invalidate_dirty_rows(dirty)
+          if active_pane.scroll_offset != 0
+            # Scrolled back: screen row r is shown at view row
+            # r + scroll_offset, and rows of history above it have no
+            # dirty flag of their own, so repaint the whole view.
+            ObjC::MSG_VOID_I.call(@view, ObjC.sel('setNeedsDisplay:'), 1)
+          else
+            cur_row = screen.cursor.row
+            dirty << cur_row
+            dirty << @last_cursor_row if @last_cursor_row && @last_cursor_row != cur_row
+            if blink_toggled
+              # SGR 5 text anywhere on screen flips with the cursor.
+              screen.grid.each_with_index { |row, r| dirty << r if row.any?(&:blink) }
+            end
+            invalidate_dirty_rows(dirty)
+          end
         end
 
         # Cursor was just drawn (or will be on the upcoming
