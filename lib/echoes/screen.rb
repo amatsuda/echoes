@@ -1151,6 +1151,10 @@ module Echoes
       @main_scrollback_wrapped = @scrollback_wrapped
       @main_rows = @rows
       @main_cols = @cols
+      # Images belong to the screen they were placed on; without this
+      # a kitty/iTerm2 image from the shell stayed drawn over vim.
+      @main_placements = @placements
+      @placements = []
 
       @grid = Array.new(@rows) { Array.new(@cols) { Cell.new } }
       @line_wrapped = Array.new(@rows, false)
@@ -1184,6 +1188,9 @@ module Echoes
       @rows = @main_rows
       @cols = @main_cols
       @attrs = Cell.new
+      dispose_placements!
+      @placements = @main_placements || []
+      @main_placements = nil
 
       @main_grid = nil
       @main_line_wrapped = nil
