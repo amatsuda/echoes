@@ -393,6 +393,15 @@ module Echoes
         end
       end
 
+      # A program redrawing the same image at the same spot (a slide
+      # tool re-sending `a=p,i=1,C=1` on every frame) replaces its
+      # earlier placement instead of stacking another one on top.
+      if image_id
+        dispose_placements! do |p|
+          p[:image_id] == image_id && p[:anchor_row] == anchor_row && p[:anchor_col] == anchor_col
+        end
+      end
+
       # Record the placement BEFORE any post-place scroll fires —
       # if the cursor advance below pushes us past the bottom and
       # triggers scroll_up, that path needs the placement already
