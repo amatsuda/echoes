@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'zlib'
+require 'tmpdir'
 require_relative 'svg_sniffer'
 
 module Echoes
@@ -230,13 +231,19 @@ module Echoes
     # any read error. For `t=t` the file is unlinked after a
     # successful read; the kitty client uses this when sending a
     # one-shot tempfile it owns.
+    #
+    # The path arrives in the pane's output stream, so a remote host
+    # or a cat'ed file can name any path. Following kitty, the file
+    # must live under a temp directory, and a `t=t` file must carry
+    # `tty-graphics-protocol` in its name, or an `a=T,t=t` could
+    # delete an arbitrary document before even decoding it.
     def resolve_transmission(decoded_payload, opts)
       case opts['t'].to_s
       when '', 'd'
         decoded_payload
       when 'f', 't'
-        path = decoded_payload.dup.force_encoding('UTF-8')
-        return nil if path.empty? || !File.file?(path) || !File.readable?(path)
+        path = file_transmission_path(decoded_payload.dup.force_encoding('UTF-8'), opts['t'])
+        return nil unless path
         data = File.binread(path)
         File.delete(path) if opts['t'] == 't'
         data
@@ -244,6 +251,34 @@ module Echoes
         nil  # 's' / anything else — not supported
       end
     rescue StandardError
+      nil
+    end
+
+    FILE_TRANSMISSION_MAX_BYTES = 64 * 1024 * 1024
+    TEMP_FILE_MARKER = 'tty-graphics-protocol'
+
+    # Directories a t=f / t=t path may resolve into: the process's
+    # temp dir, /tmp, and $TMPDIR, each realpath'd (on macOS they
+    # sit under /private/...).
+    def file_transmission_roots
+      [Dir.tmpdir, '/tmp', ENV['TMPDIR']].compact.filter_map do |d|
+        File.realpath(d)
+      rescue SystemCallError
+        nil
+      end.uniq
+    end
+
+    # The realpath to read, or nil when the request is refused.
+    def file_transmission_path(path, medium)
+      return nil if path.empty? || path.include?("\0")
+      return nil if medium == 't' && !File.basename(path).include?(TEMP_FILE_MARKER)
+      return nil if File.lstat(path).symlink?
+      real = File.realpath(path)
+      return nil unless file_transmission_roots.any? { |root| real.start_with?(root + '/') }
+      st = File.stat(real)
+      return nil unless st.file? && st.readable? && st.size <= FILE_TRANSMISSION_MAX_BYTES
+      real
+    rescue SystemCallError
       nil
     end
 

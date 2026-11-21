@@ -195,7 +195,7 @@ class Echoes::KittyGraphicsTest < Test::Unit::TestCase
   test "t=t reads the file then deletes it" do
     require 'tmpdir'
     Dir.mktmpdir do |dir|
-      png_path = File.join(dir, 'tmp.png')
+      png_path = File.join(dir, 'tty-graphics-protocol-tmp.png')
       File.binwrite(png_path, "TMP-PNG")
       Echoes::KittyGraphics.stub_decoder("TMP-PNG" => {rgba: 'Y', width: 2, height: 2}) do
         Echoes::KittyGraphics.handle_chunk(@state, "a=T,t=t,i=2,f=100",
@@ -204,6 +204,71 @@ class Echoes::KittyGraphicsTest < Test::Unit::TestCase
       end
       assert_equal 1, @screen.images.size
       refute File.exist?(png_path), "t=t should unlink the file after reading"
+    end
+  end
+
+  # A directory outside every temp root, created inside the repo's
+  # test/ dir and removed afterwards.
+  def with_non_temp_dir
+    Dir.mktmpdir('kitty-outside', __dir__) { |dir| yield dir }
+  end
+
+  test "t=f refuses a file outside the temp directories and leaves it alone" do
+    with_non_temp_dir do |dir|
+      path = File.join(dir, 'document.png')
+      File.binwrite(path, "SECRET")
+      Echoes::KittyGraphics.handle_chunk(@state, "a=T,t=f,i=5,f=100", b64(path),
+                                          screen: @screen, writer: @writer)
+      assert_empty @screen.images
+      assert_includes @writes.first, 'ENOENT'
+      assert File.exist?(path)
+    end
+  end
+
+  test "t=t refuses to delete a file outside the temp directories" do
+    with_non_temp_dir do |dir|
+      path = File.join(dir, 'tty-graphics-protocol-thesis.png')
+      File.binwrite(path, "THESIS")
+      Echoes::KittyGraphics.handle_chunk(@state, "a=T,t=t,i=6,f=100", b64(path),
+                                          screen: @screen, writer: @writer)
+      assert_empty @screen.images
+      assert File.exist?(path), "t=t must not unlink a file outside the temp dirs"
+    end
+  end
+
+  test "t=t refuses a temp file without the tty-graphics-protocol marker" do
+    Dir.mktmpdir do |dir|
+      path = File.join(dir, 'plain.png')
+      File.binwrite(path, "PLAIN")
+      Echoes::KittyGraphics.handle_chunk(@state, "a=T,t=t,i=7,f=100", b64(path),
+                                          screen: @screen, writer: @writer)
+      assert_empty @screen.images
+      assert File.exist?(path)
+    end
+  end
+
+  test "t=f refuses a symlink that points outside the temp directories" do
+    with_non_temp_dir do |outside|
+      target = File.join(outside, 'real.png')
+      File.binwrite(target, "REAL")
+      Dir.mktmpdir do |dir|
+        link = File.join(dir, 'link.png')
+        File.symlink(target, link)
+        Echoes::KittyGraphics.handle_chunk(@state, "a=T,t=f,i=8,f=100", b64(link),
+                                            screen: @screen, writer: @writer)
+        assert_empty @screen.images
+      end
+    end
+  end
+
+  test "t=f refuses a file over the size cap" do
+    Dir.mktmpdir do |dir|
+      path = File.join(dir, 'huge.png')
+      File.open(path, 'wb') { |f| f.truncate(Echoes::KittyGraphics::FILE_TRANSMISSION_MAX_BYTES + 1) }
+      Echoes::KittyGraphics.handle_chunk(@state, "a=T,t=f,i=9,f=100", b64(path),
+                                          screen: @screen, writer: @writer)
+      assert_empty @screen.images
+      assert_includes @writes.first, 'ENOENT'
     end
   end
 
