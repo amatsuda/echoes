@@ -66,3 +66,31 @@ class Echoes::KeybindTest < Test::Unit::TestCase
     assert_equal({key: 'r', modifiers: COMMAND}, @cfg.keybind_for(:reset_font_size))
   end
 end
+
+class Echoes::KeybindValidationTest < Test::Unit::TestCase
+  def setup
+    @cfg = Echoes::Configuration.new
+  end
+
+  def quietly
+    require 'stringio'
+    err = $stderr
+    $stderr = StringIO.new
+    yield
+    $stderr.string
+  ensure
+    $stderr = err
+  end
+
+  test "an unknown modifier disables the shortcut instead of binding the bare key" do
+    result = nil
+    warning = quietly { result = @cfg.parse_shortcut('Cmnd+K') }
+    assert_equal({key: '', modifiers: 0}, result)
+    assert_match(/unknown modifier "Cmnd"/, warning)
+  end
+
+  test "a trailing + is the plus key" do
+    assert_equal({key: '+', modifiers: 1 << 20}, @cfg.parse_shortcut('Cmd++'))
+    assert_equal({key: '+', modifiers: (1 << 20) | (1 << 17)}, @cfg.parse_shortcut('Cmd+Shift++'))
+  end
+end

@@ -240,11 +240,29 @@ module Echoes
       'super'   => 1 << 20,
     }.freeze
 
+    DISABLED_SHORTCUT = {key: '', modifiers: 0}.freeze
+
     def parse_shortcut(str)
-      return {key: '', modifiers: 0} if str.nil? || str.empty?
-      parts = str.split('+').map(&:strip)
-      key = parts.pop.to_s.downcase
-      modifiers = parts.sum { |p| SHORTCUT_MODIFIERS[p.downcase] || 0 }
+      return DISABLED_SHORTCUT.dup if str.nil? || str.empty?
+      # "Cmd++" binds the plus key; a split on "+" would lose it.
+      if str.end_with?('+') && str.length > 1
+        key = '+'
+        parts = str[0...-1].split('+')
+      else
+        parts = str.split('+')
+        key = parts.pop.to_s.strip.downcase
+      end
+      modifiers = 0
+      parts.map(&:strip).each do |p|
+        bit = SHORTCUT_MODIFIERS[p.downcase]
+        unless bit
+          # A typo like "Cmnd+K" must not silently become a bare `k`
+          # binding that steals the key from typing.
+          warn "echoes: unknown modifier #{p.inspect} in keybind #{str.inspect}; shortcut disabled"
+          return DISABLED_SHORTCUT.dup
+        end
+        modifiers |= bit
+      end
       {key: key, modifiers: modifiers}
     end
 
