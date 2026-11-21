@@ -2988,9 +2988,17 @@ module Echoes
       update_cell_metrics
 
       return unless @window
-      win_width  = @cell_width * @cols
-      win_height = tab_bar_height + @cell_height * @rows
-      ObjC::MSG_VOID_2D.call(@window, ObjC.sel('setContentSize:'), win_width, win_height)
+      style_mask = ObjC::MSG_RET_L.call(@window, ObjC.sel('styleMask'))
+      if (style_mask & ObjC::NSWindowStyleMaskFullScreen) != 0
+        # The window can't grow or shrink to fit; refit rows/cols to
+        # the view instead, or the grid no longer matches the cell size.
+        _, _, vw, vh = nsrect_via_invocation(@view, 'frame')
+        handle_resize(vw, vh)
+      else
+        win_width  = @cell_width * @cols
+        win_height = tab_bar_height + @cell_height * @rows
+        ObjC::MSG_VOID_2D.call(@window, ObjC.sel('setContentSize:'), win_width, win_height)
+      end
       ObjC::MSG_VOID_I.call(@view, ObjC.sel('setNeedsDisplay:'), 1)
       save_window_state
     end

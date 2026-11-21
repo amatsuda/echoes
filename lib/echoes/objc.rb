@@ -106,6 +106,7 @@ module Echoes
     NSWindowStyleMaskClosable       = 1 << 1
     NSWindowStyleMaskMiniaturizable = 1 << 2
     NSWindowStyleMaskResizable      = 1 << 3
+    NSWindowStyleMaskFullScreen     = 1 << 14
     NSWindowStyleMaskDefault = NSWindowStyleMaskTitled | NSWindowStyleMaskClosable |
                                NSWindowStyleMaskMiniaturizable | NSWindowStyleMaskResizable
     NSBackingStoreBuffered = 2
