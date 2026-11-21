@@ -147,6 +147,10 @@ module Echoes
       return if running?
       @master.winsize = [rows, cols, px_width.to_i, px_height.to_i] rescue nil
       @running = true
+      # A stale true here (a program that printed the literal sentinel)
+      # would let the next command be reaped before its output drained.
+      @sentinel_seen = false
+      @done_pending = false
       rpc_async('execute', line: line)
     end
 

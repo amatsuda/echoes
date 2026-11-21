@@ -212,6 +212,11 @@ module Echoes
           process_output(osc133_b)
           render_input_area
           @embedded_running = false
+          if @keys_pending_prompt
+            queued = @keys_pending_prompt
+            @keys_pending_prompt = nil
+            queued.each { |ch, fl| handle_key(chars: ch, flags: fl) }
+          end
         end
         out
       else
@@ -397,6 +402,16 @@ module Echoes
         # programs reading from the pty (vim, less, etc.) expect.
         translated = translate_for_pty(chars, flags)
         @embedded_shell.forward_input(translated)
+        return true
+      end
+
+      # The helper has reported command_done but this pane hasn't
+      # reaped it yet (that happens on the next timer tick, which also
+      # draws the next prompt). Keys typed in that window used to be
+      # echoed before the prompt and then again after it; hold them
+      # until the prompt is up and replay them there.
+      if @embedded_running
+        (@keys_pending_prompt ||= []) << [chars, flags]
         return true
       end
 
