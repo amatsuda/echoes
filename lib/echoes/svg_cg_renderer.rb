@@ -395,7 +395,7 @@ module Echoes
 
     def parse_points(str)
       return nil if str.nil? || str.strip.empty?
-      flat = str.scan(/-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?/).map(&:to_f)
+      flat = str.scan(SvgTransform::NUM_RE).map(&:to_f)
       return nil if flat.empty? || flat.size.odd?
       flat.each_slice(2).to_a
     end

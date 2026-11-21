@@ -79,3 +79,11 @@ class Echoes::SvgTransformTest < Test::Unit::TestCase
     assert_nil T.parse(nil)
   end
 end
+
+class Echoes::SvgTransformNumberFormsTest < Test::Unit::TestCase
+  def test_leading_dot_and_plus_numbers
+    assert_equal [[:scale, [0.5, 0.5]]], Echoes::SvgTransform.parse('scale(.5)')
+    assert_equal [[:translate, [-0.5, 3.0]]], Echoes::SvgTransform.parse('translate(-.5,3)')
+    assert_equal [[:translate, [2.0, 1.0]]], Echoes::SvgTransform.parse('translate(+2., 1)')
+  end
+end

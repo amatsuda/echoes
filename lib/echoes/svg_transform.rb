@@ -7,7 +7,9 @@ module Echoes
   # setters (CGContextTranslateCTM, ScaleCTM, RotateCTM, ConcatCTM).
   module SvgTransform
     FN_RE = /([a-zA-Z]+)\s*\(([^)]*)\)/
-    NUM_RE = /-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?/
+    # Same number grammar as SvgPathParser: `.5`, `+1` and `2.` are
+    # all valid SVG numbers; `-?\d+(?:\.\d+)?` read `scale(.5)` as 5.
+    NUM_RE = /[+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?/
 
     module_function
 

@@ -165,3 +165,9 @@ class Echoes::SvgCgRendererTest < Test::Unit::TestCase
     assert_nil R.rasterize('<div/>', width: 10, height: 10)
   end
 end
+
+class Echoes::SvgCgRendererPointsTest < Test::Unit::TestCase
+  def test_points_accept_leading_dot_numbers
+    assert_equal [[0.5, 0.5], [1.0, 1.0]], Echoes::SvgCgRenderer.send(:parse_points, '.5,.5 1,1')
+  end
+end
