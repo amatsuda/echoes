@@ -30,4 +30,4 @@ Uses the **test-unit** gem (~> 3.0). Test classes inherit from `Test::Unit::Test
 
 ## CI
 
-GitHub Actions runs `bundle exec rake` on push to master and on pull requests (Ruby 4.1.0, ubuntu-latest).
+GitHub Actions runs `bundle exec rake` on push to master and on pull requests (Ruby 4.0, macos-latest — the suite needs AppKit via Fiddle, so it cannot run on Linux).
