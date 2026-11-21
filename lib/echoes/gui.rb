@@ -249,6 +249,19 @@ module Echoes
       load_window_state(ws)
     end
 
+    # NSWindowWillCloseNotification: the user clicked the red button
+    # (Cmd+W goes through close_tab instead). Close the window's tabs
+    # so their children get SIGHUP, then drop the window state the
+    # same way close_tab does when its last tab goes.
+    def window_will_close(view_ptr)
+      ws = @view_to_ws[view_ptr.to_i]
+      return unless ws
+      activate_for_view(view_ptr)
+      @tabs.each(&:close)
+      @tabs = []
+      close_current_window
+    end
+
     private def save_window_state
       return unless @window
       ws = @view_to_ws[@view.to_i]
@@ -358,6 +371,8 @@ module Echoes
       release_window_fonts(ws) if ws
       @view_to_ws.delete(closing_view.to_i)
       @window_states.delete(ws)
+      nc = ObjC::MSG_PTR.call(ObjC.cls('NSNotificationCenter'), ObjC.sel('defaultCenter'))
+      ObjC::MSG_VOID_1.call(nc, ObjC.sel('removeObserver:'), closing_view)
       ObjC::MSG_VOID_1.call(@window, ObjC.sel('orderOut:'), Fiddle::Pointer.new(0))
 
       if @window_states.empty?
@@ -1145,6 +1160,11 @@ module Echoes
         [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP]
       ) { |_self, _cmd, _notification| gui.activate_for_view(_self); gui.window_focus_changed(false) }
 
+      @window_will_close_closure = Fiddle::Closure::BlockCaller.new(
+        Fiddle::TYPE_VOID,
+        [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP]
+      ) { |_self, _cmd, _notification| gui.window_will_close(_self) }
+
       @view_class = ObjC.define_class('EchoesTerminalView', 'NSView', {
         'drawRect:'             => ['v@:{CGRect=dddd}', @draw_rect_closure],
         'keyDown:'              => ['v@:@', @key_down_closure],
@@ -1167,6 +1187,7 @@ module Echoes
         'setFrameSize:'         => ['v@:{CGSize=dd}', @set_frame_size_closure],
         'windowDidBecomeKey:'   => ['v@:@', @focus_gained_closure],
         'windowDidResignKey:'   => ['v@:@', @focus_lost_closure],
+        'windowWillClose:'      => ['v@:@', @window_will_close_closure],
         'showAbout:'             => ['v@:@', @show_about_closure],
         **profile_selectors,
         'newWindow:'             => ['v@:@', @new_window_closure],
@@ -3049,6 +3070,14 @@ module Echoes
       ObjC::MSG_VOID_4.call(nc, ObjC.sel('addObserver:selector:name:object:'),
         new_view, ObjC.sel('windowDidResignKey:'),
         ObjC.nsstring('NSWindowDidResignKeyNotification'), new_window)
+      ObjC::MSG_VOID_4.call(nc, ObjC.sel('addObserver:selector:name:object:'),
+        new_view, ObjC.sel('windowWillClose:'),
+        ObjC.nsstring('NSWindowWillCloseNotification'), new_window)
+      # The red close button would otherwise release the NSWindow
+      # while @window_states still points at it, and the next timer
+      # tick would message the freed object. Keep it alive; the
+      # windowWillClose: observer does the bookkeeping.
+      ObjC::MSG_VOID_I.call(new_window, ObjC.sel('setReleasedWhenClosed:'), 0)
 
       # Now adopt the new window/view as the active state
       @window = new_window
@@ -4524,6 +4553,14 @@ module Echoes
       ObjC::MSG_VOID_4.call(nc, ObjC.sel('addObserver:selector:name:object:'),
         new_view, ObjC.sel('windowDidResignKey:'),
         ObjC.nsstring('NSWindowDidResignKeyNotification'), new_window)
+      ObjC::MSG_VOID_4.call(nc, ObjC.sel('addObserver:selector:name:object:'),
+        new_view, ObjC.sel('windowWillClose:'),
+        ObjC.nsstring('NSWindowWillCloseNotification'), new_window)
+      # The red close button would otherwise release the NSWindow
+      # while @window_states still points at it, and the next timer
+      # tick would message the freed object. Keep it alive; the
+      # windowWillClose: observer does the bookkeeping.
+      ObjC::MSG_VOID_I.call(new_window, ObjC.sel('setReleasedWhenClosed:'), 0)
 
       @window = new_window
       @view = new_view
