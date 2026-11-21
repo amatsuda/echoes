@@ -1652,3 +1652,35 @@ class Echoes::ParserScrollRegionValidationTest < Test::Unit::TestCase
   end
 end
 
+
+class Echoes::ParserSgrColorFormsTest < Test::Unit::TestCase
+  setup do
+    @screen = Echoes::Screen.new(rows: 5, cols: 20)
+    @parser = Echoes::Parser.new(@screen)
+  end
+
+  test "SGR 58;2;r;g;b (semicolon form) sets the underline colour" do
+    @parser.feed("\e[4m\e[58;2;1;4;7mx")
+    cell = @screen.grid[0][0]
+    assert_equal [1, 4, 7], cell.underline_color
+    assert_equal false, cell.bold
+    assert_equal false, cell.inverse
+    @parser.feed("\e[59my")
+    assert_nil @screen.grid[0][1].underline_color
+  end
+
+  test "SGR 38:2:R:G:B (five colon elements) sets a truecolour foreground" do
+    @parser.feed("\e[38:2:255:0:0mx")
+    assert_equal [255, 0, 0], @screen.grid[0][0].fg
+    @parser.feed("\e[48:2::0:255:0my")
+    assert_equal [0, 255, 0], @screen.grid[0][1].bg
+    @parser.feed("\e[58:2:1:0:128:255mz")
+    assert_equal [0, 128, 255], @screen.grid[0][2].underline_color
+  end
+
+  test "SGR 0 keeps the OSC 8 hyperlink in progress" do
+    @parser.feed("\e]8;;http://x\a\e[0mA\e]8;;\aB")
+    assert_equal 'http://x', @screen.grid[0][0].hyperlink
+    assert_nil @screen.grid[0][1].hyperlink
+  end
+end

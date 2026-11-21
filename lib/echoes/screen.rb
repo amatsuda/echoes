@@ -747,7 +747,11 @@ module Echoes
 
         case p
         when 0, nil
+          # SGR 0 resets rendition, not the OSC 8 link in progress:
+          # `\e]8;;url\a\e[0mtext` is still linked text.
+          link = @attrs.hyperlink
           @attrs.reset!
+          @attrs.hyperlink = link
         when 1
           @attrs.bold = true
         when 2
@@ -803,6 +807,18 @@ module Echoes
           end
         when 49
           @attrs.bg = nil
+        when 58
+          # Underline colour, semicolon form (vim's built-in t_8u
+          # sends `58;2;r;g;b`); the colon form is in apply_sgr_subparams.
+          if params[i + 1] == 2 && params[i + 2] && params[i + 3] && params[i + 4]
+            @attrs.underline_color = [params[i + 2], params[i + 3], params[i + 4]]
+            i += 4
+          elsif params[i + 1] == 5 && params[i + 2]
+            @attrs.underline_color = params[i + 2]
+            i += 2
+          end
+        when 59
+          @attrs.underline_color = nil
         when 90..97
           @attrs.fg = p - 90 + 8
         when 100..107
@@ -1346,21 +1362,15 @@ module Echoes
 
     private
 
-    # Extract R, G, B from sub-params like [38, 2, cs, R, G, B] or [38, 2, R, G, B]
-    # The color space ID (cs) may be nil/empty, so we try both layouts.
-    def extract_rgb_subparams(sub, type_idx)
-      # sub[type_idx] is the type (2 or 5)
-      # Try [_, 2, cs, R, G, B] first (6 elements), then [_, 2, R, G, B] (5 elements)
-      if sub.length >= type_idx + 5 && sub[type_idx + 2] && sub[type_idx + 3] && sub[type_idx + 4]
-        if sub[type_idx + 1].nil?
-          # Color space ID is empty/nil: [38, 2, nil, R, G, B]
-          [sub[type_idx + 2], sub[type_idx + 3], sub[type_idx + 4]]
-        else
-          # No color space ID: [38, 2, R, G, B]
-          [sub[type_idx + 1], sub[type_idx + 2], sub[type_idx + 3]]
-        end
-      elsif sub.length >= type_idx + 4 && sub[type_idx + 1] && sub[type_idx + 2] && sub[type_idx + 3]
-        [sub[type_idx + 1], sub[type_idx + 2], sub[type_idx + 3]]
+    # R, G, B from a colon-form truecolour SGR: [38, 2, R, G, B] (five
+    # elements) or [38, 2, cs, R, G, B] with a colour-space id that is
+    # usually empty (nil). Anything shorter yields nils.
+    def extract_rgb_subparams(sub, _type_idx = nil)
+      rest = sub[2..] || []
+      if rest.length >= 4
+        rest[1, 3]
+      elsif rest.length == 3
+        rest
       else
         [nil, nil, nil]
       end
