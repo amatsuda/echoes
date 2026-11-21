@@ -130,3 +130,16 @@ class Echoes::SixelDecoderHostileInputTest < Test::Unit::TestCase
     assert_equal 3, dec.width
   end
 end
+
+class Echoes::SixelDecoderHlsHueTest < Test::Unit::TestCase
+  def rgb(data)
+    rgba = Echoes::SixelDecoder.new.decode(data.b).to_rgba
+    [rgba.getbyte(0), rgba.getbyte(1), rgba.getbyte(2)]
+  end
+
+  test "DEC HLS hue 0 is blue, 120 red, 240 green" do
+    assert_equal [0, 0, 255], rgb("#0;1;0;50;100@")
+    assert_equal [255, 0, 0], rgb("#0;1;120;50;100@")
+    assert_equal [0, 255, 0], rgb("#0;1;240;50;100@")
+  end
+end

@@ -190,7 +190,9 @@ module Echoes
     end
 
     def hls_to_rgb(h, l, s)
-      hh = h / 360.0
+      # DEC's HLS hue circle starts at blue (0°), with red at 120° and
+      # green at 240°, unlike CSS/HSL where red is 0°.
+      hh = ((h + 240) % 360) / 360.0
       ll = l / 100.0
       ss = s / 100.0
 
