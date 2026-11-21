@@ -279,7 +279,10 @@ module Echoes
     # tests / shutdown.
     def shutdown
       rpc_async('shutdown') rescue nil
-      Process.waitpid(@helper_pid) rescue nil
+      # A helper stuck in a handler, or one that can't read the control
+      # pipe, would otherwise hang the GUI here for good: give it a
+      # second, then escalate, and let a detached waiter reap it.
+      reap_helper(1.0)
       @master.close rescue nil
       @control_write.close rescue nil
       @control_read.close rescue nil
@@ -288,6 +291,22 @@ module Echoes
     end
 
     private
+
+    def reap_helper(grace)
+      deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + grace
+      loop do
+        return if Process.waitpid(@helper_pid, Process::WNOHANG)
+        break if Process.clock_gettime(Process::CLOCK_MONOTONIC) > deadline
+        sleep 0.01
+      end
+      Process.kill(:TERM, @helper_pid) rescue nil
+      sleep 0.05
+      return if Process.waitpid(@helper_pid, Process::WNOHANG)
+      Process.kill(:KILL, @helper_pid) rescue nil
+      Process.detach(@helper_pid)
+    rescue Errno::ECHILD, Errno::ESRCH
+      nil
+    end
 
     # Mirror of Rubish::Lexer::Token's small interface (type/value)
     # over a value object so colorize_input doesn't need to know it
@@ -336,20 +355,13 @@ module Echoes
       queue = Queue.new
       @pending_lock.synchronize { @pending[id] = queue }
       send_request(op, id: id, **args)
-      result = queue.pop_with_timeout(DEFAULT_SYNC_TIMEOUT) if queue.respond_to?(:pop_with_timeout)
-      result = wait_with_timeout(queue, DEFAULT_SYNC_TIMEOUT) if result.nil?
+      result = queue.pop(timeout: DEFAULT_SYNC_TIMEOUT)
+      # A timed-out request's queue would otherwise stay in @pending
+      # for good (and a late reply would be delivered to nobody).
+      @pending_lock.synchronize { @pending.delete(id) } if result.nil?
       result
     rescue Errno::EPIPE, IOError
       nil
-    end
-
-    def wait_with_timeout(queue, timeout)
-      deadline = Time.now + timeout
-      until queue.closed? || queue.size > 0
-        return nil if Time.now > deadline
-        sleep 0.005
-      end
-      queue.pop
     end
 
     def send_request(op, **args)
