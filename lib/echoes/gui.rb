@@ -2039,9 +2039,11 @@ module Echoes
         pane.write_input(seq)
       elsif (flags & ObjC::NSEventModifierFlagControl) != 0 && (ctrl_seq = self.class.control_sequence(chars, flags))
         pane.write_input(ctrl_seq)
-      elsif (flags & ObjC::NSEventModifierFlagOption) != 0
+      elsif (flags & ObjC::NSEventModifierFlagOption) != 0 && self.class.option_is_alt?(flags, Echoes.config.option_as_alt)
         pane.write_input("\e#{chars}")
       else
+        # (An Option key not configured as Alt falls through here and
+        # composes through the input method: Option+e then e → é.)
         # Route through input method for IME support. The event is
         # autoreleased; keep the reference only for the duration of
         # the call, or a doCommandBySelector: arriving later (some
@@ -5113,6 +5115,20 @@ module Echoes
       '8' => "\x7f", '?' => "\x7f",
       "\x7f" => "\x08",   # Ctrl+Backspace
     }.freeze
+
+    # NSEvent's device-dependent bits tell the two Option keys apart.
+    NX_DEVICELALTKEYMASK = 0x20
+    NX_DEVICERALTKEYMASK = 0x40
+
+    def self.option_is_alt?(flags, setting)
+      case setting
+      when :both  then true
+      when :none  then false
+      when :left  then (flags & NX_DEVICELALTKEYMASK) != 0
+      when :right then (flags & NX_DEVICERALTKEYMASK) != 0
+      else true
+      end
+    end
 
     def self.control_sequence(chars, flags)
       return nil if chars.nil? || chars.empty?

@@ -768,3 +768,29 @@ class Echoes::GUIControlKeysTest < Test::Unit::TestCase
     assert_equal "\e\x03", Echoes::GUI.control_sequence('c', CTRL | OPT)
   end
 end
+
+class Echoes::GUIOptionAsAltTest < Test::Unit::TestCase
+  OPT   = Echoes::ObjC::NSEventModifierFlagOption
+  LEFT  = OPT | Echoes::GUI::NX_DEVICELALTKEYMASK
+  RIGHT = OPT | Echoes::GUI::NX_DEVICERALTKEYMASK
+
+  test "option_as_alt picks which Option key sends ESC" do
+    assert Echoes::GUI.option_is_alt?(LEFT, :both)
+    assert Echoes::GUI.option_is_alt?(RIGHT, :both)
+    refute Echoes::GUI.option_is_alt?(LEFT, :none)
+    assert Echoes::GUI.option_is_alt?(LEFT, :left)
+    refute Echoes::GUI.option_is_alt?(RIGHT, :left)
+    assert Echoes::GUI.option_is_alt?(RIGHT, :right)
+    refute Echoes::GUI.option_is_alt?(LEFT, :right)
+  end
+
+  test "the config setting validates its values" do
+    cfg = Echoes::Configuration.new
+    assert_equal :both, cfg.option_as_alt
+    cfg.instance_eval { option_as_alt :left }
+    assert_equal :left, cfg.option_as_alt
+    cfg.instance_eval { option_as_alt false }
+    assert_equal :none, cfg.option_as_alt
+    assert_raise(ArgumentError) { cfg.instance_eval { option_as_alt :middle } }
+  end
+end

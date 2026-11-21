@@ -33,6 +33,15 @@ module Echoes
       # OSC 52 `?` hands the pasteboard to the program that asked; a
       # remote host can ask too, so reads prompt by default.
       @clipboard_read = :ask
+      # Which Option key acts as Meta (ESC prefix) rather than
+      # composing characters the way macOS does (Option+3 = £,
+      # Option+e then e = é). :both keeps the behaviour Echoes always
+      # had; layouts that need Option for @ [ ] { } | \ ~ set :left,
+      # :right or :none.
+      @option_as_alt = :both
+      # Ask before closing a tab, pane or window whose shell still has
+      # a foreground process, and before quitting with any such pane.
+      @confirm_close_running = true
       register_default_profiles
     end
 
@@ -158,6 +167,17 @@ module Echoes
       sym = val.to_sym
       raise ArgumentError, "clipboard_read must be :ask, :allow or :deny, got #{val.inspect}" unless %i[ask allow deny].include?(sym)
       @clipboard_read = sym
+    end
+
+    def option_as_alt(val = nil)
+      return @option_as_alt if val.nil?
+      sym = val == false ? :none : val.to_sym
+      raise ArgumentError, "option_as_alt must be :both, :left, :right or :none, got #{val.inspect}" unless %i[both left right none].include?(sym)
+      @option_as_alt = sym
+    end
+
+    def confirm_close_running(val = nil)
+      val.nil? ? @confirm_close_running : @confirm_close_running = (val ? true : false)
     end
 
     # The only directory OSC 7772 ;capture may write into. nil turns
