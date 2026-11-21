@@ -134,17 +134,7 @@ module Echoes
     end
 
     def self.cwd_from_osc7_uri(uri_str)
-      return nil if uri_str.nil? || uri_str.empty?
-      uri = URI.parse(uri_str) rescue nil
-      return nil unless uri && uri.scheme == 'file'
-      host = uri.host.to_s
-      local_host = Socket.gethostname
-      unless host.empty? || host == 'localhost' ||
-             host == local_host || host == local_host.split('.').first
-        return nil
-      end
-      path = URI.decode_www_form_component(uri.path) rescue nil
-      path if path && !path.empty? && Dir.exist?(path)
+      Pane.cwd_from_osc7_uri(uri_str)
     end
 
     def close_tab(index)

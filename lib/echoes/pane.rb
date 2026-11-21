@@ -1,6 +1,8 @@
 # frozen_string_literal: true
 
 require 'pty'
+require 'uri'
+require 'socket'
 
 module Echoes
   # A Pane is one shell session within a Tab. It owns a Screen (the cell
@@ -101,6 +103,26 @@ module Echoes
 
     def embedded?
       !@embedded_shell.nil?
+    end
+
+    # The directory the shell last announced via OSC 7, as a local
+    # path, or nil when it hasn't, or the URI points elsewhere.
+    def local_cwd
+      self.class.cwd_from_osc7_uri(@screen.current_directory)
+    end
+
+    def self.cwd_from_osc7_uri(uri_str)
+      return nil if uri_str.nil? || uri_str.empty?
+      uri = URI.parse(uri_str) rescue nil
+      return nil unless uri && uri.scheme == 'file'
+      host = uri.host.to_s
+      local_host = Socket.gethostname
+      unless host.empty? || host == 'localhost' ||
+             host == local_host || host == local_host.split('.').first
+        return nil
+      end
+      path = URI.decode_www_form_component(uri.path) rescue nil
+      path if path && !path.empty? && Dir.exist?(path)
     end
 
     def editor?

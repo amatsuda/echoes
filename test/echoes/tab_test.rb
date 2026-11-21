@@ -176,3 +176,28 @@ class Echoes::TabTest < Test::Unit::TestCase
     end
   end
 end
+
+class Echoes::TabSplitInheritanceTest < Test::Unit::TestCase
+  test "a split of a program tab runs the default shell, not the program again" do
+    tab = Echoes::Tab.new(command: ["/bin/cat", "-n"], rows: 10, cols: 40)
+    new_pane = tab.split_vertical
+    assert_equal File.basename(Echoes.config.shell), new_pane.title
+    tab.close
+  end
+
+  test "a split inherits the tab's env" do
+    tab = Echoes::Tab.new(command: ["/bin/sh", "-c", "echo $ECHOES_SPLIT_TEST; sleep 5"],
+                          rows: 10, cols: 40, env: ENV.to_h.merge('ECHOES_SPLIT_TEST' => 'inherited'))
+    tab.split_vertical
+    tab.panes.last.write_input("echo $ECHOES_SPLIT_TEST\rexit\r")
+    out = +''
+    deadline = Time.now + 5
+    while Time.now < deadline && !out.include?('inherited')
+      tab.panes.last.flush_outbox
+      out << tab.panes.last.read_available_output
+      sleep 0.05
+    end
+    assert_includes out, 'inherited'
+    tab.close
+  end
+end

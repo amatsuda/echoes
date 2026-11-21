@@ -10,6 +10,7 @@ module Echoes
       @rows = rows
       @cols = cols
       @embedded = embedded
+      @env = env
       pane = Pane.new(command: command, rows: rows, cols: cols, cwd: cwd,
                       embedded: embedded, editor_file: editor_file, env: env)
       @pane_tree = PaneTree.new(pane)
@@ -150,8 +151,15 @@ module Echoes
 
     private
 
+    # A split starts like the tab did (embedded rubish stays rubish,
+    # an explicit env is inherited) in the active pane's directory.
+    # A tab that runs a specific program (an argv Array, from
+    # ;open-window) splits into the default shell rather than a
+    # second copy of that program.
     def create_pane
-      Pane.new(command: @command, rows: @rows, cols: @cols)
+      command = @command.is_a?(Array) ? Echoes.config.shell : @command
+      Pane.new(command: command, rows: @rows, cols: @cols,
+               cwd: active_pane.local_cwd, embedded: @embedded, env: @env)
     end
 
     def resize_panes
