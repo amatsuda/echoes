@@ -1350,3 +1350,15 @@ class Echoes::ScreenHostileCountsTest < Test::Unit::TestCase
     assert_equal 'A', @screen.grid[@screen.cursor.row][@screen.cursor.col - 1].char
   end
 end
+
+class Echoes::ScreenCombiningFloodTest < Test::Unit::TestCase
+  test "a flood of combining marks is capped per cell and returns promptly" do
+    screen = Echoes::Screen.new(rows: 5, cols: 10)
+    screen.put_char('a')
+    t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+    50_000.times { screen.put_char("́") }
+    assert_operator Process.clock_gettime(Process::CLOCK_MONOTONIC) - t0, :<, 0.5
+    assert_operator screen.grid[0][0].char.length, :<=, Echoes::Screen::MAX_COMBINING_MARKS + 1
+    assert_equal "á", screen.grid[0][0].char[0, 2]
+  end
+end

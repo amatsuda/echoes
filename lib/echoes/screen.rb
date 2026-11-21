@@ -100,6 +100,8 @@ module Echoes
       @current_command_mark = nil
     end
 
+    MAX_COMBINING_MARKS = 16
+
     DEC_SPECIAL = {
       '`' => "\u{25C6}", 'a' => "\u{2592}", 'b' => "\u{2409}", 'c' => "\u{240C}",
       'd' => "\u{240D}", 'e' => "\u{240A}", 'f' => "\u{00B0}", 'g' => "\u{00B1}",
@@ -138,8 +140,14 @@ module Echoes
       if combining?(c)
         col = @pending_wrap ? @cursor.col : [0, @cursor.col - 1].max
         col -= 1 if col > 0 && @grid[@cursor.row][col].width == 0
-        @grid[@cursor.row][col].char += c
-        @last_char = @grid[@cursor.row][col].char
+        cell = @grid[@cursor.row][col]
+        # Each mark re-copies the cell's string, and the renderer
+        # shapes the whole thing every frame, so past a handful
+        # (Zalgo is about 10 per base) the rest are dropped rather
+        # than letting a stream of U+0301 build a megabyte cell.
+        return if cell.char.length > MAX_COMBINING_MARKS
+        cell.char += c
+        @last_char = cell.char
         return
       end
 
