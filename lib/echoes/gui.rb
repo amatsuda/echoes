@@ -3276,7 +3276,7 @@ module Echoes
       ns_str = ObjC::MSG_PTR_1.call(pb, ObjC.sel('stringForType:'), ObjC::NSPasteboardTypeString)
       return if ns_str.null?
 
-      str = ObjC.to_ruby_string(ns_str)
+      str = self.class.sanitize_paste(ObjC.to_ruby_string(ns_str))
       return if str.empty?
 
       pane = current_tab.active_pane
@@ -3288,6 +3288,18 @@ module Echoes
         pane.write_input(str)
       end
     rescue Errno::EIO, IOError
+    end
+
+    # Pasted text goes to the child as if typed, so control bytes in
+    # it act as keystrokes. Drop everything but tab and the line
+    # ending (ESC in particular: a clipboard holding `\e[201~` would
+    # end bracketed paste early and run what follows), and send each
+    # newline as CR, which is what the Return key sends.
+    def self.sanitize_paste(str)
+      str.gsub("\r\n", "\r").tr("\n", "\r")
+         .gsub(/\e\[[\x30-\x3F]*[\x20-\x2F]*[\x40-\x7E]/, '')   # whole CSI sequences
+         .gsub(/\e\][^\a\e]*(?:\a|\e\\)?/, '')                    # whole OSC sequences
+         .gsub(/[\x00-\x08\x0A-\x0C\x0E-\x1F\x7F\u0080-\u009F]/, '')
     end
 
     # Re-blit one Screen#placements entry. Pixel coords are
