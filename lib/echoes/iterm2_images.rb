@@ -159,6 +159,15 @@ module Echoes
                           natural_px: image[:height],
                           cell_px:    cell_h_px,
                           screen_size: screen.rows)
+      # iTerm2's default preserveAspectRatio=1: with only one
+      # dimension given, derive the other from the image's own
+      # proportions instead of letting the renderer fall back to
+      # the natural pixel size and stretch the image.
+      if cells_w && !cells_h && image[:width].to_i > 0 && cell_h_px > 0
+        cells_h = [(cells_w * cell_w_px * image[:height] / image[:width].to_f / cell_h_px).ceil, 1].max
+      elsif cells_h && !cells_w && image[:height].to_i > 0 && cell_w_px > 0
+        cells_w = [(cells_h * cell_h_px * image[:width] / image[:height].to_f / cell_w_px).ceil, 1].max
+      end
       [cells_w, cells_h]
     end
 

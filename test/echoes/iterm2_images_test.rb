@@ -320,3 +320,25 @@ class Echoes::Iterm2ImagesInfiniteDimensionTest < Test::Unit::TestCase
     assert_equal 100, Echoes::Iterm2Images.svg_dim_to_pixels('100px', 8.0, 80)
   end
 end
+
+class Echoes::Iterm2ImagesAspectTest < Test::Unit::TestCase
+  def screen
+    Echoes::Iterm2ImagesTest::StubScreen.new   # 8x16 px cells
+  end
+
+  test "width alone derives the height from the image's aspect ratio" do
+    image = { width: 400, height: 200 }
+    assert_equal [20, 5], Echoes::Iterm2Images.compute_cell_dimensions({ 'width' => '20' }, image, screen)
+  end
+
+  test "height alone derives the width" do
+    image = { width: 400, height: 200 }
+    assert_equal [20, 5], Echoes::Iterm2Images.compute_cell_dimensions({ 'height' => '5' }, image, screen)
+  end
+
+  test "both given are kept as given; neither leaves both nil" do
+    image = { width: 400, height: 200 }
+    assert_equal [10, 10], Echoes::Iterm2Images.compute_cell_dimensions({ 'width' => '10', 'height' => '10' }, image, screen)
+    assert_equal [nil, nil], Echoes::Iterm2Images.compute_cell_dimensions({}, image, screen)
+  end
+end
