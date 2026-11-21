@@ -744,3 +744,54 @@ class Echoes::KittyGraphicsDecodeBombsTest < Test::Unit::TestCase
     refute ok.dimensions_ok?(10, -1)
   end
 end
+
+class Echoes::KittyGraphicsChunkingTest < Test::Unit::TestCase
+  def setup
+    @state  = {chunks: {}, cache: {}}
+    @screen = Echoes::KittyGraphicsTest::StubScreen.new
+    @writes = []
+    @writer = ->(s) { @writes << s }
+  end
+
+  def b64(s) = [s].pack('m0')
+
+  test "continuation chunks that carry only m= complete the transmission in flight" do
+    Echoes::KittyGraphics.stub_decoder("ABCDEF" => {rgba: 'X', width: 1, height: 1}) do
+      full = b64("ABCDEF")   # the client base64s the whole image, then slices the string
+      Echoes::KittyGraphics.handle_chunk(@state, "a=T,f=100,i=5,m=1", full[0, 3], screen: @screen, writer: @writer)
+      Echoes::KittyGraphics.handle_chunk(@state, "m=1", full[3, 3], screen: @screen, writer: @writer)
+      Echoes::KittyGraphics.handle_chunk(@state, "m=0", full[6..], screen: @screen, writer: @writer)
+    end
+    assert_equal 1, @screen.images.size
+    assert_empty @state[:chunks]
+    assert_includes @writes.last, 'i=5'
+  end
+
+  test "an oversized transmission is dropped rather than left wedged" do
+    big = 'x' * (Echoes::KittyGraphics::CHUNK_LIMIT_BYTES - 10)
+    Echoes::KittyGraphics.handle_chunk(@state, "a=T,f=100,i=6,m=1", big, screen: @screen, writer: @writer)
+    Echoes::KittyGraphics.handle_chunk(@state, "m=1", 'y' * 100, screen: @screen, writer: @writer)
+    assert_empty @state[:chunks]
+    Echoes::KittyGraphics.stub_decoder("OK" => {rgba: 'X', width: 1, height: 1}) do
+      Echoes::KittyGraphics.handle_chunk(@state, "a=T,f=100,i=6", b64("OK"), screen: @screen, writer: @writer)
+    end
+    assert_equal 1, @screen.images.size
+  end
+
+  test "abandoned transmissions are capped" do
+    10.times do |i|
+      Echoes::KittyGraphics.handle_chunk(@state, "a=T,f=100,i=#{i + 1},m=1", b64("x"), screen: @screen, writer: @writer)
+    end
+    assert_operator @state[:chunks].size, :<=, Echoes::KittyGraphics::INFLIGHT_LIMIT
+  end
+
+  test "the image cache is bounded by decoded bytes" do
+    budget = Echoes::KittyGraphics::CACHE_BUDGET_BYTES
+    3.times do |i|
+      Echoes::KittyGraphics.cache_image(@state, "big#{i}", {rgba: nil, width: 8192, height: 8192})  # 256 MB each
+    end
+    total = @state[:cache].sum { |_, img| Echoes::KittyGraphics.image_bytes(img) }
+    assert_operator total, :<=, budget
+    assert_equal ['big2'], @state[:cache].keys
+  end
+end

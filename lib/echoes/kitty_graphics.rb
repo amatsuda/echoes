@@ -20,6 +20,7 @@ module Echoes
   # so chunks from different panes don't collide.
   module KittyGraphics
     CHUNK_LIMIT_BYTES = 16 * 1024 * 1024
+    INFLIGHT_LIMIT    = 4
     # Most-recent N images, LRU. Slide-deck tooling (przn) uploads one
     # image per shape primitive (`<rect>`, `<line>`, etc.) plus regular
     # `<img>` tags, so a single slide easily crosses double digits. 16
@@ -51,15 +52,26 @@ module Echoes
     # chunks are still expected.
     def assemble_chunk(state, meta, payload)
       opts = parse_options(meta)
-      id   = opts['i'] || opts['I'] || ''
       more = opts['m'] == '1'
+      # Per the spec, chunks after the first carry only m= (and q=),
+      # so an id-less chunk continues the transmission in flight
+      # rather than starting a fresh "" one that never completes.
+      id = opts['i'] || opts['I']
+      id = state[:inflight] if id.nil? && state[:inflight] && state[:chunks].key?(state[:inflight])
+      id ||= ''
 
       buf = state[:chunks][id]
       if buf
         # Subsequent chunk: append payload, update saved-options
         # only with newly-seen non-id keys (Kitty's spec: only `m`
         # / `q` / `S` / size differ across chunks).
-        return nil if buf[1].bytesize + payload.bytesize > CHUNK_LIMIT_BYTES
+        if buf[1].bytesize + payload.bytesize > CHUNK_LIMIT_BYTES
+          # Oversized: forget the whole transmission instead of
+          # leaving a wedged buffer behind for this id.
+          state[:chunks].delete(id)
+          state[:inflight] = nil if state[:inflight] == id
+          return nil
+        end
         buf[0]['m'] = opts['m'] if opts.key?('m')
         buf[0]['q'] = opts['q'] if opts.key?('q')
         buf[1] << payload
@@ -69,11 +81,18 @@ module Echoes
         buf = [opts, +"".b]
         buf[1] << payload
         state[:chunks][id] = buf
+        # A sender that never finishes its transmissions must not
+        # accumulate 16 MB buffers without bound.
+        state[:chunks].shift while state[:chunks].size > INFLIGHT_LIMIT
       end
 
-      return nil if more
+      if more
+        state[:inflight] = id
+        return nil
+      end
 
       state[:chunks].delete(id)
+      state[:inflight] = nil if state[:inflight] == id
       [buf[0], buf[1]]
     end
 
@@ -371,11 +390,25 @@ module Echoes
       require_relative 'kitty_graphics_appkit'
     end
 
+    # The cache is bounded by decoded bytes as well as by count: 128
+    # entries of 4096x4096 RGBA would be 8 GB.
+    CACHE_BUDGET_BYTES = 256 * 1024 * 1024
+
+    def image_bytes(image)
+      return image[:rgba].bytesize if image[:rgba]
+      image[:width].to_i * image[:height].to_i * 4
+    end
+
     def cache_image(state, id, image)
       return if id.empty?
       state[:cache].delete(id)         # touch (LRU)
       state[:cache][id] = image
       state[:cache].shift while state[:cache].size > CACHE_LIMIT
+      total = state[:cache].sum { |_, img| image_bytes(img) }
+      while total > CACHE_BUDGET_BYTES && state[:cache].size > 1
+        _, evicted = state[:cache].shift
+        total -= image_bytes(evicted)
+      end
     end
 
     def display_image(screen, image, opts)
