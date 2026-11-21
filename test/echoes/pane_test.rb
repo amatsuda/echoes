@@ -92,3 +92,51 @@ class Echoes::PaneTest < Test::Unit::TestCase
     assert_equal("hello", output)
   end
 end
+
+class Echoes::PaneLifecycleTest < Test::Unit::TestCase
+  def wait_until(seconds)
+    deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + seconds
+    until yield
+      return false if Process.clock_gettime(Process::CLOCK_MONOTONIC) > deadline
+      sleep 0.02
+    end
+    true
+  end
+
+  def process_gone?(pid)
+    !system("ps", "-p", pid.to_s, out: File::NULL, err: File::NULL)
+  end
+
+  test "close reaps the child instead of leaving a zombie" do
+    pane = Echoes::Pane.new(command: "/bin/sleep 30", rows: 5, cols: 10)
+    pid = pane.pty_pid
+    pane.close
+    # Without reaping, `ps` keeps listing the HUP'd child as <defunct>.
+    assert wait_until(3) { process_gone?(pid) }, "pid #{pid} is still around (zombie?)"
+  end
+
+  test "close after the child was already reaped does nothing" do
+    pane = Echoes::Pane.new(command: "/usr/bin/true", rows: 5, cols: 10)
+    assert wait_until(3) { !pane.alive? }
+    assert_nothing_raised { pane.close }
+    refute pane.alive?
+  end
+
+  test "write_input never blocks when the other side isn't reading" do
+    pane = Echoes::Pane.allocate
+    reader, writer = IO.pipe
+    pane.pty_write = writer
+    big = "x" * (2 * 1024 * 1024)
+    t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+    pane.write_input(big)
+    assert_operator Process.clock_gettime(Process::CLOCK_MONOTONIC) - t0, :<, 1.0
+    assert_operator pane.pending_input_bytes, :>, 0
+
+    received = +''
+    drain = Thread.new { received << reader.read(big.bytesize) }
+    assert wait_until(5) { pane.flush_outbox; pane.pending_input_bytes.zero? }
+    writer.close
+    drain.join
+    assert_equal big, received
+  end
+end

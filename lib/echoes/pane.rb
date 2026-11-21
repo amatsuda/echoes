@@ -113,8 +113,34 @@ module Echoes
       if embedded?
         # phase-1 stub: no per-keystroke routing yet
       else
-        @pty_write.write(bytes) rescue nil
+        enqueue_input(bytes)
       end
+    end
+
+    # Bytes for the pty go through an outbox and write_nonblock. A
+    # blocking write would stall the main thread whenever the child
+    # isn't reading (a large paste into `cat` or vim: the echo fills
+    # the master's buffer, the child blocks writing it, the pty input
+    # queue fills, and both sides wait forever). Whatever doesn't fit
+    # now is flushed from the timer tick.
+    def enqueue_input(bytes)
+      (@outbox ||= +''.b) << bytes.b
+      flush_outbox
+    end
+
+    def flush_outbox
+      return if @outbox.nil? || @outbox.empty? || @pty_write.nil?
+      until @outbox.empty?
+        n = @pty_write.write_nonblock(@outbox, exception: false)
+        break if n == :wait_writable || n.nil? || n <= 0
+        @outbox.bytesplice(0, n, ''.b)
+      end
+    rescue Errno::EIO, Errno::EPIPE, IOError
+      @outbox.clear
+    end
+
+    def pending_input_bytes
+      @outbox ? @outbox.bytesize : 0
     end
 
     # Submit a complete line of input. PTY mode writes the line plus CR;
@@ -126,7 +152,7 @@ module Echoes
                                      px_width:  pty_pixel_width(@screen.cols),
                                      px_height: pty_pixel_height(@screen.rows))
       else
-        @pty_write.write("#{line}\r") rescue nil
+        enqueue_input("#{line}\r")
       end
     end
 
@@ -168,9 +194,12 @@ module Echoes
       if embedded?
         @embedded_shell.alive?
       else
-        Process.waitpid(@pty_pid, Process::WNOHANG).nil?
+        return false if @reaped
+        @reaped = !Process.waitpid(@pty_pid, Process::WNOHANG).nil?
+        !@reaped
       end
     rescue Errno::ECHILD
+      @reaped = true
       false
     end
 
@@ -216,7 +245,14 @@ module Echoes
       end
       @pty_write.close rescue nil
       @pty_read.close rescue nil
+      # Once closed, nothing calls alive? on this pane again, so the
+      # child would sit as a zombie until Echoes exits. Hand the
+      # reaping to a detached waiter. A pid alive? already reaped is
+      # left alone: the number may belong to a new process by now.
+      return if @reaped
       Process.kill(:HUP, @pty_pid) rescue nil
+      Process.detach(@pty_pid) rescue nil
+      @reaped = true
     end
 
     def process_output(data)

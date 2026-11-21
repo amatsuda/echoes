@@ -2276,6 +2276,7 @@ module Echoes
 
       @tabs.each do |tab|
         tab.panes.each do |pane|
+          pane.flush_outbox
           loop do
             data = pane.read_available_output(16384)
             break if data.empty?
