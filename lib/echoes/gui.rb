@@ -2500,14 +2500,27 @@ module Echoes
     def mouse_down(event_ptr)
       tab = current_tab
       return unless tab
-      pos = grid_position(event_ptr)
       click_count = ObjC::MSG_RET_L.call(event_ptr, ObjC.sel('clickCount'))
-
       flags = ObjC::MSG_RET_L.call(event_ptr, ObjC.sel('modifierFlags'))
 
+      # A click lands in whichever pane is under it; make that pane
+      # active first so the rest of the gesture (selection, mouse
+      # reports, Cmd+click) addresses its buffer, not the previously
+      # active pane's.
+      click_x, click_y_in_window = event_location(event_ptr)
+      click_y = view_frame_height - click_y_in_window
+      if (hit = pane_at_point(tab, click_x, click_y)) && hit != tab.active_pane
+        tab.pane_tree.active_pane = hit
+        @selection_anchor = nil
+        @selection_end = nil
+        @selection_word_anchor = nil
+      end
+      pos = grid_position(event_ptr)
+
       if pos.nil?
-        # Click in tab bar
-        click_x, click_y = event_location(event_ptr)
+        # Outside the grid: only the tab bar reacts (the strip below
+        # the last row used to switch tabs too).
+        return unless in_tab_bar?(click_y)
         tab_w = (@cell_width * @cols) / @tabs.size
         clicked_tab = (click_x / tab_w).to_i.clamp(0, @tabs.size - 1)
         @active_tab = clicked_tab
@@ -2604,18 +2617,19 @@ module Echoes
       # rather than just freezing the selection. Only active while a
       # selection drag is in progress.
       if @selection_anchor && !@selection_word_anchor &&
-         tab.screen.mouse_tracking == :off
+         tab.screen.mouse_tracking == :off && (rect = pane_rect_for(tab, tab.active_pane))
         x, y_in_window = event_location(event_ptr)
         y      = view_frame_height - y_in_window
-        gy_off = grid_y_offset
-        grid_y = y - gy_off
-        col    = (x / @cell_width).to_i.clamp(0, @cols - 1)
-        if grid_y < 0
+        # Relative to the active pane's rect, so dragging out of the
+        # top of a bottom split scrolls that pane's history.
+        pane_y = y - grid_y_offset - rect[:y] * @cell_height
+        col    = ((x / @cell_width).to_i - rect[:x]).clamp(0, rect[:w] - 1)
+        if pane_y < 0
           @auto_scroll_direction = :up
           @auto_scroll_col       = col
           apply_auto_scroll_selection(tab)
           return
-        elsif grid_y >= @rows * @cell_height
+        elsif pane_y >= rect[:h] * @cell_height
           @auto_scroll_direction = :down
           @auto_scroll_col       = col
           apply_auto_scroll_selection(tab)
@@ -2647,7 +2661,7 @@ module Echoes
     private def apply_auto_scroll_selection(tab)
       screen = tab.screen
       scrollback_size = screen.scrollback.size
-      visible_row = @auto_scroll_direction == :up ? 0 : (@rows - 1)
+      visible_row = @auto_scroll_direction == :up ? 0 : (screen.rows - 1)
       abs_row = scrollback_size - tab.scroll_offset + visible_row
       @selection_end = [abs_row, @auto_scroll_col || 0]
       ObjC::MSG_VOID_I.call(@view, ObjC.sel('setNeedsDisplay:'), 1)
@@ -3752,21 +3766,55 @@ module Echoes
       image
     end
 
+    # The active pane's [absolute row, column] under the pointer, or
+    # nil outside the grid. Coordinates are pane-local: in a split,
+    # window column 50 is column 10 of a pane that starts at column
+    # 40, and the row is counted in that pane's scrollback.
     def grid_position(event_ptr)
-      x, y_in_window = event_location(event_ptr)
-      y = view_frame_height - y_in_window
-      gy_off = grid_y_offset
-      grid_y = y - gy_off
-      return nil if grid_y < 0 || grid_y >= @rows * @cell_height
-
-      visible_row = (grid_y / @cell_height).to_i.clamp(0, @rows - 1)
-      col = (x / @cell_width).to_i.clamp(0, @cols - 1)
-      # Return absolute row (scrollback + grid index)
       tab = current_tab
       return nil unless tab
-      scrollback_size = tab.screen.scrollback.size
-      abs_row = scrollback_size - tab.scroll_offset + visible_row
+      x, y_in_window = event_location(event_ptr)
+      position_in_active_pane(tab, x, view_frame_height - y_in_window)
+    end
+
+    # Pure counterpart of grid_position: `x`/`y` are view points with
+    # y measured from the top.
+    def position_in_active_pane(tab, x, y)
+      rect = pane_rect_for(tab, tab.active_pane)
+      return nil unless rect
+      grid_y = y - grid_y_offset
+      return nil if grid_y < 0 || grid_y >= @rows * @cell_height
+
+      local_col = (x / @cell_width).to_i - rect[:x]
+      local_row = (grid_y / @cell_height).to_i - rect[:y]
+      col = local_col.clamp(0, rect[:w] - 1)
+      visible_row = local_row.clamp(0, rect[:h] - 1)
+      pane = tab.active_pane
+      abs_row = pane.screen.scrollback.size - pane.scroll_offset + visible_row
       [abs_row, col]
+    end
+
+    # The pane whose cell rect contains view point (x, y), or nil in
+    # the tab bar / outside the grid.
+    def pane_at_point(tab, x, y)
+      grid_y = y - grid_y_offset
+      return nil if grid_y < 0 || grid_y >= @rows * @cell_height
+      col = (x / @cell_width).to_i
+      row = (grid_y / @cell_height).to_i
+      rect = tab.pane_tree.layout(0, 0, @cols, @rows).find do |r|
+        col >= r[:x] && col < r[:x] + r[:w] && row >= r[:y] && row < r[:y] + r[:h]
+      end
+      rect && rect[:pane]
+    end
+
+    def pane_rect_for(tab, pane)
+      tab.pane_tree.layout(0, 0, @cols, @rows).find { |r| r[:pane] == pane }
+    end
+
+    # Whether view point y (from the top) falls on the tab bar.
+    def in_tab_bar?(y)
+      tbh = tab_bar_height
+      tbh > 0 && y >= tab_bar_y && y < tab_bar_y + tbh
     end
 
     def selection_range
@@ -4073,7 +4121,7 @@ module Echoes
         next unless row
 
         from = (abs_row == sr) ? sc : 0
-        to = (abs_row == er) ? ec : @cols - 1
+        to = (abs_row == er) ? ec : screen.cols - 1
         # Skip cells that are placeholders for a multi-cell character —
         # the second half of a wide CJK/emoji glyph (width == 0) and
         # OSC 66 continuation cells (multicell == :cont). Their `char`

@@ -693,3 +693,42 @@ class Echoes::GUIAbsoluteRowShiftTest < Test::Unit::TestCase
     refute gui.send(:search_match_at?, 5, 0)
   end
 end
+
+class Echoes::GUIPaneHitTestingTest < Test::Unit::TestCase
+  # A GUI with geometry but no window: 10x20 px cells, 80x24 grid,
+  # one tab (so no tab bar) split left/right.
+  def setup
+    @gui = Echoes::GUI.allocate
+    @gui.instance_variable_set(:@cell_width, 10.0)
+    @gui.instance_variable_set(:@cell_height, 20.0)
+    @gui.instance_variable_set(:@cols, 80)
+    @gui.instance_variable_set(:@rows, 24)
+    @tab = Echoes::Tab.new(command: "/bin/cat", rows: 24, cols: 80)
+    @tab.split_vertical
+    @gui.instance_variable_set(:@tabs, [@tab])
+    @left, @right = @tab.panes
+  end
+
+  def teardown
+    @tab.close
+  end
+
+  test "pane_at_point finds the pane under a view point" do
+    assert_equal @left,  @gui.send(:pane_at_point, @tab, 5.0, 5.0)
+    assert_equal @right, @gui.send(:pane_at_point, @tab, 500.0, 5.0)
+    assert_nil @gui.send(:pane_at_point, @tab, 500.0, 24 * 20.0 + 1)   # below the grid
+  end
+
+  test "position_in_active_pane is pane-local" do
+    @tab.pane_tree.active_pane = @right
+    abs_row, col = @gui.send(:position_in_active_pane, @tab, 500.0, 45.0)
+    assert_equal 10, col            # window column 50, pane starts at 40
+    assert_equal 2, abs_row         # row 2, empty scrollback
+    @tab.pane_tree.active_pane = @left
+    assert_equal [2, 39], @gui.send(:position_in_active_pane, @tab, 500.0, 45.0)  # clamped to the left pane
+  end
+
+  test "the strip below the grid is not the tab bar" do
+    refute @gui.send(:in_tab_bar?, 24 * 20.0 + 1)
+  end
+end
