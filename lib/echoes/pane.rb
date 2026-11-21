@@ -28,7 +28,7 @@ module Echoes
         @title = File.basename(editor_file)
       elsif embedded
         require_relative 'embedded_shell'
-        @embedded_shell = EmbeddedShell.new(no_rc: no_rc)
+        @embedded_shell = EmbeddedShell.new(no_rc: no_rc, cwd: cwd)
         # Writer routes OSC replies (display-info, OSC 52 paste-back,
         # color queries, terminfo replies, …) to the helper's pty
         # master so the foreground program reads them on its stdin.

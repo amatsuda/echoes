@@ -37,7 +37,7 @@ module Echoes
     # …) and history file restore in the helper. Tests pass true so the
     # subprocess starts from a known-clean environment; production
     # callers leave it false so the user's config takes effect.
-    def initialize(no_rc: false)
+    def initialize(no_rc: false, cwd: nil)
       # These go to the helper only (see helper_env below), never into
       # the GUI's own ENV, or every later pty pane would inherit
       # PAGER=cat as well.
@@ -84,7 +84,12 @@ module Echoes
         in: slave, out: slave, err: slave,
         3 => ctl_in_r, 4 => ctl_out_w,
         close_others: true,
+        # A new embedded tab starts where the active pane is (its OSC 7
+        # directory), like a pty tab does, instead of in the GUI
+        # process's cwd.
+        **((cwd && Dir.exist?(cwd)) ? { chdir: cwd } : {}),
       )
+      @last_cwd = (cwd && Dir.exist?(cwd)) ? cwd : @last_cwd
       slave.close
       ctl_in_r.close
       ctl_out_w.close
