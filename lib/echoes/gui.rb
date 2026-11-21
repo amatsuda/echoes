@@ -275,6 +275,9 @@ module Echoes
       ws[:current_event] = @current_event
       ws[:selection_anchor] = @selection_anchor
       ws[:selection_end] = @selection_end
+      ws[:selection_word_anchor] = @selection_word_anchor
+      ws[:search_regex_mode] = @search_regex_mode
+      ws[:search_case_insensitive] = @search_case_insensitive
       ws[:drag_start_tab_index] = @drag_start_tab_index
       ws[:drag_start_point] = @drag_start_point
       ws[:drag_insertion_index] = @drag_insertion_index
@@ -315,6 +318,9 @@ module Echoes
       @current_event = ws[:current_event]
       @selection_anchor = ws[:selection_anchor]
       @selection_end = ws[:selection_end]
+      @selection_word_anchor = ws[:selection_word_anchor]
+      @search_regex_mode = ws[:search_regex_mode] || false
+      @search_case_insensitive = ws[:search_case_insensitive] || false
       @drag_start_tab_index = ws[:drag_start_tab_index]
       @drag_start_point     = ws[:drag_start_point]
       @drag_insertion_index = ws[:drag_insertion_index]
