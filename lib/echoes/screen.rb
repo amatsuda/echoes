@@ -947,6 +947,15 @@ module Echoes
     end
 
     attr_accessor :mouse_tracking, :mouse_encoding, :insert_mode, :active_charset, :application_keypad, :cursor_style, :bell, :single_shift, :sync_active
+    # DECSET 1007 (alternate scroll): on the alternate screen with no
+    # mouse tracking, wheel events become cursor-key presses so less,
+    # man and the like page instead of the terminal scrolling history
+    # that isn't visible. On by default, as in kitty and iTerm2.
+    attr_writer :alternate_scroll
+
+    def alternate_scroll?
+      @alternate_scroll.nil? ? true : @alternate_scroll
+    end
 
     # xterm keeps ten; a program looping on `\e[22;0t` would otherwise
     # grow this without bound.

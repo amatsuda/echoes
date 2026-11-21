@@ -1762,3 +1762,15 @@ class Echoes::ParserStringOverflowTest < Test::Unit::TestCase
     assert_equal Echoes::Parser::BG_FILLS_LIMIT, screen.bg_fills.size
   end
 end
+
+class Echoes::ParserAlternateScrollTest < Test::Unit::TestCase
+  test "mode 1007 toggles alternate scroll, which defaults to on" do
+    screen = Echoes::Screen.new(rows: 5, cols: 10)
+    parser = Echoes::Parser.new(screen)
+    assert screen.alternate_scroll?
+    parser.feed("\e[?1007l")
+    refute screen.alternate_scroll?
+    parser.feed("\e[?1007h")
+    assert screen.alternate_scroll?
+  end
+end

@@ -2565,6 +2565,15 @@ module Echoes
 
       if tab.scroll_accum.abs >= 1.0
         lines = tab.scroll_accum.to_i
+        if screen.using_alt_screen? && screen.alternate_scroll?
+          # Alternate scroll: the wheel pages the program (less, man,
+          # vim without mouse) instead of showing main-screen history.
+          key = lines > 0 ? 'A' : 'B'
+          seq = screen.application_cursor_keys? ? "\eO#{key}" : "\e[#{key}"
+          tab.write_input(seq * lines.abs)
+          tab.scroll_accum -= lines
+          return
+        end
         tab.scroll_offset += lines
         tab.scroll_offset = tab.scroll_offset.clamp(0, tab.screen.scrollback.size)
         tab.scroll_accum -= lines
