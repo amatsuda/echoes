@@ -1280,19 +1280,26 @@ module Echoes
       mark_all_dirty
     end
 
+    # RIS (`ESC c`): everything DECSTR resets, plus the modes a crashed
+    # TUI typically leaves behind. `reset(1)` after such a crash used
+    # to keep mouse reporting, synchronized output (so the view never
+    # repainted again), the alternate screen and the keypad modes.
     def reset
+      switch_to_main_screen
+      soft_reset
       @cursor = Cursor.new
-      @attrs = Cell.new
       @grid = Array.new(@rows) { Array.new(@cols) { Cell.new } }
       @line_wrapped = Array.new(@rows, false)
-      @scroll_top = 0
-      @scroll_bottom = @rows - 1
-      @saved_cursor = nil
       @scrollback = []
       @scrollback_wrapped = []
-      @tab_stops = default_tab_stops
-      @pending_wrap = false
-      @placements = []
+      @mouse_tracking = :off
+      @mouse_encoding = :default
+      @application_keypad = false
+      @title_stack.clear
+      @command_marks.clear
+      @bg_fills.clear
+      @background = nil
+      dispose_placements!
       mark_all_dirty
     end
 

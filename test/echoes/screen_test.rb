@@ -1385,3 +1385,29 @@ class Echoes::ScreenRestoreAfterResizeTest < Test::Unit::TestCase
     assert_equal 'y', screen.grid[4][4].char
   end
 end
+
+class Echoes::ScreenRisTest < Test::Unit::TestCase
+  test "ESC c resets the modes a crashed TUI leaves behind" do
+    screen = Echoes::Screen.new(rows: 5, cols: 10)
+    disposed = []
+    screen.placement_disposer = ->(p) { disposed << p }
+    parser = Echoes::Parser.new(screen)
+    parser.feed("\e]0;t\a\e[22;0t")                       # push a title
+    parser.feed("\e[?1000h\e[?1006h\e[?2026h\e[?7l\e[?2004h\e[?1049h\e=")
+    screen.placements << { image: {}, anchor_row: 0, anchor_col: 0, cell_rows: 1, cell_cols: 1 }
+    assert screen.using_alt_screen?
+    parser.feed("\ec")
+    refute screen.using_alt_screen?
+    assert_equal :off, screen.mouse_tracking
+    assert_equal :default, screen.mouse_encoding
+    refute screen.sync_active
+    assert screen.auto_wrap?
+    refute screen.bracketed_paste_mode?
+    refute screen.application_keypad
+    assert_empty screen.placements
+    assert_equal 1, disposed.size
+    assert_empty screen.instance_variable_get(:@title_stack)
+    parser.feed("x")
+    assert_equal 'x', screen.grid[0][0].char
+  end
+end
