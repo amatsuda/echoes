@@ -1361,9 +1361,23 @@ module Echoes
         end
       end
 
+      # A multi-row cell (OSC 66 s=2, a sixel) is drawn by its anchor
+      # row. When the dirty strip covers only its lower rows, the
+      # background fill erases that part, so the anchor row must be
+      # drawn too; AppKit's clip keeps the rest of it untouched.
+      first_dirty_row = ((dirty_min_y - py) / @cell_height).floor
+      draw_from = first_dirty_row
+      ([first_dirty_row - MAX_MULTICELL_ROWS, 0].max...first_dirty_row).each do |r|
+        src = visible_start + r
+        row = src < scrollback.size ? scrollback[src] : screen.grid[src - scrollback.size]
+        next unless row
+        reaches = row.any? { |cell| cell.multicell.is_a?(Hash) && r + cell.multicell[:rows].to_i > first_dirty_row }
+        draw_from = r if reaches && r < draw_from
+      end
+
       pane_rows.times do |r|
         y = py + r * @cell_height
-        next if y + @cell_height < dirty_min_y || y > dirty_max_y
+        next if r < draw_from || y > dirty_max_y
         src = visible_start + r
         row = if src < scrollback.size
                 scrollback[src]
