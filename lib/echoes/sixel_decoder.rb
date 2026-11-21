@@ -12,7 +12,13 @@ module Echoes
       @cursor_y = 0
       @width = 0
       @height = 0
-      @pixels = {}
+      # One RGBA byte string per painted pixel row, grown as runs
+      # land in it; a repeat of N paints with a single string copy
+      # rather than N hash inserts. Gaps between runs hold the
+      # background pixel (transparent in mode 1, opaque black else).
+      @rows = {}
+      @bg_px = (@background_mode == 1 ? "\x00\x00\x00\x00" : "\x00\x00\x00\xFF").b
+      @color_px = {}
       @declared_width = 0
       @declared_height = 0
     end
@@ -55,27 +61,13 @@ module Echoes
     end
 
     def to_rgba
-      buf = "\x00".b * (@width * @height * 4)
-      transparent = @background_mode == 1
-
-      @pixels.each do |(x, y), color|
-        next if x >= @width || y >= @height
-
-        offset = (y * @width + x) * 4
-        buf.setbyte(offset,     color[0])
-        buf.setbyte(offset + 1, color[1])
-        buf.setbyte(offset + 2, color[2])
-        buf.setbyte(offset + 3, 255)
+      stride = @width * 4
+      buf = @bg_px * (@width * @height)
+      @rows.each do |y, row|
+        next if y >= @height
+        n = [row.bytesize, stride].min
+        buf[y * stride, n] = row.byteslice(0, n)
       end
-
-      unless transparent
-        # Set alpha=255 for unset pixels (background fill)
-        (@width * @height).times do |i|
-          offset = i * 4
-          buf.setbyte(offset + 3, 255) if buf.getbyte(offset + 3) == 0
-        end
-      end
-
       buf
     end
 
@@ -102,19 +94,30 @@ module Echoes
       }
     end
 
+    # Largest image either axis may reach. A repeat count comes off
+    # the wire (`!999999999~` is 13 bytes), so painting stops at this
+    # edge instead of inserting billions of pixels.
+    MAX_DIMENSION = 4096
+
     def paint_sixel(byte, count)
+      return if @cursor_y >= MAX_DIMENSION
+      count = [count, MAX_DIMENSION - @cursor_x].min
+      return if count <= 0
+
       bits = byte - 0x3F
       color = @color_registers[@current_color] || [0, 0, 0]
+      run = nil
 
       6.times do |bit|
         next unless (bits >> bit) & 1 == 1
 
         y = @cursor_y + bit
-        count.times do |dx|
-          x = @cursor_x + dx
-          @pixels[[x, y]] = color
-          @width = x + 1 if x + 1 > @width
-        end
+        next if y >= MAX_DIMENSION
+        run ||=(@color_px[color] ||= [color[0], color[1], color[2], 255].pack('C4')) * count
+        row = (@rows[y] ||= +''.b)
+        start = @cursor_x * 4
+        row << @bg_px * ((start - row.bytesize) / 4) if row.bytesize < start
+        row[start, run.bytesize] = run
         @height = y + 1 if y + 1 > @height
       end
 

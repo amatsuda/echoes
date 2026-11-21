@@ -102,3 +102,31 @@ class Echoes::SixelDecoderTest < Test::Unit::TestCase
     assert(r >= 126 && r <= 130, "Expected gray ~128, got #{r}")
   end
 end
+
+class Echoes::SixelDecoderHostileInputTest < Test::Unit::TestCase
+  def assert_prompt
+    t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+    yield
+    assert_operator Process.clock_gettime(Process::CLOCK_MONOTONIC) - t0, :<, 0.5
+  end
+
+  test "a huge repeat count stops at the maximum width" do
+    dec = nil
+    assert_prompt { dec = Echoes::SixelDecoder.new.decode("!999999999~".b) }
+    assert_equal Echoes::SixelDecoder::MAX_DIMENSION, dec.width
+    assert_equal 6, dec.height
+  end
+
+  test "repeated huge repeats on later lines don't paint past the maximum height" do
+    data = ("!999999999~-" * 800).b   # 800 sixel rows = 4800 px
+    dec = nil
+    assert_prompt { dec = Echoes::SixelDecoder.new.decode(data) }
+    assert_equal Echoes::SixelDecoder::MAX_DIMENSION, dec.width
+    assert_operator dec.height, :<=, Echoes::SixelDecoder::MAX_DIMENSION
+  end
+
+  test "a normal repeat near the edge still paints what fits" do
+    dec = Echoes::SixelDecoder.new.decode("!3~".b)
+    assert_equal 3, dec.width
+  end
+end
