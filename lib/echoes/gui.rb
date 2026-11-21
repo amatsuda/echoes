@@ -2613,6 +2613,16 @@ module Echoes
       end
     end
 
+    # Holding Shift (kitty, Ghostty, xterm, Alacritty, WezTerm) or
+    # Option (iTerm2) while pressing the left button skips mouse
+    # reporting, so text can still be selected while an app (przn,
+    # vim with `mouse=a`, …) has reporting turned on.
+    MOUSE_REPORT_BYPASS_MODIFIERS = ObjC::NSEventModifierFlagShift | ObjC::NSEventModifierFlagOption
+
+    def self.mouse_report_bypass?(flags, mouse_tracking)
+      mouse_tracking != :off && (flags & MOUSE_REPORT_BYPASS_MODIFIERS) != 0
+    end
+
     def mouse_down(event_ptr)
       tab = current_tab
       return unless tab
@@ -2632,6 +2642,9 @@ module Echoes
         @selection_word_anchor = nil
       end
       pos = grid_position(event_ptr)
+      # Decided once per gesture: the drag and release that follow
+      # skip reporting too, even if the modifier is let go mid-drag.
+      @mouse_report_bypass = !pos.nil? && self.class.mouse_report_bypass?(flags, tab.screen.mouse_tracking)
 
       if pos.nil?
         # Outside the grid: only the tab bar reacts (the strip below
@@ -2662,7 +2675,7 @@ module Echoes
             end
           end
         end
-      elsif tab.screen.mouse_tracking != :off
+      elsif tab.screen.mouse_tracking != :off && !@mouse_report_bypass
         row, col = pos
         send_mouse_event(tab, 0 | mouse_modifier_bits(event_ptr), col, row)  # button 0 = left press
       elsif click_count >= 3
@@ -2733,7 +2746,7 @@ module Echoes
       # rather than just freezing the selection. Only active while a
       # selection drag is in progress.
       if @selection_anchor && !@selection_word_anchor &&
-         tab.screen.mouse_tracking == :off && (rect = pane_rect_for(tab, tab.active_pane))
+         (tab.screen.mouse_tracking == :off || @mouse_report_bypass) && (rect = pane_rect_for(tab, tab.active_pane))
         x, y_in_window = event_location(event_ptr)
         y      = view_frame_height - y_in_window
         # Relative to the active pane's rect, so dragging out of the
@@ -2758,7 +2771,8 @@ module Echoes
       pos = grid_position(event_ptr)
       return unless pos
 
-      if tab.screen.mouse_tracking == :button_event || tab.screen.mouse_tracking == :any_event
+      if !@mouse_report_bypass &&
+         (tab.screen.mouse_tracking == :button_event || tab.screen.mouse_tracking == :any_event)
         row, col = pos
         send_mouse_event(tab, 32 | mouse_modifier_bits(event_ptr), col, row)  # 32 = left drag (button 0 + 32)
       elsif @selection_word_anchor
@@ -2824,6 +2838,11 @@ module Echoes
       # is over.
       @auto_scroll_direction = nil
       @auto_scroll_col       = nil
+      # A selection gesture: the app never saw the press, so it
+      # doesn't get the release either.
+      bypass = @mouse_report_bypass
+      @mouse_report_bypass = false
+      return if bypass
 
       tab = current_tab
       return unless tab

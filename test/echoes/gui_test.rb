@@ -794,3 +794,29 @@ class Echoes::GUIOptionAsAltTest < Test::Unit::TestCase
     assert_raise(ArgumentError) { cfg.instance_eval { option_as_alt :middle } }
   end
 end
+class Echoes::GUIMouseReportBypassTest < Test::Unit::TestCase
+  ObjC = Echoes::ObjC
+
+  test "mouse_report_bypass? is true for Shift or Option while reporting is on" do
+    [:x10, :normal, :button_event, :any_event].each do |mode|
+      assert Echoes::GUI.mouse_report_bypass?(ObjC::NSEventModifierFlagShift, mode), "Shift, #{mode}"
+      assert Echoes::GUI.mouse_report_bypass?(ObjC::NSEventModifierFlagOption, mode), "Option, #{mode}"
+    end
+  end
+
+  test "mouse_report_bypass? is true when Shift or Option comes with other modifiers" do
+    flags = ObjC::NSEventModifierFlagShift | ObjC::NSEventModifierFlagControl
+    assert Echoes::GUI.mouse_report_bypass?(flags, :normal)
+  end
+
+  test "mouse_report_bypass? is false without Shift or Option" do
+    refute Echoes::GUI.mouse_report_bypass?(0, :normal)
+    refute Echoes::GUI.mouse_report_bypass?(ObjC::NSEventModifierFlagControl, :normal)
+    refute Echoes::GUI.mouse_report_bypass?(ObjC::NSEventModifierFlagCommand, :normal)
+  end
+
+  test "mouse_report_bypass? is false while reporting is off" do
+    refute Echoes::GUI.mouse_report_bypass?(ObjC::NSEventModifierFlagShift, :off)
+    refute Echoes::GUI.mouse_report_bypass?(ObjC::NSEventModifierFlagOption, :off)
+  end
+end
