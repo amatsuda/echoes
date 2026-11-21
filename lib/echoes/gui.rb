@@ -2458,6 +2458,9 @@ module Echoes
 
       if screen.mouse_tracking != :off
         delta = ObjC::MSG_RET_D.call(event_ptr, ObjC.sel('deltaY'))
+        # Horizontal swipes and trackpad phase begin/end events arrive
+        # with deltaY == 0; they are not a scroll down.
+        return if delta == 0
         pos = grid_position(event_ptr)
         return unless pos
         row, col = pos
