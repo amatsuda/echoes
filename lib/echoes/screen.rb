@@ -693,6 +693,9 @@ module Echoes
           if @scrollback.size > self.class.scrollback_limit
             @scrollback.shift
             adjust_command_marks(-1)
+            # Anything else holding absolute (scrollback + grid) row
+            # numbers, the GUI's selection and search hits, moves too.
+            @scrollback_shift_handler&.call(-1)
           end
           @scrollback_wrapped.shift if @scrollback_wrapped.size > self.class.scrollback_limit
         end
@@ -1144,6 +1147,18 @@ module Echoes
       end
     end
 
+    # Whether the line at absolute row `abs_row` (scrollback first,
+    # then the grid) continued onto the next one by soft wrap, so a
+    # copy can rejoin it.
+    def row_wrapped?(abs_row)
+      if abs_row < @scrollback.size
+        @scrollback_wrapped[abs_row] == true
+      else
+        @line_wrapped[abs_row - @scrollback.size] == true
+      end
+    end
+
+    attr_accessor :scrollback_shift_handler
     attr_accessor :clipboard_handler, :palette_handler, :glyph_measurer,
                   :capture_handler, :notification_handler,
                   :display_info_handler, :open_window_handler,

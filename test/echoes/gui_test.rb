@@ -674,3 +674,22 @@ class Echoes::GUIUrlTrimTest < Test::Unit::TestCase
     assert_equal 'https://x.y/a?b=c,d', Echoes::GUI.trim_url('https://x.y/a?b=c,d')
   end
 end
+
+class Echoes::GUIAbsoluteRowShiftTest < Test::Unit::TestCase
+  test "shift_absolute_rows moves the selection and search hits with scrollback" do
+    gui = Echoes::GUI.allocate
+    gui.instance_variable_set(:@selection_anchor, [10, 2])
+    gui.instance_variable_set(:@selection_end, [12, 5])
+    gui.instance_variable_set(:@selection_word_anchor, [0, 1, 3])
+    gui.instance_variable_set(:@search_matches, [[0, 1, 2], [5, 0, 3]])
+    gui.instance_variable_set(:@search_index, 1)
+    gui.send(:shift_absolute_rows, -1)
+    assert_equal [9, 2], gui.instance_variable_get(:@selection_anchor)
+    assert_equal [11, 5], gui.instance_variable_get(:@selection_end)
+    assert_equal [0, 1, 3], gui.instance_variable_get(:@selection_word_anchor)
+    assert_equal [[4, 0, 3]], gui.instance_variable_get(:@search_matches)
+    assert_equal 0, gui.instance_variable_get(:@search_index)
+    assert gui.send(:search_match_at?, 4, 2)
+    refute gui.send(:search_match_at?, 5, 0)
+  end
+end

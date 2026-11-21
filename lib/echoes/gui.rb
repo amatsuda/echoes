@@ -3931,8 +3931,38 @@ module Echoes
       end
     end
 
+    # Called for every cell on every frame while searching; a linear
+    # scan of all matches (tens of thousands for a one-letter query
+    # over scrollback) per cell froze the UI. Index the matches by
+    # row once per match list.
     def search_match_at?(abs_row, col)
-      @search_matches.any? { |r, c, len| r == abs_row && col >= c && col < c + len }
+      unless @search_rows_for.equal?(@search_matches)
+        @search_rows_for = @search_matches
+        @search_rows = @search_matches.group_by(&:first)
+      end
+      hits = @search_rows[abs_row]
+      hits ? hits.any? { |_r, c, len| col >= c && col < c + len } : false
+    end
+
+    # The screen dropped `-delta` lines off the top of scrollback (or
+    # grew it by delta): everything stored as an absolute row moves.
+    def shift_absolute_rows(delta)
+      @selection_anchor = shifted_row_pos(@selection_anchor, delta)
+      @selection_end    = shifted_row_pos(@selection_end, delta)
+      if @selection_word_anchor
+        @selection_word_anchor = [[@selection_word_anchor[0] + delta, 0].max, *@selection_word_anchor[1..]]
+      end
+      unless @search_matches.empty?
+        @search_matches.each { |m| m[0] += delta }
+        @search_matches.reject! { |m| m[0] < 0 }
+        @search_index = [@search_index, @search_matches.size - 1].min if @search_index
+        @search_rows_for = nil   # rebuild the per-row index
+      end
+    end
+
+    def shifted_row_pos(pos, delta)
+      return nil unless pos
+      [[pos[0] + delta, 0].max, pos[1]]
     end
 
     def current_search_match_at?(abs_row, col)
@@ -4033,7 +4063,7 @@ module Echoes
     def selected_text_from_buffer(sr, sc, er, ec)
       screen = current_tab.screen
       scrollback = screen.scrollback
-      lines = []
+      out = +''
       (sr..er).each do |abs_row|
         row = if abs_row < scrollback.size
                 scrollback[abs_row]
@@ -4050,9 +4080,17 @@ module Echoes
         # is a leftover space from the cell reset; including it
         # produces "T e x t" instead of "Text" for scaled output.
         chars = row[from..to].reject { |c| c.width == 0 || c.multicell == :cont }.map(&:char)
-        lines << chars.join.rstrip
+        # A row that soft-wrapped onto the next is one logical line:
+        # a long URL or command pastes back in one piece instead of
+        # broken where the window happened to be.
+        if abs_row < er && screen.row_wrapped?(abs_row)
+          out << chars.join
+        else
+          out << chars.join.rstrip
+          out << "\n" if abs_row < er
+        end
       end
-      lines.join("\n")
+      out
     end
 
     def cell_selected?(row, col)
@@ -4185,6 +4223,13 @@ module Echoes
       # the renderer grabs the right sub-rect (split layouts have
       # several panes per view).
       screen.capture_handler   = ->(path) { capture_pane_to_png(pane, path) }
+      # Once scrollback is full, every new line drops the oldest and
+      # shifts the absolute row numbers the selection and search hits
+      # are stored in; without this the highlight crept up a line per
+      # line of output and Copy grabbed different text.
+      screen.scrollback_shift_handler = ->(delta) {
+        shift_absolute_rows(delta) if pane == current_tab&.active_pane
+      }
       screen.notification_handler = ->(title, message) { post_notification(pane, title, message) }
       screen.display_info_handler = -> { display_info_json(pane) }
       screen.open_window_handler  = ->(args) { open_window_from_osc(pane, args) }

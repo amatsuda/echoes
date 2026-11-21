@@ -1428,3 +1428,46 @@ class Echoes::ScreenBoundedStacksTest < Test::Unit::TestCase
     assert_equal Echoes::Screen::COMMAND_MARKS_LIMIT, screen.command_marks.size
   end
 end
+
+class Echoes::ScreenPlacementAndShiftTest < Test::Unit::TestCase
+  def image_screen
+    screen = Echoes::Screen.new(rows: 10, cols: 20)
+    screen.cell_pixel_width = 8.0
+    screen.cell_pixel_height = 16.0
+    screen
+  end
+
+  test "re-placing an image at the same anchor replaces the earlier placement" do
+    screen = image_screen
+    disposed = 0
+    screen.placement_disposer = ->(_p) { disposed += 1 }
+    img = {rgba: 'x' * (16 * 16 * 4), width: 16, height: 16}
+    3.times { screen.put_kitty_image(image: img, image_id: '1', suppress_cursor: true) }
+    assert_equal 1, screen.placements.size
+    assert_equal 2, disposed
+    # a different id at the same spot is a separate placement
+    screen.put_kitty_image(image: img, image_id: '2', suppress_cursor: true)
+    assert_equal 2, screen.placements.size
+  end
+
+  test "dropping the oldest scrollback line notifies the shift handler" do
+    screen = Echoes::Screen.new(rows: 3, cols: 5)
+    shifts = []
+    screen.scrollback_shift_handler = ->(d) { shifts << d }
+    limit = Echoes::Screen.scrollback_limit
+    # 3 rows: the first two feeds don't scroll; scrollback fills after
+    # `limit` scrolls, and each of the next three drops a line.
+    (limit + 2 + 3).times { screen.line_feed }
+    assert_equal [-1, -1, -1], shifts
+  end
+
+  test "row_wrapped? reports soft wraps in scrollback and grid" do
+    screen = Echoes::Screen.new(rows: 2, cols: 4)
+    "abcdefgh".each_char { |c| screen.put_char(c) }   # wraps once, then pending
+    screen.put_char('i')                               # wraps again
+    # rows: "abcd"(wrapped) "efgh"(wrapped) "i"  → first row in scrollback
+    assert screen.row_wrapped?(0)
+    assert screen.row_wrapped?(1)
+    refute screen.row_wrapped?(2)
+  end
+end
