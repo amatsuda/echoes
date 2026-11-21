@@ -31,10 +31,17 @@ module Echoes
 
         setup_signal_handlers
 
+        # The reader owns the screen: parsing, rendering and (via the
+        # flag the WINCH trap sets) resizing all happen on this
+        # thread, so the trap can't resize the grid while feed is
+        # in the middle of writing to it. The writer is the helper
+        # thread; when the shell exits and the reader sees EOF it is
+        # killed, so `echoes -t` returns without waiting for one more
+        # keypress.
         STDIN.raw do
-          reader = Thread.new { read_loop }
-          write_loop
-          reader.kill
+          writer = Thread.new { write_loop }
+          read_loop
+          writer.kill
         end
       end
     end
@@ -43,11 +50,12 @@ module Echoes
 
     def read_loop
       loop do
+        apply_pending_resize
         data = @read_io.read_nonblock(4096)
         @parser.feed(data)
         render
       rescue IO::WaitReadable
-        IO.select([@read_io])
+        IO.select([@read_io], nil, nil, 0.1)
         retry
       rescue EOFError, Errno::EIO
         break
@@ -64,6 +72,16 @@ module Echoes
       rescue EOFError, Errno::EIO
         break
       end
+    end
+
+    def apply_pending_resize
+      return unless @resize_pending
+      @resize_pending = false
+      return unless IO.console
+      @rows, @cols = IO.console.winsize
+      @screen.resize(@rows, @cols)
+      @read_io.winsize = [@rows, @cols]
+      render
     end
 
     def render
@@ -116,14 +134,11 @@ module Echoes
     end
 
     def setup_signal_handlers
-      Signal.trap(:WINCH) do
-        if IO.console
-          @rows, @cols = IO.console.winsize
-          @screen.resize(@rows, @cols)
-          @read_io.winsize = [@rows, @cols]
-          render
-        end
-      end
+      # Only set a flag here: the handler runs on whichever thread
+      # happens to be scheduled, and resizing the grid under the
+      # reader's feed corrupts it. read_loop picks the flag up on its
+      # next wake (it selects with a short timeout for that reason).
+      Signal.trap(:WINCH) { @resize_pending = true }
     end
   end
 end
