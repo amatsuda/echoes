@@ -14,6 +14,10 @@ jobs:
     strategy:
       matrix:
         ruby:
+          # 3.2 is the gemspec's minimum; 4.0 the development Ruby.
+          # 3.4 is left out for now: rubish completion and rvim's `gg`
+          # misbehave under it (tracked in those gems, not here).
+          - '3.2'
           - '4.0'
 
     steps:
