@@ -649,3 +649,13 @@ class Echoes::GUIColorCubeTest < Test::Unit::TestCase
     assert_equal [255, 255, 255], Echoes::GUI.xterm_cube_rgb(215)    # index 231
   end
 end
+
+class Echoes::GUINotificationThrottleTest < Test::Unit::TestCase
+  test "a burst of notifications is capped per window" do
+    times = []
+    sent = (0...20).count { |i| Echoes::GUI.notification_allowed?(times, 100.0 + i * 0.01) }
+    assert_equal Echoes::GUI::NOTIFICATION_BURST, sent
+    assert Echoes::GUI.notification_allowed?(times, 100.0 + Echoes::GUI::NOTIFICATION_WINDOW_S + 1)
+  end
+end
+

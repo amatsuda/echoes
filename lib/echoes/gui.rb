@@ -4220,7 +4220,27 @@ module Echoes
     # compiled native launcher in Contents/MacOS/ so
     # NSBundle.mainBundle survives the exec into ruby; until then
     # `brew install terminal-notifier` is the recommended setup.
+    # At most this many notifications per window of seconds; each one
+    # spawns an osascript / terminal-notifier process, so a loop
+    # printing `\e]9;x\a` must not fork thousands of them.
+    NOTIFICATION_BURST = 5
+    NOTIFICATION_WINDOW_S = 10.0
+
+    # Mutates `times` (recent send timestamps) and says whether one
+    # more may go out now.
+    def self.notification_allowed?(times, now)
+      times.reject! { |t| now - t > NOTIFICATION_WINDOW_S }
+      return false if times.size >= NOTIFICATION_BURST
+      times << now
+      true
+    end
+
     def post_notification(pane, title, message)
+      @notification_times ||= []
+      unless self.class.notification_allowed?(@notification_times, Process.clock_gettime(Process::CLOCK_MONOTONIC))
+        warn "echoes notification: rate limit, dropping #{message.to_s[0, 40].inspect}"
+        return
+      end
       effective_title = (title && !title.empty? && title) || pane&.title || 'Echoes'
       if (tn = terminal_notifier_path)
         pid = Process.spawn(tn, '-title', effective_title.to_s, '-message', message.to_s,
