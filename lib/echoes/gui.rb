@@ -5,6 +5,7 @@ require 'shellwords'
 require 'socket'
 require 'uri'
 require 'json'
+require 'fileutils'
 require_relative 'animation_ticker'
 
 module Echoes
@@ -4316,11 +4317,46 @@ module Echoes
 
       json_str = program_b64.delete("\r\n\t ").unpack1('m0')
       argv = JSON.parse(json_str)
-      return unless argv.is_a?(Array) && !argv.empty?
+      return unless argv.is_a?(Array) && !argv.empty? && argv.all?(String)
+
+      # The request arrived in the pane's output stream, so anything
+      # that can print there (a cat'ed file, a remote host) could have
+      # sent it. Only pre-approved programs run without asking.
+      case self.class.open_window_policy(argv, Echoes.config)
+      when :allow
+      when :ask
+        return unless confirm_open_window(argv)
+      else
+        warn "echoes open-window: refused #{argv.first} (not in allowed_programs)"
+        return
+      end
 
       open_external_window(argv: argv, display_index: display_index, fullscreen: fullscreen)
     rescue StandardError => e
       warn "echoes open-window: #{e.class}: #{e.message}"
+    end
+
+    # :allow when argv[0] matches an allowed_programs entry by absolute
+    # path or basename, otherwise the configured fallback (:ask/:deny).
+    def self.open_window_policy(argv, config)
+      program = argv.first.to_s
+      allowed = config.allowed_programs.any? do |entry|
+        entry.start_with?('/') ? entry == program : entry == File.basename(program)
+      end
+      allowed ? :allow : config.open_window_requests
+    end
+
+    def confirm_open_window(argv)
+      alert = ObjC::MSG_PTR.call(ObjC::MSG_PTR.call(ObjC.cls('NSAlert'), ObjC.sel('alloc')), ObjC.sel('init'))
+      ObjC::MSG_VOID_1.call(alert, ObjC.sel('setMessageText:'),
+                            ObjC.nsstring("A program in this terminal wants to open a new window running:"))
+      ObjC::MSG_VOID_1.call(alert, ObjC.sel('setInformativeText:'),
+                            ObjC.nsstring("#{argv.join(' ')}\n\nAdd it to allowed_programs in echoes.conf to skip this dialog."))
+      ObjC::MSG_PTR_1.call(alert, ObjC.sel('addButtonWithTitle:'), ObjC.nsstring('Open Window'))
+      ObjC::MSG_PTR_1.call(alert, ObjC.sel('addButtonWithTitle:'), ObjC.nsstring('Cancel'))
+      ObjC::MSG_RET_L.call(alert, ObjC.sel('runModal')) == 1000  # NSAlertFirstButtonReturn
+    ensure
+      ObjC.release(alert) if alert && !alert.null?
     end
 
     # Open a new window running `argv` (e.g. ["/usr/local/bin/przn",
@@ -4465,10 +4501,36 @@ module Echoes
       ObjC::MSG_VOID_1.call(view, ObjC.sel('registerForDraggedTypes:'), arr)
     end
 
-    def capture_pane_to_png(pane, path)
+    # Where an OSC 7772 ;capture request may write. The requested path
+    # (relative names land in capture_directory) must resolve inside
+    # capture_directory with no symlink in the way, must not already
+    # exist, and must end in .png or .pdf. Returns nil to refuse. The
+    # request comes from the pane's output stream, so this is what
+    # stops `\e]7772;capture;~/.zshrc\a` from clobbering a file.
+    def self.capture_target_path(requested, config = Echoes.config)
+      dir = config.capture_directory
+      return nil if dir.nil? || requested.to_s.empty?
+      return nil unless %w[.png .pdf].include?(File.extname(requested).downcase)
+      FileUtils.mkdir_p(dir)
+      base = File.realpath(dir)
+      full = File.expand_path(requested, base)
+      return nil if File.exist?(full) || File.symlink?(full)
+      parent = File.realpath(File.dirname(full))
+      return nil unless parent == base || parent.start_with?(base + '/')
+      File.join(parent, File.basename(full))
+    rescue SystemCallError
+      nil
+    end
+
+    def capture_pane_to_png(pane, requested_path)
       return unless @view
       tab = current_tab
       return unless tab
+      path = self.class.capture_target_path(requested_path)
+      unless path
+        warn "echoes capture: refused #{requested_path.inspect} (must be a new .png/.pdf under capture_directory)"
+        return
+      end
       rect_info = tab.pane_tree.layout(0, 0, @cols, @rows).find { |r| r[:pane] == pane }
       return unless rect_info
 

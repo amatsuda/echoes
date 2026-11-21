@@ -23,6 +23,13 @@ module Echoes
       @pane_divider_color = [0.4, 0.4, 0.4]
       @active_pane_border_color = [0.3, 0.5, 0.8]
       @copy_mode_cursor_color = [0.8, 0.7, 0.2]
+      # OSC 7772 ;open-window and ;capture act on whatever a program
+      # prints, so they are gated: open-window prompts unless argv[0]
+      # is pre-approved here, and capture only writes inside one
+      # directory. See GUI#open_window_from_osc / capture_target_path.
+      @allowed_programs = []
+      @open_window_requests = :ask
+      @capture_directory = File.join(Dir.home, 'Pictures', 'Echoes')
       register_default_profiles
     end
 
@@ -121,6 +128,29 @@ module Echoes
 
     def copy_mode_cursor_color(*args)
       args.empty? ? @copy_mode_cursor_color : @copy_mode_cursor_color = parse_color(args)
+    end
+
+    # Programs an OSC 7772 ;open-window request may launch without a
+    # confirmation dialog. Each entry is either a basename ("przn") or
+    # an absolute path; argv[0] must match one of them.
+    def allowed_programs(*names)
+      names.empty? ? @allowed_programs : @allowed_programs = names.flatten.map(&:to_s)
+    end
+
+    # What to do with an ;open-window request whose program isn't in
+    # allowed_programs: :ask (default) shows a confirmation dialog,
+    # :deny drops it.
+    def open_window_requests(val = nil)
+      return @open_window_requests if val.nil?
+      sym = val.to_sym
+      raise ArgumentError, "open_window_requests must be :ask or :deny, got #{val.inspect}" unless %i[ask deny].include?(sym)
+      @open_window_requests = sym
+    end
+
+    # The only directory OSC 7772 ;capture may write into. nil turns
+    # capture off.
+    def capture_directory(val = false)
+      val == false ? @capture_directory : @capture_directory = (val && File.expand_path(val))
     end
 
     def color_palette(val = nil)

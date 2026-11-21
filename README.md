@@ -128,6 +128,11 @@ foreground     "#e0e0e0"
 background     "#1a1a2e"
 cursor_color   "#b58900"
 selection_color "#586e75"
+
+# OSC 7772 trust gates (see "Echoes private namespace" below)
+allowed_programs     "przn"             # open-window without a prompt
+open_window_requests :ask               # or :deny
+capture_directory    "~/Pictures/Echoes" # nil disables ;capture
 ```
 
 ### Profiles (color themes)
@@ -231,9 +236,12 @@ collide with ours.
 ```
 
 - `capture` writes a snapshot of the active pane to disk. `.png`
-  rasterizes via `NSBitmapImageRep`; anything else (default `.pdf`)
-  saves vector — usually smaller and crisper because text and
-  background gradients stay resolution-independent.
+  rasterizes via `NSBitmapImageRep`; `.pdf` saves vector — usually
+  smaller and crisper because text and background gradients stay
+  resolution-independent. Because any program output can carry this
+  sequence, the path must be a new `.png`/`.pdf` file inside
+  `capture_directory` (default `~/Pictures/Echoes`; a bare filename
+  lands there). Anything else is refused.
 - `display-info` is a sync query: the host replies on the same pty
   with `\e]7772;display-info;<json>\a`, where `<json>` is an array
   of `{index, w, h, primary, current}` per `NSScreen`. A presentation
@@ -244,7 +252,11 @@ collide with ours.
   base64-wrapped (e.g. `Base64.strict_encode64(JSON.dump(argv))`).
   `fullscreen=yes` uses a borderless, above-menu-bar window covering
   the full screen frame; otherwise the visible frame with default
-  chrome.
+  chrome. Since this runs a program on your machine at the request of
+  whatever printed to the pane, Echoes shows a confirmation dialog
+  unless `argv[0]` is listed in `allowed_programs` (by basename or
+  absolute path). Set `open_window_requests :deny` to drop unlisted
+  requests silently instead of asking.
 
 A small Ruby helper (`Echoes::Client`) lets in-pane Ruby tools emit
 these without hand-rolling escape sequences:

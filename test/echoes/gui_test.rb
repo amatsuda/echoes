@@ -498,3 +498,100 @@ class Echoes::GUITabDragHelpersTest < Test::Unit::TestCase
     assert_nil gui.decode_tab_drag_token("123:-1")
   end
 end
+
+class Echoes::GUIOscTrustGateTest < Test::Unit::TestCase
+  def config(&blk)
+    c = Echoes::Configuration.new
+    c.instance_eval(&blk) if blk
+    c
+  end
+
+  # --- open-window policy ---
+
+  test "open-window asks by default" do
+    assert_equal :ask, Echoes::GUI.open_window_policy(['/usr/local/bin/przn', '--audience'], config)
+  end
+
+  test "open-window allows a program listed by basename" do
+    cfg = config { allowed_programs 'przn' }
+    assert_equal :allow, Echoes::GUI.open_window_policy(['/opt/x/bin/przn', '--audience'], cfg)
+    assert_equal :ask,   Echoes::GUI.open_window_policy(['/opt/x/bin/prznx'], cfg)
+  end
+
+  test "open-window allows a program listed by absolute path only at that path" do
+    cfg = config { allowed_programs '/usr/local/bin/przn' }
+    assert_equal :allow, Echoes::GUI.open_window_policy(['/usr/local/bin/przn'], cfg)
+    assert_equal :ask,   Echoes::GUI.open_window_policy(['/tmp/przn'], cfg)
+  end
+
+  test "open-window can be denied outright" do
+    cfg = config { open_window_requests :deny }
+    assert_equal :deny, Echoes::GUI.open_window_policy(['/bin/sh', '-c', 'true'], cfg)
+  end
+
+  test "open_window_requests rejects unknown values" do
+    assert_raise(ArgumentError) { config { open_window_requests :yolo } }
+  end
+
+  # --- capture path restriction ---
+
+  def with_capture_dir
+    Dir.mktmpdir do |dir|
+      cfg = config { capture_directory dir }
+      yield File.realpath(dir), cfg
+    end
+  end
+
+  test "capture resolves a bare filename into capture_directory" do
+    with_capture_dir do |dir, cfg|
+      assert_equal File.join(dir, 'snap.png'), Echoes::GUI.capture_target_path('snap.png', cfg)
+      assert_equal File.join(dir, 'snap.pdf'), Echoes::GUI.capture_target_path('snap.pdf', cfg)
+    end
+  end
+
+  test "capture accepts an absolute path inside capture_directory, including subdirs" do
+    with_capture_dir do |dir, cfg|
+      Dir.mkdir(File.join(dir, 'sub'))
+      assert_equal File.join(dir, 'sub', 'a.png'),
+                   Echoes::GUI.capture_target_path(File.join(dir, 'sub', 'a.png'), cfg)
+    end
+  end
+
+  test "capture refuses paths outside capture_directory" do
+    with_capture_dir do |dir, cfg|
+      assert_nil Echoes::GUI.capture_target_path('/tmp/evil.png', cfg)
+      assert_nil Echoes::GUI.capture_target_path('../evil.png', cfg)
+      assert_nil Echoes::GUI.capture_target_path(File.join(dir, '..', 'evil.pdf'), cfg)
+      assert_nil Echoes::GUI.capture_target_path(File.expand_path('~/.zshrc'), cfg)
+    end
+  end
+
+  test "capture refuses to overwrite an existing file or follow a symlink" do
+    with_capture_dir do |dir, cfg|
+      File.write(File.join(dir, 'exists.png'), 'x')
+      assert_nil Echoes::GUI.capture_target_path('exists.png', cfg)
+
+      File.symlink('/etc', File.join(dir, 'escape'))
+      assert_nil Echoes::GUI.capture_target_path('escape/out.png', cfg)
+      File.symlink('/tmp/target.png', File.join(dir, 'link.png'))
+      assert_nil Echoes::GUI.capture_target_path('link.png', cfg)
+    end
+  end
+
+  test "capture refuses non-image extensions" do
+    with_capture_dir do |_dir, cfg|
+      assert_nil Echoes::GUI.capture_target_path('zshrc', cfg)
+      assert_nil Echoes::GUI.capture_target_path('x.sh', cfg)
+      assert_nil Echoes::GUI.capture_target_path('', cfg)
+    end
+  end
+
+  test "capture is off when capture_directory is nil" do
+    cfg = config { capture_directory nil }
+    assert_nil Echoes::GUI.capture_target_path('snap.png', cfg)
+  end
+
+  test "capture_directory defaults to ~/Pictures/Echoes" do
+    assert_equal File.join(Dir.home, 'Pictures', 'Echoes'), config.capture_directory
+  end
+end
