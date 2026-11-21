@@ -251,7 +251,10 @@ module Echoes
       activate_for_view(view_ptr)
       @tabs.each(&:close)
       @tabs = []
+      @closing_from_appkit = true
       close_current_window
+    ensure
+      @closing_from_appkit = false
     end
 
     private def save_window_state
@@ -365,7 +368,13 @@ module Echoes
       @window_states.delete(ws)
       nc = ObjC::MSG_PTR.call(ObjC.cls('NSNotificationCenter'), ObjC.sel('defaultCenter'))
       ObjC::MSG_VOID_1.call(nc, ObjC.sel('removeObserver:'), closing_view)
-      ObjC::MSG_VOID_1.call(@window, ObjC.sel('orderOut:'), Fiddle::Pointer.new(0))
+      # Windows are created with releasedWhenClosed NO, so closing
+      # them is ours to finish: close (a no-op when AppKit is already
+      # closing it from the red button, since the observer is gone)
+      # and drop the alloc/init reference. orderOut: alone kept every
+      # closed window and its view alive for the life of the app.
+      ObjC::MSG_VOID.call(@window, ObjC.sel('close')) unless @closing_from_appkit
+      ObjC.release(@window)
 
       if @window_states.empty?
         ObjC::MSG_VOID_1.call(@app, ObjC.sel('terminate:'), Fiddle::Pointer.new(0))
