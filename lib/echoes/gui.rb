@@ -2238,8 +2238,20 @@ module Echoes
       end
     end
 
+    # Per 60 Hz tick, across a window's panes. Half the frame, so a
+    # flooding child still leaves time to draw and handle input.
+    OUTPUT_DRAIN_BUDGET_S = 0.008
+
     private def timer_fired_for_window(ws, blink_toggled)
       need_redraw = false
+
+      # Each pane gets a slice of this tick to drain its output. The
+      # parser works byte by byte in Ruby, so a child that writes
+      # faster than that (`yes`, `cat /dev/urandom | base64`) would
+      # otherwise keep this callback from returning, and with it
+      # every keystroke, Ctrl-C included. What isn't read stays in
+      # the pty buffer for the next tick.
+      deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + OUTPUT_DRAIN_BUDGET_S
 
       @tabs.each do |tab|
         tab.panes.each do |pane|
@@ -2248,6 +2260,7 @@ module Echoes
             break if data.empty?
             pane.process_output(data)
             need_redraw = true
+            break if Process.clock_gettime(Process::CLOCK_MONOTONIC) > deadline
           end
           if need_redraw && pane.screen.title
             tab.title = pane.screen.title if pane == tab.active_pane
