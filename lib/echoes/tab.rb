@@ -108,6 +108,18 @@ module Echoes
       true
     end
 
+    # A pane whose process exited on its own: take it out of the tree
+    # and give its space to the survivors (their ptys learn the new
+    # winsize through resize_panes, which the GUI's removal skipped).
+    def remove_dead_pane(pane)
+      return false if @pane_tree.single_pane?
+
+      @pane_tree.remove(pane)
+      pane.close
+      resize_panes
+      true
+    end
+
     def next_pane
       @pane_tree.active_pane = @pane_tree.next_pane(active_pane)
     end

@@ -2295,10 +2295,7 @@ module Echoes
         # Clean up dead panes within the tab
         dead_panes = tab.panes.reject(&:alive?)
         dead_panes.each do |dp|
-          next if tab.pane_tree.single_pane?
-          tab.pane_tree.remove(dp)
-          dp.close
-          need_redraw = true
+          need_redraw = true if tab.remove_dead_pane(dp)
         end
       end
 
