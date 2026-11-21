@@ -38,24 +38,29 @@ module Echoes
     # subprocess starts from a known-clean environment; production
     # callers leave it false so the user's config takes effect.
     def initialize(no_rc: false)
-      ENV['GIT_PAGER'] ||= 'cat'
-      ENV['PAGER']     ||= 'cat'
-      # Default $TERM so terminfo-aware tools (tput, less, vim, …)
-      # have a profile to look up. CI runners launch the rake task
-      # without TERM set; programs that read it bail with
-      # "No value for $TERM and no -T specified".
-      ENV['TERM']      ||= Echoes.config.term
+      # These go to the helper only (see helper_env below), never into
+      # the GUI's own ENV, or every later pty pane would inherit
+      # PAGER=cat as well.
+      pager_env = {
+        'GIT_PAGER' => ENV.fetch('GIT_PAGER', 'cat'),
+        'PAGER'     => ENV.fetch('PAGER', 'cat'),
+        # Default $TERM so terminfo-aware tools (tput, less, vim, …)
+        # have a profile to look up. CI runners launch the rake task
+        # without TERM set; programs that read it bail with
+        # "No value for $TERM and no -T specified".
+        'TERM'      => ENV.fetch('TERM', Echoes.config.term),
+      }
 
       # Drop rbenv version pins so commands the helper's REPL spawns
       # do their own `.ruby-version` lookup per cwd instead of
       # inheriting Echoes' frozen RBENV_VERSION. The helper itself
       # launches via RbConfig.ruby below, which bypasses the shim,
       # so nothing will re-export these into the helper's env.
-      helper_env = {
+      helper_env = pager_env.merge(
         'ECHOES_HELPER_NO_RC' => no_rc ? '1' : nil,
         'RBENV_VERSION' => nil,
         'RBENV_DIR' => nil,
-      }
+      )
       @master, slave = PTY.open
       # Bidirectional JSON-line control pipes. Helper reads requests on
       # fd 3 and writes responses/events on fd 4.

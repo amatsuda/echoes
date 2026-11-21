@@ -140,3 +140,24 @@ class Echoes::PaneLifecycleTest < Test::Unit::TestCase
     assert_equal big, received
   end
 end
+
+class Echoes::PaneChildEnvTest < Test::Unit::TestCase
+  test "normalizing the child's env does not touch the GUI's own ENV" do
+    saved = ENV.to_h
+    ENV['RBENV_VERSION'] = '9.9.9'
+    ENV['TERM'] = 'dumb'
+    ENV.delete('LANG')
+    pane = Echoes::Pane.new(command: ["/bin/sh", "-c", "echo T=$TERM R=${RBENV_VERSION:-unset} L=$LANG"],
+                            rows: 5, cols: 60)
+    out = +''
+    deadline = Time.now + 5
+    out << pane.read_available_output while Time.now < deadline && !out.include?('L=')
+    assert_includes out, "T=#{Echoes.config.term} R=unset L=en_US.UTF-8"
+    assert_equal '9.9.9', ENV['RBENV_VERSION']
+    assert_equal 'dumb', ENV['TERM']
+    assert_nil ENV['LANG']
+    pane.close
+  ensure
+    ENV.replace(saved) if saved
+  end
+end

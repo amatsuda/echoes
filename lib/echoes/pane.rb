@@ -53,26 +53,28 @@ module Echoes
       else
         start_dir = (cwd && Dir.exist?(cwd)) ? cwd : Dir.home
         Dir.chdir(start_dir) do
-          # When env: is nil (the default), we just normalize a few
-          # vars on our own process — the child then inherits the
-          # whole env from us, same as before. When env: is given,
-          # it's an explicit env Hash that fully replaces what the
-          # child sees, with our normalizations applied on top. The
-          # explicit form is used by the OSC 7772 ;open-window path
-          # so a child program (e.g. przn) reliably gets PATH /
-          # HOME / USER / LANG even when Echoes.app was launched by
-          # launchd with a minimal env.
-          ENV['TERM'] = Echoes.config.term
-          ENV['LANG'] ||= 'en_US.UTF-8'
-          ENV['LC_CTYPE'] = 'UTF-8'
+          # The child's environment: the explicit env: Hash when one
+          # is given (the OSC 7772 ;open-window path builds a full one
+          # so a child like przn reliably gets PATH / HOME / USER /
+          # LANG even when Echoes.app was launched by launchd with a
+          # minimal env), otherwise a copy of our own. The
+          # normalizations below go on that copy, not on ENV: the GUI
+          # process's environment must not drift with every pane it
+          # opens (an embedded pane's PAGER=cat leaking into the next
+          # zsh pane, for instance).
+          child_env = (env || ENV.to_h).dup
+          child_env['TERM'] = Echoes.config.term
+          child_env['LANG'] ||= 'en_US.UTF-8'
+          child_env['LC_CTYPE'] = 'UTF-8'
           # rbenv's `ruby` shim sets RBENV_VERSION (and RBENV_DIR)
           # before exec'ing the real interpreter, freezing the Ruby
           # version for the whole child-process subtree. A descendant
           # that `cd`s into a directory with a `.ruby-version` file
           # then never gets to consult it (RBENV_VERSION wins). Scrub
-          # the pins so child shells resolve fresh per cwd.
-          ENV.delete('RBENV_VERSION')
-          ENV.delete('RBENV_DIR')
+          # the pins so child shells resolve fresh per cwd (nil in an
+          # exec env Hash unsets the variable).
+          child_env['RBENV_VERSION'] = nil
+          child_env['RBENV_DIR'] = nil
           # `command` may be a String (shell-parsed by /bin/sh) or an
           # Array of [argv0, *args] (execve directly, no shell). The
           # array form is what the OSC 7772 ;open-window handler
@@ -83,9 +85,11 @@ module Echoes
           # re-export RBENV_VERSION, undoing the scrub above. Rewrite
           # the invocation to use the absolute Ruby binary directly.
           spawn_args = bypass_rbenv_shim_for_ruby_script(spawn_args)
-          @pty_read, @pty_write, @pty_pid = spawn_with_pty(spawn_args, env, rows, cols)
+          @pty_read, @pty_write, @pty_pid = spawn_with_pty(spawn_args, child_env, rows, cols)
         end
-        @parser = Parser.new(@screen, writer: ->(s) { @pty_write.write(s) rescue nil })
+        # OSC replies (DA, DSR, colour queries, …) take the same
+        # non-blocking outbox as keystrokes.
+        @parser = Parser.new(@screen, writer: ->(s) { enqueue_input(s) })
         @title = File.basename(command.is_a?(Array) ? command.first : command)
       end
       @scroll_offset = 0
