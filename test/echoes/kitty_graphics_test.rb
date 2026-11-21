@@ -705,3 +705,42 @@ module Echoes::KittyGraphics
     end
   end
 end
+
+class Echoes::KittyGraphicsDecodeBombsTest < Test::Unit::TestCase
+  def setup
+    @state  = {chunks: {}, cache: {}}
+    @screen = Echoes::KittyGraphicsTest::StubScreen.new
+    @writes = []
+    @writer = ->(s) { @writes << s }
+  end
+
+  test "an o=z payload that inflates past the cap is answered with EBADDATA" do
+    bomb = Zlib::Deflate.deflate("\0".b * (Echoes::KittyGraphics::INFLATE_LIMIT_BYTES + 1024))
+    t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+    Echoes::KittyGraphics.handle_chunk(@state, "a=T,f=32,o=z,s=8192,v=8192,i=1",
+                                        [bomb].pack('m0'), screen: @screen, writer: @writer)
+    assert_operator Process.clock_gettime(Process::CLOCK_MONOTONIC) - t0, :<, 2.0
+    assert_empty @screen.images
+    assert_includes @writes.first, 'EBADDATA'
+  end
+
+  test "an o=z payload within the cap still inflates" do
+    rgba = ("\xFF\x00\x00\xFF" * 4).b
+    Echoes::KittyGraphics.stub_decoder(rgba => {rgba: rgba, width: 2, height: 2}) do
+      Echoes::KittyGraphics.handle_chunk(@state, "a=T,f=100,o=z,i=2",
+                                          [Zlib::Deflate.deflate(rgba)].pack('m0'),
+                                          screen: @screen, writer: @writer)
+    end
+    assert_equal 1, @screen.images.size
+    assert_includes @writes.first, 'OK'
+  end
+
+  test "a bitmap header claiming a gigantic image is refused before allocation" do
+    require 'echoes/kitty_graphics_appkit'
+    ok = Echoes::KittyGraphics::AppKitPng
+    assert ok.dimensions_ok?(4096, 4096)
+    refute ok.dimensions_ok?(40_000, 40_000)
+    refute ok.dimensions_ok?(0, 10)
+    refute ok.dimensions_ok?(10, -1)
+  end
+end

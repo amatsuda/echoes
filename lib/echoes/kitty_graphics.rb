@@ -199,11 +199,30 @@ module Echoes
     def inflate_if_needed(bytes, compression)
       case compression.to_s
       when ''  then bytes
-      when 'z' then Zlib::Inflate.inflate(bytes)
+      when 'z' then inflate_capped(bytes)
       else          nil
       end
     rescue Zlib::Error
       nil
+    end
+
+    # 64 MB decoded is already a 4096x4096 RGBA image; a deflate
+    # stream that expands past it (14 MB of zeros inflate to 14 GB)
+    # is abandoned part way, so the payload size bounds the memory
+    # the sender can make us allocate.
+    INFLATE_LIMIT_BYTES = 64 * 1024 * 1024
+
+    def inflate_capped(bytes)
+      z = Zlib::Inflate.new
+      out = +''.b
+      z.inflate(bytes) do |chunk|
+        out << chunk
+        return nil if out.bytesize > INFLATE_LIMIT_BYTES
+      end
+      out << z.finish
+      out.bytesize > INFLATE_LIMIT_BYTES ? nil : out
+    ensure
+      z&.close
     end
 
     # Tolerant base64 decode: strips whitespace (some clients

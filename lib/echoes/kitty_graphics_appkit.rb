@@ -60,6 +60,17 @@ module Echoes
 
       module_function
 
+      # The header of a PNG/GIF says how big the decoded bitmap is,
+      # and cgimage_to_rgba allocates width*height*4 twice over on the
+      # strength of it. 32 megapixels (128 MB per copy) is far beyond
+      # anything a terminal can show; a 40000x40000 header is refused
+      # before the first malloc.
+      MAX_PIXELS = 32_000_000
+
+      def dimensions_ok?(width, height)
+        width > 0 && height > 0 && width * height <= MAX_PIXELS
+      end
+
       def decode(bytes)
         return nil if bytes.nil? || bytes.bytesize.zero?
 
@@ -78,7 +89,7 @@ module Echoes
 
         width  = ObjC::MSG_RET_L.call(rep, ObjC.sel('pixelsWide'))
         height = ObjC::MSG_RET_L.call(rep, ObjC.sel('pixelsHigh'))
-        return nil if width <= 0 || height <= 0
+        return nil unless dimensions_ok?(width, height)
 
         # Multi-frame (animated GIF, APNG, etc.) — return an
         # animated image hash keyed by the retained rep, leaving
