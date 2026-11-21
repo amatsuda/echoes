@@ -1411,3 +1411,20 @@ class Echoes::ScreenRisTest < Test::Unit::TestCase
     assert_equal 'x', screen.grid[0][0].char
   end
 end
+
+class Echoes::ScreenBoundedStacksTest < Test::Unit::TestCase
+  test "the title stack keeps at most ten entries" do
+    screen = Echoes::Screen.new(rows: 5, cols: 10)
+    parser = Echoes::Parser.new(screen)
+    30.times { |i| parser.feed("\e]0;t#{i}\a\e[22;0t") }
+    assert_equal Echoes::Screen::TITLE_STACK_LIMIT, screen.instance_variable_get(:@title_stack).size
+    parser.feed("\e[23;0t")
+    assert_equal 't29', screen.title
+  end
+
+  test "command marks are capped" do
+    screen = Echoes::Screen.new(rows: 5, cols: 10)
+    (Echoes::Screen::COMMAND_MARKS_LIMIT + 100).times { screen.osc133_mark(:prompt_start) }
+    assert_equal Echoes::Screen::COMMAND_MARKS_LIMIT, screen.command_marks.size
+  end
+end

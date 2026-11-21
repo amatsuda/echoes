@@ -1743,3 +1743,22 @@ class Echoes::ParserSgrColorFormsTest < Test::Unit::TestCase
     assert_nil @screen.grid[0][1].hyperlink
   end
 end
+
+class Echoes::ParserStringOverflowTest < Test::Unit::TestCase
+  test "a DCS past the buffer limit is swallowed to ST, not printed" do
+    screen = Echoes::Screen.new(rows: 5, cols: 20)
+    parser = Echoes::Parser.new(screen)
+    payload = "?".b * (Echoes::Parser::DCS_BUFFER_LIMIT + 2048)
+    parser.feed("\ePq#{payload}\e\\ok")
+    assert_equal 'ok', screen.grid[0].map(&:char).join.rstrip
+  end
+
+  test "bg-fill regions are capped" do
+    screen = Echoes::Screen.new(rows: 5, cols: 20)
+    parser = Echoes::Parser.new(screen)
+    (Echoes::Parser::BG_FILLS_LIMIT + 50).times do
+      parser.feed("\e]7772;bg-fill;color=#112233:rect=0,0,1,1\a")
+    end
+    assert_equal Echoes::Parser::BG_FILLS_LIMIT, screen.bg_fills.size
+  end
+end

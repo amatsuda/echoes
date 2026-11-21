@@ -935,7 +935,15 @@ module Echoes
 
     attr_accessor :mouse_tracking, :mouse_encoding, :insert_mode, :active_charset, :application_keypad, :cursor_style, :bell, :single_shift, :sync_active
 
+    # xterm keeps ten; a program looping on `\e[22;0t` would otherwise
+    # grow this without bound.
+    TITLE_STACK_LIMIT = 10
+    # Enough for every prompt a full scrollback can hold; marks that
+    # scrolled out of history long ago are of no use.
+    COMMAND_MARKS_LIMIT = 4096
+
     def push_title
+      @title_stack.shift if @title_stack.size >= TITLE_STACK_LIMIT
       @title_stack.push(@title)
     end
 
@@ -1016,6 +1024,11 @@ module Echoes
     #
     # Marks are stored as visual rows (scrollback rows + grid rows from 0).
     # `:prompt_start` opens a new mark; subsequent kinds populate it.
+    def add_command_mark(mark)
+      @command_marks.shift(@command_marks.size - COMMAND_MARKS_LIMIT + 1) if @command_marks.size >= COMMAND_MARKS_LIMIT
+      @command_marks << mark
+    end
+
     def osc133_mark(kind, exit_code: nil)
       row = @scrollback.size + @cursor.row
       case kind
@@ -1024,11 +1037,11 @@ module Echoes
           prompt_start: row, input_start: nil,
           output_start: nil, output_end: nil, exit_code: nil,
         }
-        @command_marks << @current_command_mark
+        add_command_mark(@current_command_mark)
       when :prompt_end
         @current_command_mark ||= {prompt_start: row, input_start: nil,
                                    output_start: nil, output_end: nil, exit_code: nil}
-        @command_marks << @current_command_mark unless @command_marks.last.equal?(@current_command_mark)
+        add_command_mark(@current_command_mark) unless @command_marks.last.equal?(@current_command_mark)
         @current_command_mark[:input_start] = row
       when :command_start
         return unless @current_command_mark

@@ -31,6 +31,7 @@ module Echoes
     REPLACEMENT_CHAR = "\u{FFFD}"
     CSI_PARAM_LIMIT = 32
     CSI_PARAM_MAX_LEN = 64
+    BG_FILLS_LIMIT = 256
     # 16 MB to accommodate OSC 1337 ;File= base64-encoded image
     # payloads (iTerm2 inline images). Non-image OSCs are short
     # and don't notice the higher cap.
@@ -143,12 +144,15 @@ module Echoes
         @dcs_current_param = +""
         @dcs_data = "".b
         @dcs_intermediate = nil
+        @string_overflow = false
       when 0x5D # ]
         @state = :osc_string
         @osc_string = "".b
+        @string_overflow = false
       when 0x5F # _ (APC — Application Program Command)
         @state = :apc_string
         @apc_string = "".b
+        @string_overflow = false
       when 0x37 # 7
         @screen.save_cursor
         @state = :ground
@@ -289,16 +293,19 @@ module Echoes
     def osc_string(byte)
       case byte
       when 0x07 # BEL terminates OSC
-        dispatch_osc
+        dispatch_osc unless @string_overflow
         @state = :ground
       when 0x1B # ESC — dispatch OSC, enter escape state for ST (\)
-        dispatch_osc
+        dispatch_osc unless @string_overflow
         @state = :escape
       else
+        # Past the limit the rest of the string is still consumed up
+        # to its terminator (and then dropped); falling back to ground
+        # here printed the remainder of a huge payload as text.
         if @osc_string.bytesize < OSC_BUFFER_LIMIT
           @osc_string << byte
         else
-          @state = :ground
+          @string_overflow = true
         end
       end
     end
@@ -310,16 +317,16 @@ module Echoes
     def apc_string(byte)
       case byte
       when 0x07 # BEL terminates APC
-        dispatch_apc
+        dispatch_apc unless @string_overflow
         @state = :ground
       when 0x1B # ESC — dispatch, enter escape state for ST (\)
-        dispatch_apc
+        dispatch_apc unless @string_overflow
         @state = :escape
       else
         if @apc_string.bytesize < APC_BUFFER_LIMIT
           @apc_string << byte
         else
-          @state = :ground
+          @string_overflow = true
         end
       end
     end
@@ -388,12 +395,12 @@ module Echoes
 
     def dcs_passthrough(byte)
       if byte == 0x1B
-        dispatch_dcs
+        dispatch_dcs unless @string_overflow
         @state = :escape
       elsif @dcs_data.bytesize < DCS_BUFFER_LIMIT
         @dcs_data << byte
       else
-        @state = :ground
+        @string_overflow = true
       end
     end
 
@@ -665,6 +672,9 @@ module Echoes
       when 'bg-fill'
         fill = parse_bg_fill_args(args || '')
         if fill && @screen.respond_to?(:bg_fills) && @screen.bg_fills
+          # Every fill is drawn every frame; a program re-sending its
+          # fills on each redraw without ;bg-clear would pile them up.
+          @screen.bg_fills.shift while @screen.bg_fills.size >= BG_FILLS_LIMIT
           @screen.bg_fills << fill
           @screen.mark_all_dirty if @screen.respond_to?(:mark_all_dirty)
         end
