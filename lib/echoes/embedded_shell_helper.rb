@@ -21,9 +21,15 @@
 
 require 'json'
 require 'fiddle/import'
-require 'rubish'
-require 'rubish/runtime/command'
-require 'reline'
+begin
+  require 'rubish'
+  require 'rubish/runtime/command'
+  require 'reline'
+rescue LoadError => e
+  # This runs inside the pane's pty, so the message lands where the
+  # prompt would have been instead of a stack trace.
+  abort "echoes: the embedded shell needs the rubish gem (https://github.com/amatsuda/rubish): #{e.message}"
+end
 
 module Echoes
   module HelperLibc

@@ -38,7 +38,14 @@ module Echoes
     attr_reader :file
 
     def initialize(file:, rows:, cols:)
-      require 'rvim'
+      begin
+        require 'rvim'
+      rescue LoadError
+        # rvim isn't a gem dependency (it comes from a sibling checkout
+        # or git); say so instead of surfacing a bare LoadError from
+        # the Edit File menu item.
+        raise Echoes::Error, "Edit File needs the rvim gem (https://github.com/amatsuda/rvim); install it and restart Echoes"
+      end
       @editor = Rvim::Editor.new(Reline.core.config)
       @rows = rows
       @cols = cols
