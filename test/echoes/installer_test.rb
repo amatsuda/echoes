@@ -4,6 +4,8 @@ require "test_helper"
 require "echoes/installer"
 require "tmpdir"
 require "fileutils"
+require "shellwords"
+require "rbconfig"
 
 class Echoes::InstallerTest < Test::Unit::TestCase
   def setup
@@ -49,7 +51,10 @@ class Echoes::InstallerTest < Test::Unit::TestCase
     end
     wrapper = File.read(File.join(@target, 'Echoes.app/Contents/MacOS/Echoes'))
     expected = File.join(@source, 'Echoes.app/Contents/MacOS/Echoes')
-    assert_match(/exec "#{Regexp.escape(expected)}"/, wrapper)
+    assert_match(/^exec #{Regexp.escape(Shellwords.escape(expected))} "\$@"$/, wrapper)
+    # The Ruby that ran `echoes install` is pinned so the launcher
+    # doesn't probe its way to some other interpreter.
+    assert_match(/^export RUBY="\$\{RUBY:-#{Regexp.escape(Shellwords.escape(RbConfig.ruby))}\}"$/, wrapper)
     # Wrapper must be executable; otherwise LaunchServices won't run it.
     assert((File.stat(File.join(@target, 'Echoes.app/Contents/MacOS/Echoes')).mode & 0o111) != 0,
            "wrapper script must be executable")
@@ -112,5 +117,49 @@ class Echoes::InstallerTest < Test::Unit::TestCase
     [sout.string, serr.string]
   ensure
     $stdout, $stderr = real_out, real_err
+  end
+end
+
+class Echoes::InstallerSafetyTest < Test::Unit::TestCase
+  def setup
+    @source = Dir.mktmpdir("echoes-installer-source with 'quotes' $and spaces")
+    @target = Dir.mktmpdir('echoes-installer-target')
+    %w[Echoes.app EchoesEmbed.app].each do |bundle|
+      FileUtils.mkdir_p(File.join(@source, bundle, 'Contents', 'MacOS'))
+      File.write(File.join(@source, bundle, 'Contents', 'Info.plist'), "<plist/>")
+      launcher = File.join(@source, bundle, 'Contents', 'MacOS', bundle.delete_suffix('.app'))
+      File.write(launcher, "#!/bin/sh\necho launched $1\n")
+      File.chmod(0o755, launcher)
+    end
+  end
+
+  def teardown
+    FileUtils.remove_entry(@source) rescue nil
+    FileUtils.remove_entry(@target) rescue nil
+  end
+
+  def quietly
+    require 'stringio'
+    out, err = $stdout, $stderr
+    $stdout, $stderr = StringIO.new, StringIO.new
+    yield
+  ensure
+    $stdout, $stderr = out, err
+  end
+
+  test "the wrapper survives quotes, spaces and $ in the gem path and passes arguments on" do
+    quietly { Echoes::Installer.install(source_root: @source, target_dir: @target) }
+    wrapper = File.join(@target, 'Echoes.app/Contents/MacOS/Echoes')
+    assert_equal "launched hello\n", IO.popen([wrapper, 'hello'], &:read)
+  end
+
+  test "uninstall leaves a bundle that echoes install did not create" do
+    foreign = File.join(@target, 'Echoes.app')
+    FileUtils.mkdir_p(File.join(foreign, 'Contents', 'MacOS'))
+    File.write(File.join(foreign, 'Contents', 'MacOS', 'Echoes'), "the user's own build")
+    removed = nil
+    quietly { removed = Echoes::Installer.uninstall(target_dir: @target) }
+    assert_equal [], removed
+    assert File.exist?(File.join(foreign, 'Contents', 'MacOS', 'Echoes'))
   end
 end
