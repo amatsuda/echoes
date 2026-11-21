@@ -1652,6 +1652,65 @@ class Echoes::ParserScrollRegionValidationTest < Test::Unit::TestCase
   end
 end
 
+class Echoes::ParserPrivateCsiDispatchTest < Test::Unit::TestCase
+  setup do
+    @screen = Echoes::Screen.new(rows: 10, cols: 10)
+    @parser = Echoes::Parser.new(@screen)
+  end
+
+  test "a ?-flagged CSI is not run as its plain ANSI meaning" do
+    @parser.feed("\e[?4m")        # XTQMODKEYS query, not SGR 4
+    @parser.feed("x")
+    assert_equal false, @screen.grid[0][0].underline
+
+    @parser.feed("\e[3;6r\e[5;5H")
+    @parser.feed("\e[?1r")        # XTRESTORE, not DECSTBM
+    assert_equal [2, 5], [@screen.scroll_top, @screen.scroll_bottom]
+    assert_equal [4, 4], [@screen.cursor.row, @screen.cursor.col]
+  end
+
+  test "an intermediate-byte CSI that isn't implemented is ignored" do
+    @parser.feed("ab\e[1;1H\e[2 @")   # SL (shift left), not ICH
+    assert_equal 'ab', @screen.grid[0].map(&:char).join.rstrip
+  end
+
+  test "DECSET / DECRST and DECSTR / DECSCUSR still work" do
+    @parser.feed("\e[?25l")
+    refute @screen.cursor.visible
+    @parser.feed("\e[?25h")
+    assert @screen.cursor.visible
+    @parser.feed("\e[3 q")
+    assert_equal 3, @screen.cursor_style
+    @parser.feed("\e[!p")
+    assert_equal 0, @screen.cursor_style
+  end
+end
+
+class Echoes::ParserDcsIgnoreTest < Test::Unit::TestCase
+  setup do
+    @screen = Echoes::Screen.new(rows: 5, cols: 20)
+    @parser = Echoes::Parser.new(@screen)
+  end
+
+  test "an unknown DCS is swallowed up to ST instead of printed" do
+    @parser.feed("\ePtmux;\e\e]0;hi\a\e\\after")
+    assert_equal 'after', @screen.grid[0].map(&:char).join.rstrip
+  end
+
+  test "DECRQSS is swallowed rather than fed to the sixel decoder" do
+    @parser.feed("\eP$qm\e\\ok")
+    assert_equal 'ok', @screen.grid[0].map(&:char).join.rstrip
+    assert_nil @screen.grid[0][0].multicell
+  end
+
+  test "XTGETTCAP still gets a reply" do
+    responses = []
+    parser = Echoes::Parser.new(@screen, writer: ->(s) { responses << s })
+    parser.feed("\eP+q#{'TN'.unpack1('H*')}\e\\")
+    assert_equal 1, responses.size
+    assert_match(/\AP1\+r/, responses.first.delete_prefix("\e"))
+  end
+end
 
 class Echoes::ParserSgrColorFormsTest < Test::Unit::TestCase
   setup do

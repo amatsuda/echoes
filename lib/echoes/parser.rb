@@ -85,6 +85,8 @@ module Echoes
         dcs_param(byte)
       when :dcs_passthrough
         dcs_passthrough(byte)
+      when :dcs_ignore
+        dcs_ignore(byte)
       end
     end
 
@@ -336,13 +338,34 @@ module Echoes
         @state = :dcs_param
       when 0x40..0x7E # final byte
         @dcs_params << @dcs_current_param unless @dcs_current_param.empty?
-        if byte == 0x71 # 'q'
-          @state = :dcs_passthrough
-        else
-          @state = :ground
-        end
+        @state = dcs_state_for_final(byte)
       when 0x1B
         @state = :escape
+      end
+    end
+
+    # Only `q` (sixel) and `+q` (XTGETTCAP) are consumed; everything
+    # else, including `$q` (DECRQSS, unanswered for now) and tmux's
+    # `tmux;` passthrough, is swallowed up to ST instead of dropping
+    # to ground, which used to print the body as text.
+    def dcs_state_for_final(byte)
+      if byte == 0x71 && (@dcs_intermediate.nil? || @dcs_intermediate == 0x2B)
+        :dcs_passthrough
+      else
+        @dcs_ignore_esc = false
+        :dcs_ignore
+      end
+    end
+
+    # Swallow until ST (ESC \). An ESC followed by anything else stays
+    # inside the string: tmux's passthrough doubles every ESC in its
+    # payload, so `\e\e]0;hi\a` must not become an OSC of our own.
+    def dcs_ignore(byte)
+      if @dcs_ignore_esc
+        @dcs_ignore_esc = false
+        @state = :ground if byte == 0x5C
+      elsif byte == 0x1B
+        @dcs_ignore_esc = true
       end
     end
 
@@ -357,11 +380,7 @@ module Echoes
         @dcs_intermediate = byte
       when 0x40..0x7E # final byte
         @dcs_params << @dcs_current_param unless @dcs_current_param.empty?
-        if byte == 0x71 # 'q'
-          @state = :dcs_passthrough
-        else
-          @state = :ground
-        end
+        @state = dcs_state_for_final(byte)
       when 0x1B
         @state = :escape
       end
@@ -807,6 +826,17 @@ module Echoes
       end
     end
 
+    # Finals that have a meaning with the `?` private flag here (h/l
+    # are DECSET/DECRST; n keeps its current handling). Any other
+    # private sequence (`\e[?4m` XTQMODKEYS, `\e[?1r` XTRESTORE,
+    # `\e[?1049s` XTSAVE) is ignored instead of running as its plain
+    # ANSI meaning.
+    PRIVATE_FLAG_FINALS = %w[h l n].freeze
+    # Likewise for intermediates: only `!p` (DECSTR) and ` q`
+    # (DECSCUSR) are implemented; `\e[2 @` (SL) must not run as ICH,
+    # nor `\e[…$r` (DECCARA) as DECSTBM.
+    INTERMEDIATE_FINALS = %w[p q].freeze
+
     def dispatch_csi(final)
       if @csi_prefix
         if @csi_prefix == 0x3E && final == 'c'
@@ -814,6 +844,8 @@ module Echoes
         end
         return
       end
+      return if @private_flag && !PRIVATE_FLAG_FINALS.include?(final)
+      return if @csi_intermediate && !INTERMEDIATE_FINALS.include?(final)
 
       params = collect_params
 
