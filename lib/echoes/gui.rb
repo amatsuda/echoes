@@ -2556,7 +2556,7 @@ module Echoes
         return unless pos
         row, col = pos
         button = delta > 0 ? 64 : 65  # 64=scroll up, 65=scroll down
-        send_mouse_event(tab, button, col, row)
+        send_mouse_event(tab, button | mouse_modifier_bits(event_ptr), col, row)
         return
       end
 
@@ -2632,7 +2632,7 @@ module Echoes
         end
       elsif tab.screen.mouse_tracking != :off
         row, col = pos
-        send_mouse_event(tab, 0, col, row)  # button 0 = left press
+        send_mouse_event(tab, 0 | mouse_modifier_bits(event_ptr), col, row)  # button 0 = left press
       elsif click_count >= 3
         # Triple-click: if the clicked row falls inside a command's
         # OSC 133 output region, select the whole region (semantic
@@ -2728,7 +2728,7 @@ module Echoes
 
       if tab.screen.mouse_tracking == :button_event || tab.screen.mouse_tracking == :any_event
         row, col = pos
-        send_mouse_event(tab, 32, col, row)  # 32 = left drag (button 0 + 32)
+        send_mouse_event(tab, 32 | mouse_modifier_bits(event_ptr), col, row)  # 32 = left drag (button 0 + 32)
       elsif @selection_word_anchor
         extend_word_drag_selection(tab, pos)
       else
@@ -2800,7 +2800,7 @@ module Echoes
       pos = grid_position(event_ptr)
       return unless pos
       row, col = pos
-      send_mouse_event(tab, 3, col, row, release: true)  # 3 = release
+      send_mouse_event(tab, 3 | mouse_modifier_bits(event_ptr), col, row, release: true)  # 3 = release
     end
 
     # Pointer-was-hidden + user-shakes-the-mouse path: when the user
@@ -2830,7 +2830,7 @@ module Echoes
       pos = grid_position(event_ptr)
       return unless pos
       row, col = pos
-      send_mouse_event(tab, 2, col, row)  # button 2 = right press
+      send_mouse_event(tab, 2 | mouse_modifier_bits(event_ptr), col, row)  # button 2 = right press
     rescue Errno::EIO, IOError
       close_tab(@active_tab)
     end
@@ -2843,7 +2843,7 @@ module Echoes
       pos = grid_position(event_ptr)
       return unless pos
       row, col = pos
-      send_mouse_event(tab, 34, col, row)  # 34 = right drag (button 2 + 32)
+      send_mouse_event(tab, 34 | mouse_modifier_bits(event_ptr), col, row)  # 34 = right drag (button 2 + 32)
     rescue Errno::EIO, IOError
       close_tab(@active_tab)
     end
@@ -2856,7 +2856,7 @@ module Echoes
       pos = grid_position(event_ptr)
       return unless pos
       row, col = pos
-      send_mouse_event(tab, 3, col, row, release: true)
+      send_mouse_event(tab, 3 | mouse_modifier_bits(event_ptr), col, row, release: true)
     rescue Errno::EIO, IOError
       close_tab(@active_tab)
     end
@@ -2869,7 +2869,7 @@ module Echoes
       pos = grid_position(event_ptr)
       return unless pos
       row, col = pos
-      send_mouse_event(tab, 1, col, row)  # button 1 = middle press
+      send_mouse_event(tab, 1 | mouse_modifier_bits(event_ptr), col, row)  # button 1 = middle press
     rescue Errno::EIO, IOError
       close_tab(@active_tab)
     end
@@ -2882,7 +2882,7 @@ module Echoes
       pos = grid_position(event_ptr)
       return unless pos
       row, col = pos
-      send_mouse_event(tab, 33, col, row)  # 33 = middle drag (button 1 + 32)
+      send_mouse_event(tab, 33 | mouse_modifier_bits(event_ptr), col, row)  # 33 = middle drag (button 1 + 32)
     rescue Errno::EIO, IOError
       close_tab(@active_tab)
     end
@@ -2895,7 +2895,7 @@ module Echoes
       pos = grid_position(event_ptr)
       return unless pos
       row, col = pos
-      send_mouse_event(tab, 3, col, row, release: true)
+      send_mouse_event(tab, 3 | mouse_modifier_bits(event_ptr), col, row, release: true)
     rescue Errno::EIO, IOError
       close_tab(@active_tab)
     end
@@ -5226,6 +5226,18 @@ module Echoes
       end
 
       colors
+    end
+
+    # xterm adds the held modifiers to the button code: 4 Shift,
+    # 8 Meta (Option here), 16 Control. vim and tmux distinguish
+    # Ctrl+click and Shift+click by these bits.
+    def mouse_modifier_bits(event_ptr)
+      flags = ObjC::MSG_RET_L.call(event_ptr, ObjC.sel('modifierFlags'))
+      bits = 0
+      bits |= 4  if (flags & ObjC::NSEventModifierFlagShift) != 0
+      bits |= 8  if (flags & ObjC::NSEventModifierFlagOption) != 0
+      bits |= 16 if (flags & ObjC::NSEventModifierFlagControl) != 0
+      bits
     end
 
     def send_mouse_event(tab, button, col, row, release: false)
