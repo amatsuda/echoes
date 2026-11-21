@@ -4119,6 +4119,10 @@ module Echoes
         if rep && !rep.null?
           ObjC.release(rep)
           img[:rep] = nil
+          # The cached frame belonged to that rep; a later blit of the
+          # same image hash (shared with the kitty cache and other a=p
+          # placements) must not draw through the dangling pointer.
+          img[:cg_image] = nil
         end
       }
       # OSC 7772 hide-pointer / show-pointer — same hide-or-show effect as
