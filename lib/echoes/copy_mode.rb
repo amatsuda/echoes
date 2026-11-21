@@ -17,6 +17,18 @@ module Echoes
       @pending_find = nil   # :f, :F, :t, :T
       @last_find = nil      # [direction, char] for ; and ,
       @line_selection = false
+      @line_anchor_row = nil
+      @search_input = nil   # the query being typed after / or ?
+    end
+
+    # True while a / or ? query is being typed; the GUI can show it.
+    def searching?
+      !@search_input.nil?
+    end
+
+    def search_prompt
+      return nil unless @search_input
+      (@search_direction == :forward ? '/' : '?') + @search_input
     end
 
     def enter
@@ -43,6 +55,13 @@ module Echoes
     # Handle a key in copy mode. Returns :exit if copy mode should end,
     # :yank if text was yanked, nil otherwise.
     def handle_key(key)
+      # A search query is being typed: keys go into it until Enter.
+      if @search_input
+        handle_search_input(key)
+        update_selection_end if selecting?
+        return nil
+      end
+
       # Pending f/F/t/T — next key is the target character
       if @pending_find
         execute_find(@pending_find, key)
@@ -132,12 +151,13 @@ module Echoes
       when "\x06" # Ctrl-F
         move_cursor(@screen.rows, 0)
 
-      # Search
+      # Search: / and ? open a query; the keys that follow build it
+      # (see handle_search_input) and Enter runs it.
       when '/'
-        @search_query = +""
+        @search_input = +""
         @search_direction = :forward
       when '?'
-        @search_query = +""
+        @search_input = +""
         @search_direction = :backward
       when 'n'
         search_next
@@ -159,7 +179,10 @@ module Echoes
       nil
     end
 
-    # Extract text from selection range
+    # Extract text from selection range. Columns are cut from the
+    # cell row, then joined skipping the padding cell behind a wide
+    # character, so `日本x` yanks as "日本x" rather than "日 本 x";
+    # trailing blank cells are dropped from each line.
     def selected_text
       return "" unless @selection_start && @selection_end
 
@@ -169,27 +192,26 @@ module Echoes
 
       lines = []
       (sr..er).each do |row|
-        line = row_text(row)
-        if row == sr && row == er
-          lines << line[sc..ec]
-        elsif row == sr
-          lines << line[sc..]
-        elsif row == er
-          lines << line[0..ec]
-        else
-          lines << line
-        end
+        cells = row_cells(row)
+        from = row == sr ? sc : 0
+        to   = row == er ? ec : cells.size - 1
+        lines << cells_to_text(cells[from..to] || []).rstrip
       end
       lines.join("\n")
     end
 
-    # Scroll offset needed to keep cursor visible
-    def scroll_offset_for_cursor
-      if @cursor_row < 0
-        @cursor_row.abs
-      else
-        0
+    # The pane scroll offset that keeps the cursor on screen, given
+    # the current one: scroll history in when the cursor is above the
+    # grid, back out when it comes down again.
+    def scroll_offset_to_show_cursor(current)
+      rows = @screen.rows
+      offset = current
+      if @cursor_row + offset < 0
+        offset = -@cursor_row
+      elsif @cursor_row + offset >= rows
+        offset = rows - 1 - @cursor_row
       end
+      offset.clamp(0, @screen.scrollback.size)
     end
 
     # Absolute row in the combined scrollback+grid buffer
@@ -287,25 +309,25 @@ module Echoes
     end
 
     def move_word_backward
+      # Only a cursor already in column 0 wraps to the previous line;
+      # a motion that lands on a word starting at column 0 stays there.
+      if @cursor_col == 0
+        if @cursor_row > -@screen.scrollback.size
+          @cursor_row -= 1
+          line = row_text(@cursor_row)
+          col = line.rstrip.length - 1
+          @cursor_col = col < 0 ? 0 : col.clamp(0, @screen.cols - 1)
+        end
+        return
+      end
+
       line = row_text(@cursor_row)
-      col = @cursor_col
-
-      if col > 0
-        col -= 1
-        # Skip whitespace
-        col -= 1 while col > 0 && char_class(line[col]) == :space
-        # Skip to beginning of word
-        cls = char_class(line[col])
-        col -= 1 while col > 0 && char_class(line[col - 1]) == cls
-      end
-
-      if col <= 0 && @cursor_row > -@screen.scrollback.size
-        # Wrap to end of previous line
-        @cursor_row -= 1
-        line = row_text(@cursor_row)
-        col = line.rstrip.length - 1
-        col = 0 if col < 0
-      end
+      col = @cursor_col - 1
+      # Skip whitespace
+      col -= 1 while col > 0 && char_class(line[col]) == :space
+      # Skip to beginning of word
+      cls = char_class(line[col])
+      col -= 1 while col > 0 && char_class(line[col - 1]) == cls
 
       @cursor_col = col.clamp(0, @screen.cols - 1)
     end
@@ -434,29 +456,47 @@ module Echoes
       end
     end
 
+    def handle_search_input(key)
+      case key
+      when "\r", "\n"
+        @search_query = @search_input
+        @search_input = nil
+        search_next
+      when "\e"
+        @search_input = nil
+      when "\x7F", "\b"
+        @search_input.chop!
+      else
+        @search_input << key if key.length == 1 && key.ord >= 0x20
+      end
+    end
+
+    # Rows are searched as text with the wide-character padding
+    # removed, and the hit mapped back to a column, so "日本" matches
+    # the cells `日` `(pad)` `本`.
     def search_forward
       min_row = -@screen.scrollback.size
       max_row = @screen.rows - 1
 
       # Search from current position forward
       ((@cursor_row)..max_row).each do |row|
-        line = row_text(row)
-        start = (row == @cursor_row) ? @cursor_col + 1 : 0
-        idx = line.index(@search_query, start)
+        text, cols = row_text_and_columns(row)
+        start = (row == @cursor_row) ? text_index_after_column(cols, @cursor_col) : 0
+        idx = text.index(@search_query, start)
         if idx
           @cursor_row = row
-          @cursor_col = idx
+          @cursor_col = cols[idx]
           return
         end
       end
 
       # Wrap around from top
       (min_row...@cursor_row).each do |row|
-        line = row_text(row)
-        idx = line.index(@search_query)
+        text, cols = row_text_and_columns(row)
+        idx = text.index(@search_query)
         if idx
           @cursor_row = row
-          @cursor_col = idx
+          @cursor_col = cols[idx]
           return
         end
       end
@@ -468,26 +508,33 @@ module Echoes
 
       # Search from current position backward
       @cursor_row.downto(min_row) do |row|
-        line = row_text(row)
-        limit = (row == @cursor_row) ? [@cursor_col - 1, 0].max : line.length
-        idx = line.rindex(@search_query, limit)
-        if idx && (row != @cursor_row || idx < @cursor_col)
+        text, cols = row_text_and_columns(row)
+        idx = text.rindex(@search_query)
+        if row == @cursor_row
+          idx = nil while idx && cols[idx] >= @cursor_col && (idx = idx > 0 ? text.rindex(@search_query, idx - 1) : nil)
+        end
+        if idx
           @cursor_row = row
-          @cursor_col = idx
+          @cursor_col = cols[idx]
           return
         end
       end
 
       # Wrap around from bottom
       max_row.downto(@cursor_row + 1) do |row|
-        line = row_text(row)
-        idx = line.rindex(@search_query)
+        text, cols = row_text_and_columns(row)
+        idx = text.rindex(@search_query)
         if idx
           @cursor_row = row
-          @cursor_col = idx
+          @cursor_col = cols[idx]
           return
         end
       end
+    end
+
+    # First text index whose column is past `col`.
+    def text_index_after_column(cols, col)
+      cols.index { |c| c > col } || cols.size
     end
 
     # --- Screen-relative ---
@@ -515,31 +562,65 @@ module Echoes
         @selection_start = nil
         @selection_end = nil
         @line_selection = false
+        @line_anchor_row = nil
       else
         @selection_start = [@cursor_row, 0]
         @selection_end = [@cursor_row, @screen.cols - 1]
         @line_selection = true
+        @line_anchor_row = @cursor_row
       end
     end
 
+    # Line-wise selection spans the anchor row and the cursor row,
+    # whichever order; taking min/max against the previous bounds
+    # instead meant `V j j k k` kept all three rows.
     def update_selection_end
       if @line_selection
-        @selection_start = [[@selection_start[0], @cursor_row].min, 0]
-        @selection_end = [[@selection_end[0], @cursor_row].max, @screen.cols - 1]
+        top, bottom = [@line_anchor_row, @cursor_row].minmax
+        @selection_start = [top, 0]
+        @selection_end = [bottom, @screen.cols - 1]
       else
         @selection_end = [@cursor_row, @cursor_col]
       end
     end
 
-    def row_text(row)
+    def row_cells(row)
       if row < 0
         sb_index = @screen.scrollback.size + row
-        return "" if sb_index < 0 || sb_index >= @screen.scrollback.size
-        @screen.scrollback[sb_index].map(&:char).join
+        return [] if sb_index < 0 || sb_index >= @screen.scrollback.size
+        @screen.scrollback[sb_index]
       else
-        return "" if row >= @screen.rows
-        @screen.grid[row].map(&:char).join
+        return [] if row >= @screen.rows
+        @screen.grid[row]
       end
+    end
+
+    # One character per column (the padding cell behind a wide
+    # character keeps its blank), so string indices are columns.
+    def row_text(row)
+      row_cells(row).map(&:char).join
+    end
+
+    def wide_padding?(cell)
+      cell.width == 0 || cell.multicell == :cont
+    end
+
+    def cells_to_text(cells)
+      cells.reject { |c| wide_padding?(c) }.map(&:char).join
+    end
+
+    # The row's text without wide-character padding, plus the column
+    # each text index came from.
+    def row_text_and_columns(row)
+      text = +''
+      cols = []
+      row_cells(row).each_with_index do |cell, col|
+        next if wide_padding?(cell)
+        ch = cell.char
+        cols.concat([col] * ch.length)
+        text << ch
+      end
+      [text, cols]
     end
   end
 end

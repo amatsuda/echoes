@@ -452,3 +452,94 @@ class Echoes::CopyModeTest < Test::Unit::TestCase
     assert_equal(initial_col, @copy_mode.cursor_col)
   end
 end
+
+class Echoes::CopyModeFixesTest < Test::Unit::TestCase
+  def screen_with(*lines, rows: 5, cols: 20)
+    screen = Echoes::Screen.new(rows: rows, cols: cols)
+    lines.each_with_index do |line, i|
+      screen.move_cursor(i, 0)
+      line.each_char { |c| screen.put_char(c) }
+    end
+    screen
+  end
+
+  def copy_mode_at(screen, row, col)
+    screen.move_cursor(row, col)
+    cm = Echoes::CopyMode.new(screen)
+    cm.enter
+    cm
+  end
+
+  test "/ collects the typed query and Enter jumps to it; n and N repeat" do
+    cm = copy_mode_at(screen_with("aaa bar", "foo bar", "bar end"), 0, 0)
+    "/bar".each_char { |k| cm.handle_key(k) }
+    assert cm.searching?
+    assert_equal '/bar', cm.search_prompt
+    assert_equal [0, 0], [cm.cursor_row, cm.cursor_col]   # motion keys did not run
+    cm.handle_key("\r")
+    refute cm.searching?
+    assert_equal [0, 4], [cm.cursor_row, cm.cursor_col]
+    cm.handle_key('n')
+    assert_equal [1, 4], [cm.cursor_row, cm.cursor_col]
+    cm.handle_key('n')
+    assert_equal [2, 0], [cm.cursor_row, cm.cursor_col]
+    cm.handle_key('N')
+    assert_equal [1, 4], [cm.cursor_row, cm.cursor_col]
+  end
+
+  test "backspace edits the query and Escape cancels it" do
+    cm = copy_mode_at(screen_with("foo bar"), 0, 0)
+    "/bax".each_char { |k| cm.handle_key(k) }
+    cm.handle_key("\x7F")
+    cm.handle_key('r')
+    assert_equal '/bar', cm.search_prompt
+    cm.handle_key("\e")
+    refute cm.searching?
+    assert cm.active
+    assert_equal [0, 0], [cm.cursor_row, cm.cursor_col]
+  end
+
+  test "V j j k k leaves a single row selected" do
+    cm = copy_mode_at(screen_with("a", "b", "c", "d"), 1, 0)
+    %w[V j j k k].each { |k| cm.handle_key(k) }
+    assert_equal [[1, 0], [1, 19]], [cm.selection_start, cm.selection_end]
+    cm.handle_key('k')
+    assert_equal [[0, 0], [1, 19]], [cm.selection_start, cm.selection_end]
+  end
+
+  test "b stops on a word that starts in column 0" do
+    cm = copy_mode_at(screen_with("aaa", "foo bar"), 1, 4)
+    cm.handle_key('b')
+    assert_equal [1, 0], [cm.cursor_row, cm.cursor_col]
+    cm.handle_key('b')
+    assert_equal [0, 2], [cm.cursor_row, cm.cursor_col]   # only now wrap to the previous line
+  end
+
+  test "wide characters yank and search as whole characters" do
+    cm = copy_mode_at(screen_with("日本x end"), 0, 0)
+    cm.handle_key('v')
+    cm.handle_key('$')
+    assert_equal '日本x end', cm.selected_text
+    cm.handle_key('v')
+    cm.handle_key('0')
+    "/本x".each_char { |k| cm.handle_key(k) }
+    cm.handle_key("\r")
+    assert_equal [0, 2], [cm.cursor_row, cm.cursor_col]
+  end
+
+  test "scroll_offset_to_show_cursor follows the cursor into history and back" do
+    screen = Echoes::Screen.new(rows: 5, cols: 10)
+    12.times { |i| screen.put_char(i.to_s); screen.line_feed; screen.carriage_return }
+    cm = Echoes::CopyMode.new(screen)
+    cm.enter
+    assert_equal 0, cm.scroll_offset_to_show_cursor(0)
+    cm.handle_key('g')
+    assert_equal screen.scrollback.size, cm.scroll_offset_to_show_cursor(0)
+    cm.handle_key('G')
+    assert_equal 0, cm.scroll_offset_to_show_cursor(screen.scrollback.size)
+    4.times { cm.handle_key('k') }
+    assert_equal 0, cm.scroll_offset_to_show_cursor(0)
+    cm.handle_key('k')
+    assert_equal 1, cm.scroll_offset_to_show_cursor(0)
+  end
+end

@@ -1792,8 +1792,11 @@ module Echoes
 
       # Draw cursor or copy mode cursor
       if copy_mode&.active
-        # Copy mode cursor (inverse block)
-        cm_row = copy_mode.cursor_row
+        # Copy mode cursor (inverse block). cursor_row is relative to
+        # the grid (negative = scrollback); the view is shifted by the
+        # pane's scroll_offset, which copy_mode_key_down keeps in step
+        # with the cursor.
+        cm_row = copy_mode.cursor_row + pane.scroll_offset
         if cm_row >= 0 && cm_row < pane_rows
           cx = px + copy_mode.cursor_col * @cell_width
           cy = py + cm_row * @cell_height
@@ -2021,6 +2024,11 @@ module Echoes
             end
 
       result = pane.copy_mode.handle_key(key)
+      # Keep the copy-mode cursor on screen: scroll history into view
+      # when it moves above the grid, and back down when it returns.
+      if pane.copy_mode
+        pane.scroll_offset = pane.copy_mode.scroll_offset_to_show_cursor(pane.scroll_offset)
+      end
       case result
       when :exit
         pane.copy_mode = nil
