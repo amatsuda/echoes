@@ -407,6 +407,7 @@ module Echoes
       # triggers scroll_up, that path needs the placement already
       # in @placements so its anchor_row gets decremented along
       # with the rest of the content.
+      image[:refs] = image[:refs].to_i + 1   # see KittyGraphics.release_image_if_unreferenced
       @placements << {
         image_id:   image_id,
         anchor_row: anchor_row,

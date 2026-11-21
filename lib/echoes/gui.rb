@@ -7,6 +7,7 @@ require 'uri'
 require 'json'
 require 'fileutils'
 require_relative 'animation_ticker'
+require_relative 'kitty_graphics'   # the placement disposer uses its image bookkeeping
 
 module Echoes
   class GUI
@@ -4382,16 +4383,14 @@ module Echoes
       # short-circuits on the :animated flag.
       screen.placement_disposer = ->(pl) {
         img = pl[:image]
-        next unless img && img[:animated]
-        rep = img[:rep]
-        if rep && !rep.null?
-          ObjC.release(rep)
-          img[:rep] = nil
-          # The cached frame belonged to that rep; a later blit of the
-          # same image hash (shared with the kitty cache and other a=p
-          # placements) must not draw through the dangling pointer.
-          img[:cg_image] = nil
-        end
+        next unless img
+        # One placement fewer holds the image; an animated image's
+        # rep is released only when neither the kitty cache nor any
+        # other placement still refers to it (it used to go with the
+        # first placement to leave, leaving other placements of the
+        # same GIF with a dangling frame).
+        img[:refs] = [img[:refs].to_i - 1, 0].max
+        KittyGraphics.release_image_if_unreferenced(img)
       }
       # OSC 7772 hide-pointer / show-pointer — same hide-or-show effect as
       # the user's Cmd+Shift+P toggle, but invokable from a child program

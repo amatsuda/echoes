@@ -795,3 +795,46 @@ class Echoes::KittyGraphicsChunkingTest < Test::Unit::TestCase
     assert_equal ['big2'], @state[:cache].keys
   end
 end
+
+class Echoes::KittyGraphicsImageLifetimeTest < Test::Unit::TestCase
+  def animated_image
+    released = []
+    img = {animated: true, rep: :rep, width: 2, height: 2, refs: 0, release: -> { released << :released }}
+    [img, released]
+  end
+
+  test "an animated image is released when it leaves the cache with no placements" do
+    img, released = animated_image
+    state = {chunks: {}, cache: {}}
+    Echoes::KittyGraphics.cache_image(state, '1', img)
+    assert_empty released
+    Echoes::KittyGraphics.clear_cache(state)
+    assert_equal [:released], released
+    assert_nil img[:rep]
+  end
+
+  test "an animated image still placed survives cache eviction and goes with its last placement" do
+    img, released = animated_image
+    state = {chunks: {}, cache: {}}
+    Echoes::KittyGraphics.cache_image(state, '1', img)
+    screen = Echoes::Screen.new(rows: 10, cols: 20)
+    screen.cell_pixel_width = 8.0
+    screen.cell_pixel_height = 16.0
+    disposer = ->(pl) {
+      i = pl[:image]
+      i[:refs] -= 1
+      Echoes::KittyGraphics.release_image_if_unreferenced(i)
+    }
+    screen.placement_disposer = disposer
+    screen.put_kitty_image(image: img, image_id: '1', suppress_cursor: true)
+    screen.cursor.col = 5
+    screen.put_kitty_image(image: img, image_id: '1', suppress_cursor: true)
+    assert_equal 2, img[:refs]
+    Echoes::KittyGraphics.clear_cache(state)
+    assert_empty released, "two placements still show it"
+    screen.dispose_placements! { |pl| pl[:anchor_col] == 0 }
+    assert_empty released, "one placement still shows it"
+    screen.dispose_placements!
+    assert_equal [:released], released
+  end
+end

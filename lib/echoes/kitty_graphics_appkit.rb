@@ -141,6 +141,11 @@ module Echoes
         {
           animated: true,
           rep: rep,
+          # The image hash is shared by the kitty cache and every
+          # placement of it; whoever drops the last reference (see
+          # KittyGraphics.release_image) calls this once.
+          release: -> { ObjC.release(rep) },
+          refs: 0,
           width: width,
           height: height,
           frame_count: frame_count,

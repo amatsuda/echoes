@@ -163,13 +163,13 @@ module Echoes
         case sel.downcase
         when 'a', ''
           screen.dispose_placements! if screen.respond_to?(:dispose_placements!)
-          state[:cache].clear if upper
+          clear_cache(state) if upper
         when 'i', 'n'
           if target && !target.empty?
             if screen.respond_to?(:dispose_placements!)
               screen.dispose_placements! { |pl| pl[:image_id] == target }
             end
-            state[:cache].delete(target) if upper
+            evict_image(state[:cache].delete(target)) if upper
           end
         end
         respond(writer, opts, ok: true)
@@ -401,14 +401,41 @@ module Echoes
 
     def cache_image(state, id, image)
       return if id.empty?
-      state[:cache].delete(id)         # touch (LRU)
+      previous = state[:cache].delete(id)   # touch (LRU)
+      evict_image(previous) if previous && !previous.equal?(image)
+      image[:cached] = true
       state[:cache][id] = image
-      state[:cache].shift while state[:cache].size > CACHE_LIMIT
+      evict_image(state[:cache].shift.last) while state[:cache].size > CACHE_LIMIT
       total = state[:cache].sum { |_, img| image_bytes(img) }
       while total > CACHE_BUDGET_BYTES && state[:cache].size > 1
         _, evicted = state[:cache].shift
         total -= image_bytes(evicted)
+        evict_image(evicted)
       end
+    end
+
+    # An image hash is held by the cache (one reference) and by each
+    # placement (refs). An animated image carries a retained
+    # NSBitmapImageRep that must be released exactly once, when the
+    # last holder lets go: the cache on eviction, or the GUI's
+    # placement disposer when the last placement leaves.
+    def evict_image(image)
+      return unless image
+      image[:cached] = false
+      release_image_if_unreferenced(image)
+    end
+
+    def release_image_if_unreferenced(image)
+      return unless image && image[:release] && !image[:cached] && image[:refs].to_i <= 0
+      image[:release].call
+      image[:release] = nil
+      image[:rep] = nil
+      image[:cg_image] = nil
+    end
+
+    def clear_cache(state)
+      state[:cache].each_value { |img| evict_image(img) }
+      state[:cache].clear
     end
 
     def display_image(screen, image, opts)
