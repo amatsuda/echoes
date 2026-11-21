@@ -3758,6 +3758,12 @@ module Echoes
       ObjC::NSDragOperationMove
     end
 
+    def point_in_window?(nswindow, screen_x, screen_y)
+      return false if nswindow.nil? || nswindow.null?
+      wx, wy, ww, wh = nsrect_via_invocation(nswindow, 'frame')
+      screen_x >= wx && screen_x < wx + ww && screen_y >= wy && screen_y < wy + wh
+    end
+
     def clear_drag_target
       return unless @drag_insertion_index
       @drag_insertion_index = nil
@@ -3795,6 +3801,11 @@ module Echoes
       tab_index = src_ws.delete(:dragging_tab_index)
       return unless operation == ObjC::NSDragOperationNone
       return unless tab_index && tab_index >= 0 && tab_index < src_ws[:tabs].size
+      # NSDragOperationNone also covers Escape and a drop back onto
+      # the source window's own grid (its drop target refuses the tab
+      # it came from). Neither is a tear-out: a release inside the
+      # source window just cancels.
+      return if point_in_window?(src_ws[:nswindow], screen_x, screen_y)
 
       tab = src_ws[:tabs].delete_at(tab_index)
       src_ws[:active_tab] = src_ws[:active_tab].clamp(
