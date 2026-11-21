@@ -294,24 +294,36 @@ module Echoes
     private
 
     def parse_color(args)
-      if args.size == 1 && args[0].is_a?(String)
+      self.class.parse_color(args)
+    end
+
+    # Accepts "#rgb", "#rrggbb", "#rrggbbaa", any of those followed by
+    # an alpha (`cursor_color "#93a1a1", 0.7`, the documented form),
+    # or 3–4 numbers in 0..1. Anything else raises so a typo in the
+    # config is reported at the line rather than as a crash in the
+    # renderer later.
+    def self.parse_color(args)
+      args = args.flatten
+      if args[0].is_a?(String)
         hex = args[0].delete_prefix('#')
-        r = hex[0, 2].to_i(16) / 255.0
-        g = hex[2, 2].to_i(16) / 255.0
-        b = hex[4, 2].to_i(16) / 255.0
-        if hex.size == 8
-          a = hex[6, 2].to_i(16) / 255.0
-          [r, g, b, a]
-        else
-          [r, g, b]
-        end
-      else
+        raise ArgumentError, "invalid color #{args[0].inspect} (use #rgb, #rrggbb or #rrggbbaa)" unless hex.match?(/\A\h{3}(?:\h{3}(?:\h{2})?)?\z/)
+        hex = hex.chars.map { |c| c * 2 }.join if hex.size == 3
+        rgb = hex.scan(/\h\h/).map { |h| h.to_i(16) / 255.0 }
+        raise ArgumentError, "invalid color #{args.inspect}: expected one alpha value after the hex" if args.size > 2
+        rgb << Float(args[1]).clamp(0.0, 1.0) if args.size == 2
+        rgb
+      elsif args.size.between?(3, 4) && args.all? { |a| a.is_a?(Numeric) }
         args.map(&:to_f)
+      else
+        raise ArgumentError, "invalid color #{args.inspect} (use a hex string or 3-4 numbers in 0..1)"
       end
     end
   end
 
-  CONFIG_PATH = File.join(Dir.home, '.config', 'echoes', 'echoes.conf')
+  # $ECHOES_CONFIG overrides the location (the test suite points it at
+  # a file that doesn't exist so the developer's own config can't
+  # change test results).
+  CONFIG_PATH = ENV['ECHOES_CONFIG'] || File.join(Dir.home, '.config', 'echoes', 'echoes.conf')
 
   def self.config
     @config ||= Configuration.new

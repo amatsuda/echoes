@@ -56,20 +56,7 @@ module Echoes
     private
 
     def parse_color(args)
-      if args.size == 1 && args[0].is_a?(String)
-        hex = args[0].delete_prefix('#')
-        r = hex[0, 2].to_i(16) / 255.0
-        g = hex[2, 2].to_i(16) / 255.0
-        b = hex[4, 2].to_i(16) / 255.0
-        if hex.size == 8
-          a = hex[6, 2].to_i(16) / 255.0
-          [r, g, b, a]
-        else
-          [r, g, b]
-        end
-      else
-        args.map(&:to_f)
-      end
+      Configuration.parse_color(args)
     end
   end
 end

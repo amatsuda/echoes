@@ -129,3 +129,39 @@ class Echoes::ConfigurationTest < Test::Unit::TestCase
     $VERBOSE = old_verbose
   end
 end
+
+class Echoes::ConfigurationColorParsingTest < Test::Unit::TestCase
+  def config(&blk)
+    c = Echoes::Configuration.new
+    c.instance_eval(&blk)
+    c
+  end
+
+  test "three-digit hex expands" do
+    assert_equal [1.0, 1.0, 1.0], config { foreground '#fff' }.foreground
+    assert_equal [0x11 / 255.0, 0x22 / 255.0, 0x33 / 255.0], config { background '#123' }.background
+  end
+
+  test "hex followed by an alpha value (the documented profile form)" do
+    assert_equal [0x93 / 255.0, 0xa1 / 255.0, 0xa1 / 255.0, 0.7], config { cursor_color '#93a1a1', 0.7 }.cursor_color
+  end
+
+  test "numeric triples and quads still work" do
+    assert_equal [0.1, 0.2, 0.3], config { foreground 0.1, 0.2, 0.3 }.foreground
+    assert_equal [0.1, 0.2, 0.3, 0.4], config { cursor_color 0.1, 0.2, 0.3, 0.4 }.cursor_color
+  end
+
+  test "invalid colours raise a clear error instead of producing garbage" do
+    assert_raise(ArgumentError) { config { foreground 'red' } }
+    assert_raise(ArgumentError) { config { foreground '#12345' } }
+    assert_raise(ArgumentError) { config { foreground 1.0 } }
+    assert_raise(ArgumentError) { config { foreground '#ffffff', 0.5, 0.5 } }
+  end
+
+  test "profiles use the same parser" do
+    c = config { profile('P') { cursor_color '#93a1a1', 0.7; background '#000' } }
+    p = c.profiles['P']
+    assert_equal [0x93 / 255.0, 0xa1 / 255.0, 0xa1 / 255.0, 0.7], p.cursor_color
+    assert_equal [0.0, 0.0, 0.0], p.background
+  end
+end
