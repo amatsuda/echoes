@@ -2037,9 +2037,8 @@ module Echoes
         pane.write_input("\e[Z")
       elsif mod > 1 && (seq = map_modified_key(chars, mod))
         pane.write_input(seq)
-      elsif (flags & ObjC::NSEventModifierFlagControl) != 0
-        ctrl_char = (chars[0].ord & 0x1F).chr
-        pane.write_input(ctrl_char)
+      elsif (flags & ObjC::NSEventModifierFlagControl) != 0 && (ctrl_seq = self.class.control_sequence(chars, flags))
+        pane.write_input(ctrl_seq)
       elsif (flags & ObjC::NSEventModifierFlagOption) != 0
         pane.write_input("\e#{chars}")
       else
@@ -5090,6 +5089,30 @@ module Echoes
       "\u{F70E}" => ['23', '~'],  # F11
       "\u{F70F}" => ['24', '~'],  # F12
     }.freeze
+
+    # What xterm sends for Ctrl plus a key. Letters mask to their
+    # control byte; the digits and punctuation that have a C0 meaning
+    # get it explicitly, since `('3'.ord & 0x1F)` is ^S (XOFF, which
+    # froze output) where xterm sends ESC. Ctrl+Option prefixes ESC.
+    CONTROL_KEY_BYTES = {
+      '2' => "\x00", ' ' => "\x00", '@' => "\x00",
+      '3' => "\e",   '[' => "\e",
+      '4' => "\x1c", '\\' => "\x1c",
+      '5' => "\x1d", ']' => "\x1d",
+      '6' => "\x1e", '^' => "\x1e",
+      '7' => "\x1f", '_' => "\x1f", '-' => "\x1f", '/' => "\x1f",
+      '8' => "\x7f", '?' => "\x7f",
+      "\x7f" => "\x08",   # Ctrl+Backspace
+    }.freeze
+
+    def self.control_sequence(chars, flags)
+      return nil if chars.nil? || chars.empty?
+      key = chars[0]
+      byte = CONTROL_KEY_BYTES[key]
+      byte ||= (key.ord & 0x1F).chr if key.match?(/[A-Za-z]/)
+      return nil unless byte
+      (flags & ObjC::NSEventModifierFlagOption) != 0 ? "\e#{byte}" : byte
+    end
 
     def modifier_param(flags)
       m = 1

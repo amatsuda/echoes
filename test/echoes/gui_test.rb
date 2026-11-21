@@ -743,3 +743,28 @@ class Echoes::GUIUnderlineStyleTest < Test::Unit::TestCase
     assert_equal Echoes::ObjC::NSUnderlineStyleSingle | Echoes::ObjC::NSUnderlinePatternDash, Echoes::GUI.underline_style_mask(5)
   end
 end
+
+class Echoes::GUIControlKeysTest < Test::Unit::TestCase
+  CTRL = Echoes::ObjC::NSEventModifierFlagControl
+  OPT  = Echoes::ObjC::NSEventModifierFlagOption
+
+  test "Ctrl+letter is the control byte" do
+    assert_equal "\x03", Echoes::GUI.control_sequence('c', CTRL)
+    assert_equal "\x01", Echoes::GUI.control_sequence('A', CTRL)
+  end
+
+  test "Ctrl+digit and punctuation follow xterm, not a bare bit mask" do
+    assert_equal "\x00", Echoes::GUI.control_sequence('2', CTRL)
+    assert_equal "\e",   Echoes::GUI.control_sequence('3', CTRL)   # was ^S (XOFF)
+    assert_equal "\x1c", Echoes::GUI.control_sequence('4', CTRL)
+    assert_equal "\x1f", Echoes::GUI.control_sequence('7', CTRL)
+    assert_equal "\x7f", Echoes::GUI.control_sequence('8', CTRL)
+    assert_equal "\x08", Echoes::GUI.control_sequence("\x7f", CTRL)   # Ctrl+Backspace
+    assert_equal "\x00", Echoes::GUI.control_sequence(' ', CTRL)
+    assert_nil Echoes::GUI.control_sequence('9', CTRL)                # no C0 meaning
+  end
+
+  test "Ctrl+Option prefixes ESC" do
+    assert_equal "\e\x03", Echoes::GUI.control_sequence('c', CTRL | OPT)
+  end
+end
