@@ -1290,3 +1290,63 @@ class Echoes::ScreenTest < Test::Unit::TestCase
     assert_equal false, @screen.grid[0][2].bold
   end
 end
+
+class Echoes::ScreenHostileCountsTest < Test::Unit::TestCase
+  HUGE = 999_999_999
+
+  setup do
+    @screen = Echoes::Screen.new(rows: 5, cols: 10)
+    5.times { |r| 10.times { |c| @screen.cursor.row = r; @screen.cursor.col = c; @screen.put_char('x') } }
+    @screen.cursor.row = 2
+    @screen.cursor.col = 3
+  end
+
+  def assert_prompt
+    t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+    yield
+    assert_operator Process.clock_gettime(Process::CLOCK_MONOTONIC) - t0, :<, 0.5
+  end
+
+  def blank_rows
+    @screen.grid.count { |row| row.all? { |cell| cell.char == ' ' } }
+  end
+
+  test "scroll_up with a huge count clears the region and returns promptly" do
+    assert_prompt { @screen.scroll_up(HUGE) }
+    assert_equal 5, blank_rows
+  end
+
+  test "scroll_down, insert_lines and delete_lines with huge counts return promptly" do
+    assert_prompt { @screen.scroll_down(HUGE) }
+    assert_equal 5, blank_rows
+    @screen.put_char('y')
+    assert_prompt { @screen.insert_lines(HUGE) }
+    assert_prompt { @screen.delete_lines(HUGE) }
+    assert_equal 5, blank_rows
+  end
+
+  test "insert_chars and delete_chars with huge counts clear the rest of the row only" do
+    assert_prompt { @screen.delete_chars(HUGE) }
+    assert_equal 'xxx       ', @screen.grid[2].map(&:char).join
+    assert_equal 'xxxxxxxxxx', @screen.grid[1].map(&:char).join
+    @screen.cursor.col = 0
+    assert_prompt { @screen.insert_chars(HUGE) }
+    assert_equal '          ', @screen.grid[2].map(&:char).join
+  end
+
+  test "repeat_char and backward_tab with huge counts return promptly" do
+    @screen.put_char('z')
+    assert_prompt { @screen.repeat_char(HUGE) }
+    assert_prompt { @screen.backward_tab(HUGE) }
+    assert_equal 0, @screen.cursor.col
+  end
+
+  test "a CSI parameter with hundreds of digits is handled promptly" do
+    parser = Echoes::Parser.new(@screen)
+    assert_prompt { parser.feed("\e[#{'9' * 500}S") }
+    assert_equal 5, blank_rows
+    # and the parser is back in ground state
+    parser.feed("A")
+    assert_equal 'A', @screen.grid[@screen.cursor.row][@screen.cursor.col - 1].char
+  end
+end

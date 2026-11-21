@@ -206,10 +206,13 @@ module Echoes
       @last_char = c
     end
 
+    # CSI counts come straight off the wire, so every n.times below
+    # clamps n to what could possibly change the grid; `\e[999999999S`
+    # otherwise spins for minutes.
     def repeat_char(n = 1)
       return unless @last_char
 
-      n.times { put_char(@last_char) }
+      [n, @rows * @cols].min.times { put_char(@last_char) }
     end
 
     def put_multicell(text, scale:, width:, frac_n:, frac_d:, valign:, halign:,
@@ -549,7 +552,7 @@ module Echoes
 
     def backward_tab(n = 1)
       @pending_wrap = false
-      n.times do
+      [n, @cols].min.times do
         prev_stop = @tab_stops.reverse.find { |s| s < @cursor.col }
         @cursor.col = prev_stop || 0
       end
@@ -611,7 +614,7 @@ module Echoes
       @pending_wrap = false
       return unless @cursor.row >= @scroll_top && @cursor.row <= @scroll_bottom
 
-      n.times do
+      [n, scroll_region_height].min.times do
         @grid.insert(@cursor.row, Array.new(@cols) { Cell.new })
         @line_wrapped.insert(@cursor.row, false)
         @grid.delete_at(@scroll_bottom + 1)
@@ -624,7 +627,7 @@ module Echoes
       @pending_wrap = false
       return unless @cursor.row >= @scroll_top && @cursor.row <= @scroll_bottom
 
-      n.times do
+      [n, scroll_region_height].min.times do
         @grid.delete_at(@cursor.row)
         @line_wrapped.delete_at(@cursor.row)
         @grid.insert(@scroll_bottom, Array.new(@cols) { Cell.new })
@@ -636,7 +639,7 @@ module Echoes
     def delete_chars(n = 1)
       @pending_wrap = false
       row = @grid[@cursor.row]
-      n.times do
+      [n, @cols - @cursor.col].min.times do
         row.delete_at(@cursor.col)
         row.push(Cell.new)
       end
@@ -646,7 +649,7 @@ module Echoes
     def insert_chars(n = 1)
       @pending_wrap = false
       row = @grid[@cursor.row]
-      n.times do
+      [n, @cols - @cursor.col].min.times do
         row.pop
         row.insert(@cursor.col, Cell.new)
       end
@@ -664,6 +667,7 @@ module Echoes
 
     def scroll_up(n = 1)
       @pending_wrap = false
+      n = [n, scroll_region_height].min
       n.times do
         if @scroll_top == 0
           row = @grid[@scroll_top]
@@ -696,7 +700,7 @@ module Echoes
 
     def scroll_down(n = 1)
       @pending_wrap = false
-      n.times do
+      [n, scroll_region_height].min.times do
         @grid.delete_at(@scroll_bottom)
         @line_wrapped.delete_at(@scroll_bottom)
         @grid.insert(@scroll_top, Array.new(@cols) { Cell.new })
@@ -1466,6 +1470,10 @@ module Echoes
 
     def clamp_row(row)
       [[row, 0].max, @rows - 1].min
+    end
+
+    def scroll_region_height
+      @scroll_bottom - @scroll_top + 1
     end
 
     def clamp_col(col)

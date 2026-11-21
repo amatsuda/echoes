@@ -30,6 +30,7 @@ module Echoes
 
     REPLACEMENT_CHAR = "\u{FFFD}"
     CSI_PARAM_LIMIT = 32
+    CSI_PARAM_MAX_LEN = 64
     # 16 MB to accommodate OSC 1337 ;File= base64-encoded image
     # payloads (iTerm2 inline images). Non-image OSCs are short
     # and don't notice the higher cap.
@@ -253,7 +254,9 @@ module Echoes
     def csi_param(byte)
       case byte
       when 0x30..0x39 # 0-9
-        @current_param << byte.chr
+        # Long enough for any colon-joined SGR sub-parameter list;
+        # further digits of a runaway number are dropped.
+        @current_param << byte.chr if @current_param.size < CSI_PARAM_MAX_LEN
       when 0x3A # : (sub-parameter separator)
         @current_param << ':'
       when 0x3B # ;
