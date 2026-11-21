@@ -105,6 +105,12 @@ module Echoes
       !@embedded_shell.nil?
     end
 
+    # An editor pane with a buffer that hasn't been written; closing
+    # it throws the edits away, so the GUI asks first.
+    def unsaved_changes?
+      editor? && @editor.modified?
+    end
+
     # The directory the shell last announced via OSC 7, as a local
     # path, or nil when it hasn't, or the URI points elsewhere.
     def local_cwd

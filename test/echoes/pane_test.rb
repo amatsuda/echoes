@@ -161,3 +161,19 @@ class Echoes::PaneChildEnvTest < Test::Unit::TestCase
     ENV.replace(saved) if saved
   end
 end
+
+class Echoes::PaneUnsavedChangesTest < Test::Unit::TestCase
+  FakeEditor = Struct.new(:modified) do
+    def modified? = modified
+    def closed? = false
+  end
+
+  test "unsaved_changes? is true only for an editor pane with a modified buffer" do
+    pane = Echoes::Pane.allocate
+    refute pane.unsaved_changes?                          # not an editor pane
+    pane.instance_variable_set(:@editor, FakeEditor.new(false))
+    refute pane.unsaved_changes?
+    pane.instance_variable_set(:@editor, FakeEditor.new(true))
+    assert pane.unsaved_changes?
+  end
+end

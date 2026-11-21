@@ -139,6 +139,7 @@ module Echoes
 
     def close_tab(index)
       return if index < 0 || index >= @tabs.size
+      return unless confirm_discard_unsaved?(@tabs[index].panes)
 
       @tabs[index].close
       @tabs.delete_at(index)
@@ -1035,7 +1036,7 @@ module Echoes
         tab = current_tab
         if tab.pane_tree.single_pane?
           close_tab(@active_tab)
-        else
+        elsif confirm_discard_unsaved?([tab.active_pane])
           tab.close_active_pane
         end
         ObjC::MSG_VOID_I.call(@view, ObjC.sel('setNeedsDisplay:'), 1)
@@ -4664,6 +4665,17 @@ module Echoes
         entry.start_with?('/') ? entry == program : entry == File.basename(program)
       end
       allowed ? :allow : config.open_window_requests
+    end
+
+    # Cmd-W on an editor pane with unwritten changes threw them away
+    # without a word. Ask, naming the files.
+    def confirm_discard_unsaved?(panes)
+      dirty = panes.select(&:unsaved_changes?)
+      return true if dirty.empty?
+      names = dirty.map { |p| p.editor.file ? File.basename(p.editor.file) : '[No Name]' }
+      confirm_dialog("Discard unsaved changes to #{names.join(', ')}?",
+                     "The editor buffer has changes that haven't been written. Closing discards them.",
+                     'Discard')
     end
 
     def confirm_open_window(argv)

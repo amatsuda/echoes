@@ -132,6 +132,10 @@ module Echoes
       @editor.quit?
     end
 
+    def modified?
+      @editor.modified ? true : false
+    end
+
     # Short label for the current vim mode (used in the statusline
     # and exposed for window-title / future status-bar plumbing).
     def mode_label
