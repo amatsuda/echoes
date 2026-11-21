@@ -732,3 +732,14 @@ class Echoes::GUIPaneHitTestingTest < Test::Unit::TestCase
     refute @gui.send(:in_tab_bar?, 24 * 20.0 + 1)
   end
 end
+
+class Echoes::GUIUnderlineStyleTest < Test::Unit::TestCase
+  test "SGR 4:n styles map to AppKit underline masks" do
+    assert_equal Echoes::ObjC::NSUnderlineStyleSingle, Echoes::GUI.underline_style_mask(true)
+    assert_equal Echoes::ObjC::NSUnderlineStyleSingle, Echoes::GUI.underline_style_mask(1)
+    assert_equal Echoes::ObjC::NSUnderlineStyleDouble, Echoes::GUI.underline_style_mask(2)
+    assert_equal Echoes::ObjC::NSUnderlineStyleThick,  Echoes::GUI.underline_style_mask(3)
+    assert_equal Echoes::ObjC::NSUnderlineStyleSingle | Echoes::ObjC::NSUnderlinePatternDot,  Echoes::GUI.underline_style_mask(4)
+    assert_equal Echoes::ObjC::NSUnderlineStyleSingle | Echoes::ObjC::NSUnderlinePatternDash, Echoes::GUI.underline_style_mask(5)
+  end
+end

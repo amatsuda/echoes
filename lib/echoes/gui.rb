@@ -1742,7 +1742,7 @@ module Echoes
             if cell.concealed || (cell.blink && !@cursor_blink_on)
               fg_color = bg_color
             elsif cell.faint
-              fg_color = make_color_with_alpha(fg_color, 0.5)
+              fg_color = faint_color_for(fg_color)
             end
             # OSC 7772 cell-alpha — translucent text against whatever's
             # below (slide bg fill, screen bg). Sits AFTER faint so a
@@ -1753,7 +1753,14 @@ module Echoes
               fg_color = make_color_with_alpha(fg_color, cell.alpha)
             end
 
-            sig = [base_font.to_i, fg_color.to_i, cell.underline, cell.strikethrough, cell.alpha]
+            underline_color = cell.underline && cell.underline_color ? resolve_color(cell.underline_color, nil) : nil
+            # A glyph from a fallback font advances by that font's own
+            # width, so a run of them drifts off the cell grid (btop's
+            # braille graphs, Nerd Font icons). Such cells are drawn one
+            # per cell: the run key carries the column.
+            per_cell = base_font.to_i != @font.to_i && base_font.to_i != @bold_font.to_i
+            sig = [base_font.to_i, fg_color.to_i, cell.underline, underline_color.to_i,
+                   cell.strikethrough, cell.alpha, per_cell ? c : nil]
             if run_sig != sig
               flush_run.call
               run_sig     = sig
@@ -1768,7 +1775,10 @@ module Echoes
                 # `0` only does fi/fl-style essential ones.
                 ObjC::NSLigatureAttributeName        => ObjC.nsnumber_int(2),
               }
-              attrs[ObjC::NSUnderlineStyleAttributeName]     = ObjC.nsnumber_int(1) if cell.underline
+              if cell.underline
+                attrs[ObjC::NSUnderlineStyleAttributeName] = ObjC.nsnumber_int(self.class.underline_style_mask(cell.underline))
+                attrs[ObjC::NSUnderlineColorAttributeName] = underline_color if underline_color
+              end
               attrs[ObjC::NSStrikethroughStyleAttributeName] = ObjC.nsnumber_int(1) if cell.strikethrough
               run_attrs = ObjC.nsdict(attrs)
             end
@@ -2872,6 +2882,7 @@ module Echoes
       ObjC.release(@selection_color)   if @selection_color
       ObjC.release(@cursor_ns_color)   if @cursor_ns_color
       @colors&.each_value { |c| ObjC.release(c) }
+      release_faint_colors   # keyed by palette colour pointers, which just changed
 
       @colors = build_color_table
       @default_fg      = make_color(*@active_profile.foreground)
@@ -4897,6 +4908,19 @@ module Echoes
       end
     end
 
+    # SGR 4:n styles → NSUnderlineStyle. 4:3 (curly) has no AppKit
+    # equivalent and draws as a thick line so it still stands out
+    # from a plain underline, as neovim's undercurl diagnostics expect.
+    def self.underline_style_mask(style)
+      case style
+      when 2 then ObjC::NSUnderlineStyleDouble
+      when 3 then ObjC::NSUnderlineStyleThick
+      when 4 then ObjC::NSUnderlineStyleSingle | ObjC::NSUnderlinePatternDot
+      when 5 then ObjC::NSUnderlineStyleSingle | ObjC::NSUnderlinePatternDash
+      else ObjC::NSUnderlineStyleSingle
+      end
+    end
+
     def font_for_char(char)
       return @font if char.ascii_only?
 
@@ -5112,6 +5136,7 @@ module Echoes
           if @rgb_color_cache.size >= RGB_COLOR_CACHE_LIMIT
             @rgb_color_cache.each_value { |c| ObjC.release(c) }
             @rgb_color_cache.clear
+            release_faint_colors
           end
           make_color(val[0] / 255.0, val[1] / 255.0, val[2] / 255.0)
         end
@@ -5120,6 +5145,21 @@ module Echoes
     end
 
     RGB_COLOR_CACHE_LIMIT = 4096
+
+    # colorWithAlphaComponent: returns a fresh autoreleased object, so
+    # faint text got a new colour per cell, which changed the run
+    # signature cell by cell: faint text drew one glyph at a time and
+    # lost its ligatures. Cache per base colour; the cache is dropped
+    # with the truecolour cache whose pointers key it.
+    def faint_color_for(color)
+      @faint_color_cache ||= {}
+      @faint_color_cache[color.to_i] ||= ObjC.retain(make_color_with_alpha(color, 0.5))
+    end
+
+    def release_faint_colors
+      @faint_color_cache&.each_value { |c| ObjC.release(c) }
+      @faint_color_cache = {}
+    end
 
     def make_color_with_alpha(color, alpha)
       ObjC::MSG_PTR_D.call(color, ObjC.sel('colorWithAlphaComponent:'), alpha)

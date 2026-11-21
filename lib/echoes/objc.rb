@@ -186,6 +186,14 @@ module Echoes
     NSForegroundColorAttributeName = appkit_const('NSForegroundColorAttributeName')
     NSUnderlineStyleAttributeName      = appkit_const('NSUnderlineStyleAttributeName')
     NSStrikethroughStyleAttributeName  = appkit_const('NSStrikethroughStyleAttributeName')
+    NSUnderlineColorAttributeName      = appkit_const('NSUnderlineColorAttributeName')
+    # NSUnderlineStyle bits: single / thick / double, and the pattern
+    # bits that turn a single underline into dots or dashes.
+    NSUnderlineStyleSingle       = 0x01
+    NSUnderlineStyleThick        = 0x02
+    NSUnderlineStyleDouble       = 0x09
+    NSUnderlinePatternDot        = 0x0100
+    NSUnderlinePatternDash       = 0x0200
     NSLigatureAttributeName            = appkit_const('NSLigatureAttributeName')
     NSParagraphStyleAttributeName      = appkit_const('NSParagraphStyleAttributeName')
     NSPasteboardTypeString         = appkit_const('NSPasteboardTypeString')
