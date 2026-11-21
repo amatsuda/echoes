@@ -1,6 +1,11 @@
 # frozen_string_literal: true
 
 $LOAD_PATH.unshift File.expand_path("../lib", __dir__)
+# Requiring echoes loads ~/.config/echoes/echoes.conf, and several
+# classes (CopyMode's word separators, Screen's scrollback limit, the
+# profile fallbacks) read Echoes.config; keep the developer's own
+# settings out of the run.
+ENV["ECHOES_CONFIG"] ||= File.join(__dir__, "no-such-echoes.conf")
 require "echoes"
 
 require "test-unit"
