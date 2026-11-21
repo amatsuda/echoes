@@ -83,9 +83,13 @@ module Echoes
 
     def feed_key(ch)
       mapped = SPECIAL_KEY_MAP[ch] || ch
+      @last_error = nil
       mapped.each_char { |c| @editor.send(:dispatch_synthesized_key, c) }
       true
-    rescue
+    rescue StandardError => e
+      # Swallowing this silently hid failed `:w`s; show it where vim
+      # would, on the status line, until the next key.
+      @last_error = "E: #{e.message}"[0, [@cols - 1, 1].max]
       false
     end
 
@@ -186,7 +190,7 @@ module Echoes
     # `status_message` (if rvim has one — e.g. ':"…" written') wins
     # over the mode label so saves and errors are visible.
     def statusline_segments
-      status = @editor.status_message
+      status = @last_error || @editor.status_message
       left =
         if status && !status.empty?
           status.to_s
