@@ -839,7 +839,13 @@ module Echoes
       when 'S' then @screen.scroll_up(params[0] || 1)
       when 'T' then @screen.scroll_down(params[0] || 1)
       when 'm' then @screen.set_graphics(collect_sgr_params)
-      when 'r' then @screen.set_scroll_region((params[0] || 1) - 1, (params[1] || @screen.rows) - 1)
+      when 'r'
+        # DECSTBM: 0 or omitted means the default for both ends.
+        top    = params[0].to_i
+        bottom = params[1].to_i
+        top    = 1 if top < 1
+        bottom = @screen.rows if bottom < 1
+        @screen.set_scroll_region(top - 1, bottom - 1)
       when 's' then @screen.save_cursor
       when 'u' then @screen.restore_cursor
       when 'g' then @screen.clear_tab_stop(params[0] || 0)

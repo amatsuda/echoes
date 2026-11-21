@@ -1624,3 +1624,31 @@ class Echoes::ParserTest < Test::Unit::TestCase
     assert_empty seen
   end
 end
+
+class Echoes::ParserScrollRegionValidationTest < Test::Unit::TestCase
+  setup do
+    @screen = Echoes::Screen.new(rows: 10, cols: 10)
+    @parser = Echoes::Parser.new(@screen)
+  end
+
+  test "DECSTBM with top >= bottom is ignored" do
+    @parser.feed("\e[3;6r")
+    @parser.feed("\e[8;4r")
+    assert_equal [2, 5], [@screen.scroll_top, @screen.scroll_bottom]
+    @parser.feed("\e[5;5r")
+    assert_equal [2, 5], [@screen.scroll_top, @screen.scroll_bottom]
+  end
+
+  test "DECSTBM treats 0 as the default for either end" do
+    @parser.feed("\e[3;6r")
+    @parser.feed("\e[0;0r")
+    assert_equal [0, 9], [@screen.scroll_top, @screen.scroll_bottom]
+  end
+
+  test "DECSTBM homes to the region top in origin mode" do
+    @parser.feed("\e[?6h\e[4;8r")
+    assert_equal 3, @screen.cursor.row
+    assert_equal 0, @screen.cursor.col
+  end
+end
+

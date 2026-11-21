@@ -15,7 +15,7 @@ module Echoes
     # received (held by reference, not a deep copy — the parser's
     # bitmap cache and the placement share the same object so a
     # later a=d ;d=I … can delete by image id without re-decoding).
-    attr_reader :placements
+    attr_reader :placements, :scroll_top, :scroll_bottom
     # Optional `->(placement) {…}` callback set by the GUI in
     # wire_screen_handlers. Runs once per placement just before it
     # leaves @placements — used to release the retained
@@ -718,10 +718,17 @@ module Echoes
     end
 
     def set_scroll_region(top, bottom)
+      top = clamp_row(top)
+      bottom = clamp_row(bottom)
+      # A region of fewer than two rows is ignored (xterm, DEC STD
+      # 070); `\e[10;5r` used to leave scroll_up deleting row 9 and
+      # inserting at row 4.
+      return unless top < bottom
       @pending_wrap = false
-      @scroll_top = clamp_row(top)
-      @scroll_bottom = clamp_row(bottom)
-      @cursor.row = 0
+      @scroll_top = top
+      @scroll_bottom = bottom
+      # Home: the region's top row when DECOM is on, else row 0.
+      @cursor.row = @origin_mode ? @scroll_top : 0
       @cursor.col = 0
     end
 
