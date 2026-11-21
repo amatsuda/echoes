@@ -3886,7 +3886,24 @@ module Echoes
       nil
     end
 
+    # Schemes a Cmd+click may hand to NSWorkspace. An OSC 8 link's
+    # text can say one thing while its target is `file:///…/x.app`,
+    # `smb://`, `ssh://` or a custom app scheme, and NSWorkspace would
+    # launch whatever handles it; only web and mail links go through.
+    OPENABLE_URL_SCHEMES = %w[http https mailto].freeze
+
+    def self.openable_url?(url)
+      scheme = URI.parse(url.to_s).scheme
+      scheme && OPENABLE_URL_SCHEMES.include?(scheme.downcase)
+    rescue URI::InvalidURIError
+      false
+    end
+
     def open_url(url)
+      unless self.class.openable_url?(url)
+        warn "echoes: refusing to open #{url.inspect} (scheme not in #{OPENABLE_URL_SCHEMES.join('/')})"
+        return
+      end
       ns_url = ObjC::MSG_PTR_1.call(ObjC.cls('NSURL'), ObjC.sel('URLWithString:'), ObjC.nsstring(url))
       return if ns_url.null?
       workspace = ObjC::MSG_PTR.call(ObjC.cls('NSWorkspace'), ObjC.sel('sharedWorkspace'))

@@ -540,6 +540,24 @@ class Echoes::GUIOscTrustGateTest < Test::Unit::TestCase
     assert_raise(ArgumentError) { config { clipboard_read :sometimes } }
   end
 
+  # --- Cmd+click URL schemes ---
+
+  test "openable_url? accepts web and mail links" do
+    assert Echoes::GUI.openable_url?('https://example.com/a?b=c')
+    assert Echoes::GUI.openable_url?('HTTP://example.com')
+    assert Echoes::GUI.openable_url?('mailto:someone@example.com')
+  end
+
+  test "openable_url? refuses schemes that launch local handlers" do
+    %w[file:///Applications/Calculator.app smb://evil/share ssh://host
+       x-apple.systempreferences:com.apple.preference javascript:alert(1)
+       vscode://file/etc/passwd].each do |u|
+      refute Echoes::GUI.openable_url?(u), u
+    end
+    refute Echoes::GUI.openable_url?('no scheme here')
+    refute Echoes::GUI.openable_url?("http://exa mple.com")
+  end
+
   # --- paste sanitizing ---
 
   test "sanitize_paste strips the bracketed-paste terminator and other escapes" do
