@@ -2292,6 +2292,20 @@ module Echoes
     end
 
     def timer_fired
+      # The SVG rasterizer pumps the default run-loop mode while it
+      # waits for WebKit, so this timer can fire from inside a pane's
+      # own process_output. Feeding that parser again from here would
+      # interleave two byte streams through one state machine (and a
+      # nested tick could close the tab mid-dispatch); skip the tick
+      # instead, the pty data waits for the next one.
+      return if @in_timer_fired
+      @in_timer_fired = true
+      timer_tick
+    ensure
+      @in_timer_fired = false
+    end
+
+    private def timer_tick
       save_window_state
 
       @cursor_blink_counter += 1
@@ -2302,7 +2316,10 @@ module Echoes
         blink_toggled = true
       end
 
-      @window_states.each do |ws|
+      # close_current_window deletes from @window_states while a tab
+      # dies; iterate a snapshot so the window after it isn't skipped.
+      @window_states.dup.each do |ws|
+        next unless @window_states.include?(ws)
         load_window_state(ws)
         timer_fired_for_window(ws, blink_toggled)
       end
