@@ -2000,10 +2000,18 @@ module Echoes
       elsif (flags & ObjC::NSEventModifierFlagOption) != 0
         pane.write_input("\e#{chars}")
       else
-        # Route through input method for IME support
+        # Route through input method for IME support. The event is
+        # autoreleased; keep the reference only for the duration of
+        # the call, or a doCommandBySelector: arriving later (some
+        # input methods send one outside keyDown) would read freed
+        # memory.
         @current_event = event_ptr
-        arr = ObjC::MSG_PTR_1.call(ObjC.cls('NSArray'), ObjC.sel('arrayWithObject:'), event_ptr)
-        ObjC::MSG_VOID_1.call(@view, ObjC.sel('interpretKeyEvents:'), arr)
+        begin
+          arr = ObjC::MSG_PTR_1.call(ObjC.cls('NSArray'), ObjC.sel('arrayWithObject:'), event_ptr)
+          ObjC::MSG_VOID_1.call(@view, ObjC.sel('interpretKeyEvents:'), arr)
+        ensure
+          @current_event = nil
+        end
       end
     rescue Errno::EIO, IOError
       close_tab(@active_tab)
