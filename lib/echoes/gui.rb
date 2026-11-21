@@ -876,16 +876,6 @@ module Echoes
         [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP]
       ) { |_self, _cmd| gui.ime_has_marked_text }
 
-      @marked_range_closure = Fiddle::Closure::BlockCaller.new(
-        Fiddle::TYPE_LONG,
-        [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP]
-      ) { |_self, _cmd| gui.ime_marked_range_location }
-
-      @selected_range_closure = Fiddle::Closure::BlockCaller.new(
-        Fiddle::TYPE_LONG,
-        [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP]
-      ) { |_self, _cmd| 0x7FFFFFFFFFFFFFFF } # NSNotFound
-
       @valid_attrs_closure = Fiddle::Closure::BlockCaller.new(
         Fiddle::TYPE_VOIDP,
         [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP]
@@ -1215,8 +1205,10 @@ module Echoes
         'setMarkedText:selectedRange:replacementRange:'     => ['v@:@{_NSRange=QQ}{_NSRange=QQ}', @set_marked_text_closure],
         'unmarkText'                                        => ['v@:', @unmark_text_closure],
         'hasMarkedText'                                     => ['c@:', @has_marked_text_closure],
-        'markedRange'                                       => ['{_NSRange=QQ}@:', @marked_range_closure],
-        'selectedRange'                                     => ['{_NSRange=QQ}@:', @selected_range_closure],
+        # markedRange / selectedRange return an NSRange (two 64-bit
+        # words, x0 and x1 on arm64). A Fiddle::Closure can only set
+        # x0, so like firstRectForCharacterRange: they go through the
+        # forwardInvocation: path below.
         'validAttributesForMarkedText'                      => ['@@:', @valid_attrs_closure],
         'attributedSubstringForProposedRange:actualRange:'  => ['@@:{_NSRange=QQ}^{_NSRange=QQ}', @attr_substring_closure],
         # firstRectForCharacterRange:actualRange: is intentionally
@@ -2103,10 +2095,6 @@ module Echoes
       @marked_text ? 1 : 0
     end
 
-    def ime_marked_range_location
-      @marked_text ? 0 : 0x7FFFFFFFFFFFFFFF # NSNotFound
-    end
-
     # --- IME candidate-window positioning via message forwarding ---
     #
     # firstRectForCharacterRange:actualRange: returns NSRect (4 doubles).
@@ -2122,16 +2110,22 @@ module Echoes
     # NSInvocation.setReturnValue:, which handles the struct ABI for
     # us correctly. methodSignatureForSelector: is the gateway that
     # tells the runtime to use the forwarding path.
-    IME_FORWARDED_SELECTORS = ['firstRectForCharacterRange:actualRange:'].freeze
+    IME_FORWARDED_SELECTORS = ['firstRectForCharacterRange:actualRange:', 'markedRange', 'selectedRange'].freeze
     FIRST_RECT_SIG = '{CGRect={CGPoint=dd}{CGSize=dd}}@:{_NSRange=QQ}^{_NSRange=QQ}'.freeze
+    NSRANGE_RETURN_SIG = '{_NSRange=QQ}@:'.freeze
+    NS_NOT_FOUND = 0x7FFFFFFFFFFFFFFF
 
     def method_signature_for_selector(self_ptr, sel)
       name = sel_name_string(sel)
-      if name == 'firstRectForCharacterRange:actualRange:'
+      sig = case name
+            when 'firstRectForCharacterRange:actualRange:' then FIRST_RECT_SIG
+            when 'markedRange', 'selectedRange' then NSRANGE_RETURN_SIG
+            end
+      if sig
         return ObjC::MSG_PTR_1.call(
           ObjC.cls('NSMethodSignature'),
           ObjC.sel('signatureWithObjCTypes:'),
-          Fiddle::Pointer[FIRST_RECT_SIG.b])
+          Fiddle::Pointer[sig.b])
       end
       # Default: defer to whatever the runtime would have computed
       # from the class's method table. class_getInstanceMethod walks
@@ -2149,13 +2143,29 @@ module Echoes
 
     def forward_invocation(_self_ptr, inv)
       sel = ObjC::MSG_PTR.call(inv, ObjC.sel('selector'))
-      name = sel_name_string(sel)
-      return unless name == 'firstRectForCharacterRange:actualRange:'
+      case sel_name_string(sel)
+      when 'firstRectForCharacterRange:actualRange:'
+        rect = first_rect_for_marked_text_screen_coords
+        buf = Fiddle::Pointer.malloc(32, Fiddle::RUBY_FREE)
+        buf[0, 32] = rect.pack('d4')
+        ObjC::MSG_VOID_1.call(inv, ObjC.sel('setReturnValue:'), buf)
+      when 'markedRange'
+        set_nsrange_return(inv, *ime_marked_range)
+      when 'selectedRange'
+        set_nsrange_return(inv, NS_NOT_FOUND, 0)
+      end
+    end
 
-      rect = first_rect_for_marked_text_screen_coords
-      buf = Fiddle::Pointer.malloc(32, Fiddle::RUBY_FREE)
-      buf[0, 32] = rect.pack('d4')
+    def set_nsrange_return(inv, location, length)
+      buf = Fiddle::Pointer.malloc(16, Fiddle::RUBY_FREE)
+      buf[0, 16] = [location, length].pack('Q2')
       ObjC::MSG_VOID_1.call(inv, ObjC.sel('setReturnValue:'), buf)
+    end
+
+    # The marked (pre-edit) text, when any, starts at 0 and covers
+    # its own length; {NSNotFound, 0} otherwise.
+    def ime_marked_range
+      @marked_text && !@marked_text.empty? ? [0, @marked_text.length] : [NS_NOT_FOUND, 0]
     end
 
     def responds_to_selector?(self_ptr, sel)
