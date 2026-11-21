@@ -129,10 +129,11 @@ background     "#1a1a2e"
 cursor_color   "#b58900"
 selection_color "#586e75"
 
-# OSC 7772 trust gates (see "Echoes private namespace" below)
-allowed_programs     "przn"             # open-window without a prompt
+# What programs printing to a pane may ask of the host
+clipboard_read       :ask               # OSC 52 `?`: :ask, :allow or :deny
+allowed_programs     "przn"             # OSC 7772 open-window without a prompt
 open_window_requests :ask               # or :deny
-capture_directory    "~/Pictures/Echoes" # nil disables ;capture
+capture_directory    "~/Pictures/Echoes" # OSC 7772 capture; nil disables
 ```
 
 ### Profiles (color themes)
@@ -282,7 +283,7 @@ knob like `family:` is set.
 | OSC 4 / 10 / 11 / 12 | Get/set 256-color palette + default fg / bg / cursor      |
 | OSC 7                | Working directory (`file://host/path`)                    |
 | OSC 9                | iTerm2-style notification — `\e]9;message\a`              |
-| OSC 52               | Clipboard read/write                                      |
+| OSC 52               | Clipboard write; read prompts (see `clipboard_read`)      |
 | OSC 66               | Kitty multicell (standard `s/w/n/d/v/h` only)             |
 | OSC 133              | Semantic prompts (FinalTerm / iTerm2 style)               |
 | OSC 777              | VTE-style notification — `\e]777;notify;title;message\a`  |

@@ -30,6 +30,9 @@ module Echoes
       @allowed_programs = []
       @open_window_requests = :ask
       @capture_directory = File.join(Dir.home, 'Pictures', 'Echoes')
+      # OSC 52 `?` hands the pasteboard to the program that asked; a
+      # remote host can ask too, so reads prompt by default.
+      @clipboard_read = :ask
       register_default_profiles
     end
 
@@ -145,6 +148,16 @@ module Echoes
       sym = val.to_sym
       raise ArgumentError, "open_window_requests must be :ask or :deny, got #{val.inspect}" unless %i[ask deny].include?(sym)
       @open_window_requests = sym
+    end
+
+    # What an OSC 52 clipboard query gets: :ask (default) shows a
+    # confirmation dialog, :allow answers silently, :deny answers
+    # with an empty clipboard. Writes are always allowed.
+    def clipboard_read(val = nil)
+      return @clipboard_read if val.nil?
+      sym = val.to_sym
+      raise ArgumentError, "clipboard_read must be :ask, :allow or :deny, got #{val.inspect}" unless %i[ask allow deny].include?(sym)
+      @clipboard_read = sym
     end
 
     # The only directory OSC 7772 ;capture may write into. nil turns

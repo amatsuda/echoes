@@ -782,6 +782,22 @@ class Echoes::ParserTest < Test::Unit::TestCase
     assert_equal("Hello", clipboard)
   end
 
+  test "OSC 52 query replies with what the clipboard handler hands back" do
+    responses = []
+    @screen.clipboard_handler = ->(action, _text) { 'secret' if action == :get }
+    parser = Echoes::Parser.new(@screen, writer: ->(s) { responses << s })
+    parser.feed("\e]52;c;?\x07")
+    assert_equal(["\e]52;c;#{['secret'].pack('m0')}\e\\"], responses)
+  end
+
+  test "OSC 52 query still answers (with nothing) when the handler refuses the read" do
+    responses = []
+    @screen.clipboard_handler = ->(action, _text) { '' if action == :get }
+    parser = Echoes::Parser.new(@screen, writer: ->(s) { responses << s })
+    parser.feed("\e]52;c;?\x07")
+    assert_equal(["\e]52;c;\e\\"], responses)
+  end
+
   test "BEL sets bell flag on screen" do
     @parser.feed("\x07")
     assert_true(@screen.bell)

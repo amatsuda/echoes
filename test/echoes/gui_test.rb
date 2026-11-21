@@ -533,6 +533,13 @@ class Echoes::GUIOscTrustGateTest < Test::Unit::TestCase
     assert_raise(ArgumentError) { config { open_window_requests :yolo } }
   end
 
+  test "clipboard_read defaults to :ask and accepts :allow / :deny only" do
+    assert_equal :ask, config.clipboard_read
+    assert_equal :allow, config { clipboard_read :allow }.clipboard_read
+    assert_equal :deny,  config { clipboard_read 'deny' }.clipboard_read
+    assert_raise(ArgumentError) { config { clipboard_read :sometimes } }
+  end
+
   # --- capture path restriction ---
 
   def with_capture_dir

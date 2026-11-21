@@ -3253,8 +3253,20 @@ module Echoes
         ObjC::MSG_PTR_2.call(pb, ObjC.sel('setString:forType:'), ObjC.nsstring(text), ObjC::NSPasteboardTypeString)
         nil
       when :get
+        # An OSC 52 query. Whatever printed to the pane asked for the
+        # pasteboard, so gate it; a refused read answers with an empty
+        # clipboard rather than silence so the asker doesn't hang.
+        allowed =
+          case Echoes.config.clipboard_read
+          when :allow then true
+          when :ask   then confirm_dialog("A program in this terminal wants to read the clipboard.",
+                                          "Set clipboard_read :allow or :deny in echoes.conf to skip this dialog.",
+                                          'Allow')
+          else false
+          end
+        return '' unless allowed
         ns_str = ObjC::MSG_PTR_1.call(pb, ObjC.sel('stringForType:'), ObjC::NSPasteboardTypeString)
-        return nil if ns_str.null?
+        return '' if ns_str.null?
         ObjC.to_ruby_string(ns_str)
       end
     end
@@ -4347,12 +4359,19 @@ module Echoes
     end
 
     def confirm_open_window(argv)
+      confirm_dialog("A program in this terminal wants to open a new window running:",
+                     "#{argv.join(' ')}\n\nAdd it to allowed_programs in echoes.conf to skip this dialog.",
+                     'Open Window')
+    end
+
+    # Modal yes/no NSAlert; true when the first (affirmative) button
+    # was pressed. The 60 Hz timer runs in the default run-loop mode,
+    # so it stays quiet while the modal loop runs.
+    def confirm_dialog(message, informative, ok_label)
       alert = ObjC::MSG_PTR.call(ObjC::MSG_PTR.call(ObjC.cls('NSAlert'), ObjC.sel('alloc')), ObjC.sel('init'))
-      ObjC::MSG_VOID_1.call(alert, ObjC.sel('setMessageText:'),
-                            ObjC.nsstring("A program in this terminal wants to open a new window running:"))
-      ObjC::MSG_VOID_1.call(alert, ObjC.sel('setInformativeText:'),
-                            ObjC.nsstring("#{argv.join(' ')}\n\nAdd it to allowed_programs in echoes.conf to skip this dialog."))
-      ObjC::MSG_PTR_1.call(alert, ObjC.sel('addButtonWithTitle:'), ObjC.nsstring('Open Window'))
+      ObjC::MSG_VOID_1.call(alert, ObjC.sel('setMessageText:'), ObjC.nsstring(message))
+      ObjC::MSG_VOID_1.call(alert, ObjC.sel('setInformativeText:'), ObjC.nsstring(informative))
+      ObjC::MSG_PTR_1.call(alert, ObjC.sel('addButtonWithTitle:'), ObjC.nsstring(ok_label))
       ObjC::MSG_PTR_1.call(alert, ObjC.sel('addButtonWithTitle:'), ObjC.nsstring('Cancel'))
       ObjC::MSG_RET_L.call(alert, ObjC.sel('runModal')) == 1000  # NSAlertFirstButtonReturn
     ensure
