@@ -58,6 +58,8 @@ module Echoes
       @tab_fg_active   = make_color(0.95, 0.95, 0.95)
       @tab_fg_inactive = make_color(0.55, 0.55, 0.55)
       @selection_color = make_color(*@active_profile.selection_color)
+      @cursor_ns_color = make_color(*@active_profile.cursor_color)
+      @inactive_pane_cursor_color = make_color(0.5, 0.5, 0.5, 0.3)
       @search_match_color = make_color(0.6, 0.5, 0.0)
       @search_current_color = make_color(0.8, 0.6, 0.0)
       @selection_anchor = nil
@@ -1825,7 +1827,7 @@ module Echoes
         if @window_focused
           # Active window: filled cursor (blinking if requested)
           if !blink || (is_active ? @cursor_blink_on : true)
-            cursor_color = is_active ? make_color(*@active_profile.cursor_color) : make_color(0.5, 0.5, 0.5, 0.3)
+            cursor_color = is_active ? @cursor_ns_color : @inactive_pane_cursor_color
             ObjC::MSG_VOID.call(cursor_color, ObjC.sel('setFill'))
             case style
             when 3, 4 # underline
@@ -1853,7 +1855,7 @@ module Echoes
           end
         else
           # Inactive window: hollow square outline (no blinking)
-          ObjC::MSG_VOID.call(make_color(*@active_profile.cursor_color), ObjC.sel('setFill'))
+          ObjC::MSG_VOID.call(@cursor_ns_color, ObjC.sel('setFill'))
           ObjC::NSRectFill.call(cx, cy, @cell_width, 1.0)                       # top
           ObjC::NSRectFill.call(cx, cy + @cell_height - 1.0, @cell_width, 1.0)  # bottom
           ObjC::NSRectFill.call(cx, cy, 1.0, @cell_height)                      # left
@@ -2838,13 +2840,16 @@ module Echoes
       ObjC.release(@default_fg)        if @default_fg
       ObjC.release(@default_bg)        if @default_bg
       ObjC.release(@selection_color)   if @selection_color
+      ObjC.release(@cursor_ns_color)   if @cursor_ns_color
       @colors&.each_value { |c| ObjC.release(c) }
 
       @colors = build_color_table
       @default_fg      = make_color(*@active_profile.foreground)
       @default_bg      = make_color(*@active_profile.background)
       @selection_color = make_color(*@active_profile.selection_color)
-      @rgb_color_cache = {}  # truecolor cache stale after palette swap
+      @cursor_ns_color = make_color(*@active_profile.cursor_color)
+      # Truecolor entries don't depend on the palette, so the cache
+      # stays; it is bounded in resolve_color instead.
 
       @window_states.each do |ws|
         ws[:tabs].each { |tab| tab.panes.each { |p| p.screen.mark_all_dirty } } if ws[:tabs]
@@ -3378,7 +3383,7 @@ module Echoes
             rgba_ptr, img[:width], img[:height], 8, img[:width] * 4, cs,
             ObjC::KCGImageAlphaPremultipliedLast
           )
-          img[:cg_image] = ObjC::CGBitmapContextCreateImage.call(ctx)
+          img[:cg_image] = owned_cg_image(ObjC::CGBitmapContextCreateImage.call(ctx))
           ObjC::CGContextRelease.call(ctx)
           ObjC::CGColorSpaceRelease.call(cs)
         end
@@ -3401,6 +3406,18 @@ module Echoes
       ObjC::CGContextRestoreGState.call(cg_ctx)
     end
 
+    # CGBitmapContextCreateImage copies the pixels into an image we
+    # own (Create rule). The image hash it is cached on lives as long
+    # as its placement, kitty cache entry or anchor cell does, and
+    # nothing else knows when that ends, so tie the CGImageRelease to
+    # the pointer's own lifetime: when the hash is collected, so is
+    # the bitmap. Animated frames come from the retained rep and are
+    # not wrapped.
+    def owned_cg_image(ptr)
+      return ptr if ptr.null?
+      Fiddle::Pointer.new(ptr.to_i, 0, ObjC::CGImageRelease)
+    end
+
     def draw_sixel_image(sixel, x, y, draw_w, draw_h)
       # Cache CGImage on first render
       unless sixel[:cg_image]
@@ -3414,7 +3431,7 @@ module Echoes
           rgba_ptr, w, h, 8, w * 4, color_space,
           ObjC::KCGImageAlphaPremultipliedLast
         )
-        sixel[:cg_image] = ObjC::CGBitmapContextCreateImage.call(ctx)
+        sixel[:cg_image] = owned_cg_image(ObjC::CGBitmapContextCreateImage.call(ctx))
         ObjC::CGContextRelease.call(ctx)
         ObjC::CGColorSpaceRelease.call(color_space)
       end
@@ -3475,7 +3492,7 @@ module Echoes
       if @drag_insertion_index
         marker_w = 2.0
         marker_x = (@drag_insertion_index * tab_w) - (marker_w / 2.0)
-        accent_color = make_color(*@active_profile.cursor_color)
+        accent_color = @cursor_ns_color
         ObjC::MSG_VOID.call(accent_color, ObjC.sel('setFill'))
         ObjC::NSRectFill.call(marker_x, ty, marker_w, tbh)
       end
@@ -3527,7 +3544,7 @@ module Echoes
       ObjC.release(attr_str)
 
       if is_active
-        accent_color = make_color(*@active_profile.cursor_color)
+        accent_color = @cursor_ns_color
         accent_h     = 2.0
         accent_inset = @cell_width * 0.5
         ObjC::MSG_VOID.call(accent_color, ObjC.sel('setFill'))
@@ -4936,10 +4953,21 @@ module Echoes
       when Integer then @colors[val]
       when Array
         key = (val[0] << 16) | (val[1] << 8) | val[2]
-        @rgb_color_cache[key] ||= make_color(val[0] / 255.0, val[1] / 255.0, val[2] / 255.0)
+        @rgb_color_cache[key] ||= begin
+          # Each entry is a retained NSColor. A chafa/timg image or a
+          # lolcat gradient can touch tens of thousands of distinct
+          # colours; past the cap, release the lot and start over.
+          if @rgb_color_cache.size >= RGB_COLOR_CACHE_LIMIT
+            @rgb_color_cache.each_value { |c| ObjC.release(c) }
+            @rgb_color_cache.clear
+          end
+          make_color(val[0] / 255.0, val[1] / 255.0, val[2] / 255.0)
+        end
       else default
       end
     end
+
+    RGB_COLOR_CACHE_LIMIT = 4096
 
     def make_color_with_alpha(color, alpha)
       ObjC::MSG_PTR_D.call(color, ObjC.sel('colorWithAlphaComponent:'), alpha)
