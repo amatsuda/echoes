@@ -232,9 +232,15 @@ module Echoes
         # Replace invalid byte sequences so a malformed SVG doesn't
         # crash NSString creation.
         svg = svg.scrub('')
+        # The SVG is whatever a program printed to the pane. JavaScript
+        # is off, but WebKit would still fetch <image href="https://…">,
+        # CSS url() and the like, letting output beacon out of the
+        # machine. The CSP keeps every load inline or data:.
         <<~HTML
           <!doctype html>
-          <html><head><style>
+          <html><head>
+          <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'unsafe-inline'; font-src data:">
+          <style>
           html, body { margin: 0; padding: 0; background: transparent; width: 100%; height: 100%; overflow: hidden; }
           svg { display: block; width: 100%; height: 100%; }
           </style></head><body>#{svg}</body></html>
