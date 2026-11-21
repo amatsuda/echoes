@@ -186,18 +186,24 @@ class Echoes::TabSplitInheritanceTest < Test::Unit::TestCase
   end
 
   test "a split inherits the tab's env" do
+    # The split runs the configured shell; pin it to /bin/sh so the
+    # test doesn't depend on how long zsh takes to read rc files.
+    configured_shell = Echoes.config.shell
+    Echoes.config.shell('/bin/sh')
     tab = Echoes::Tab.new(command: ["/bin/sh", "-c", "echo $ECHOES_SPLIT_TEST; sleep 5"],
-                          rows: 10, cols: 40, env: ENV.to_h.merge('ECHOES_SPLIT_TEST' => 'inherited'))
+                          rows: 10, cols: 40, env: ENV.to_h.merge('ECHOES_SPLIT_TEST' => 'inherited', 'ENV' => nil))
     tab.split_vertical
     tab.panes.last.write_input("echo $ECHOES_SPLIT_TEST\rexit\r")
     out = +''
-    deadline = Time.now + 5
-    while Time.now < deadline && !out.include?('inherited')
+    deadline = Time.now + 10
+    while Time.now < deadline && !out.include?("inherited\r\n")
       tab.panes.last.flush_outbox
       out << tab.panes.last.read_available_output
       sleep 0.05
     end
-    assert_includes out, 'inherited'
+    assert_includes out, "inherited\r\n"
     tab.close
+  ensure
+    Echoes.config.shell(configured_shell) if configured_shell
   end
 end
