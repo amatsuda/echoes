@@ -638,3 +638,14 @@ class Echoes::GUIOscTrustGateTest < Test::Unit::TestCase
     assert_equal File.join(Dir.home, 'Pictures', 'Echoes'), config.capture_directory
   end
 end
+
+class Echoes::GUIColorCubeTest < Test::Unit::TestCase
+  test "the 256-colour cube uses xterm's levels" do
+    assert_equal [0, 0, 0],       Echoes::GUI.xterm_cube_rgb(0)      # index 16
+    assert_equal [0, 0, 255],     Echoes::GUI.xterm_cube_rgb(5)      # index 21
+    assert_equal [0, 95, 0],      Echoes::GUI.xterm_cube_rgb(6)      # index 22
+    assert_equal [255, 0, 0],     Echoes::GUI.xterm_cube_rgb(180)    # index 196
+    assert_equal [135, 175, 215], Echoes::GUI.xterm_cube_rgb(2 * 36 + 3 * 6 + 4)  # index 110
+    assert_equal [255, 255, 255], Echoes::GUI.xterm_cube_rgb(215)    # index 231
+  end
+end

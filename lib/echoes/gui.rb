@@ -4918,11 +4918,8 @@ module Echoes
 
       # 6x6x6 color cube (indices 16-231)
       216.times do |i|
-        idx = 16 + i
-        b_val = (i % 6) * 51
-        g_val = ((i / 6) % 6) * 51
-        r_val = (i / 36) * 51
-        colors[idx] = make_color(r_val / 255.0, g_val / 255.0, b_val / 255.0)
+        r_val, g_val, b_val = self.class.xterm_cube_rgb(i)
+        colors[16 + i] = make_color(r_val / 255.0, g_val / 255.0, b_val / 255.0)
       end
 
       # Grayscale ramp (indices 232-255)
@@ -4945,6 +4942,15 @@ module Echoes
         tab.write_input("\e[M#{(button + 32).chr}#{(cx + 32).chr}#{(cy + 32).chr}")
       end
     rescue Errno::EIO, IOError
+    end
+
+    # The 6x6x6 cube (indices 16-231) uses xterm's levels, which every
+    # theme and 256-colour app assumes; evenly spaced 0,51,102,… made
+    # the cube noticeably darker than other terminals.
+    XTERM_CUBE_LEVELS = [0, 95, 135, 175, 215, 255].freeze
+
+    def self.xterm_cube_rgb(i)
+      [XTERM_CUBE_LEVELS[i / 36], XTERM_CUBE_LEVELS[(i / 6) % 6], XTERM_CUBE_LEVELS[i % 6]]
     end
 
     def resolve_color(val, default)
