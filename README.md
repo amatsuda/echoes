@@ -129,6 +129,12 @@ background     "#1a1a2e"
 cursor_color   "#b58900"
 selection_color "#586e75"
 
+# Keyboard and closing
+option_as_alt        :both              # Option sends ESC+key; :left, :right or :none
+                                        # leave the other Option composing (é, @, [ …)
+confirm_close_running true              # ask before closing a pane whose shell has a
+                                        # foreground process, and before Cmd+Q
+
 # What programs printing to a pane may ask of the host
 clipboard_read       :ask               # OSC 52 `?`: :ask, :allow or :deny
 allowed_programs     "przn"             # OSC 7772 open-window without a prompt

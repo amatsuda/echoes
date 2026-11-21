@@ -1164,6 +1164,35 @@ module Echoes
         [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP]
       ) { |_self, _cmd, _notification| gui.window_will_close(_self) }
 
+      # The view doubles as the window's delegate so the red button
+      # can be refused (unsaved buffer, running process).
+      @window_should_close_closure = Fiddle::Closure::BlockCaller.new(
+        Fiddle::TYPE_CHAR,
+        [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP]
+      ) do |_self, _cmd, _sender|
+        gui.window_should_close(_self) ? 1 : 0
+      rescue => e
+        gui.log_crash(e, context: 'windowShouldClose')
+        1
+      end
+
+      # NSApplication delegate: Cmd+Q goes through
+      # applicationShouldTerminate: (NSTerminateCancel = 0, Now = 1).
+      @app_should_terminate_closure = Fiddle::Closure::BlockCaller.new(
+        Fiddle::TYPE_LONG,
+        [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP]
+      ) do |_self, _cmd, _app|
+        gui.application_should_terminate? ? 1 : 0
+      rescue => e
+        gui.log_crash(e, context: 'applicationShouldTerminate')
+        1
+      end
+      app_delegate_class = ObjC.define_class('EchoesAppDelegate', 'NSObject', {
+        'applicationShouldTerminate:' => ['L@:@', @app_should_terminate_closure],
+      })
+      @app_delegate = ObjC::MSG_PTR.call(ObjC::MSG_PTR.call(app_delegate_class, ObjC.sel('alloc')), ObjC.sel('init'))
+      ObjC::MSG_VOID_1.call(@app, ObjC.sel('setDelegate:'), @app_delegate)
+
       @view_class = ObjC.define_class('EchoesTerminalView', 'NSView', {
         'drawRect:'             => ['v@:{CGRect=dddd}', @draw_rect_closure],
         'keyDown:'              => ['v@:@', @key_down_closure],
@@ -1187,6 +1216,7 @@ module Echoes
         'windowDidBecomeKey:'   => ['v@:@', @focus_gained_closure],
         'windowDidResignKey:'   => ['v@:@', @focus_lost_closure],
         'windowWillClose:'      => ['v@:@', @window_will_close_closure],
+        'windowShouldClose:'    => ['c@:@', @window_should_close_closure],
         'showAbout:'             => ['v@:@', @show_about_closure],
         **profile_selectors,
         'newWindow:'             => ['v@:@', @new_window_closure],
@@ -3209,6 +3239,7 @@ module Echoes
       # tick would message the freed object. Keep it alive; the
       # windowWillClose: observer does the bookkeeping.
       ObjC::MSG_VOID_I.call(new_window, ObjC.sel('setReleasedWhenClosed:'), 0)
+      ObjC::MSG_VOID_1.call(new_window, ObjC.sel('setDelegate:'), new_view)
 
       # Now adopt the new window/view as the active state
       @window = new_window
@@ -4702,14 +4733,41 @@ module Echoes
     end
 
     # Cmd-W on an editor pane with unwritten changes threw them away
-    # without a word. Ask, naming the files.
+    # without a word, and a tab with ssh or a build still running
+    # closed just as quietly. Ask, naming the files or the process.
     def confirm_discard_unsaved?(panes)
       dirty = panes.select(&:unsaved_changes?)
-      return true if dirty.empty?
-      names = dirty.map { |p| p.editor.file ? File.basename(p.editor.file) : '[No Name]' }
-      confirm_dialog("Discard unsaved changes to #{names.join(', ')}?",
-                     "The editor buffer has changes that haven't been written. Closing discards them.",
-                     'Discard')
+      unless dirty.empty?
+        names = dirty.map { |p| p.editor.file ? File.basename(p.editor.file) : '[No Name]' }
+        return false unless confirm_dialog("Discard unsaved changes to #{names.join(', ')}?",
+                                           "The editor buffer has changes that haven't been written. Closing discards them.",
+                                           'Discard')
+      end
+      if Echoes.config.confirm_close_running
+        busy = panes.select(&:busy?)
+        unless busy.empty?
+          names = busy.filter_map(&:foreground_process_name).uniq
+          what = names.empty? ? 'A process is' : "#{names.join(', ')} #{names.size == 1 ? 'is' : 'are'}"
+          return false unless confirm_dialog("#{what} still running. Close anyway?",
+                                             "Closing sends the process a hangup signal. Set confirm_close_running false in echoes.conf to skip this dialog.",
+                                             'Close')
+        end
+      end
+      true
+    end
+
+    # windowShouldClose: (the red button). The windowWillClose:
+    # observer does the bookkeeping once this has said yes.
+    def window_should_close(view_ptr)
+      ws = @view_to_ws[view_ptr.to_i]
+      return true unless ws
+      confirm_discard_unsaved?(ws[:tabs].to_a.flat_map(&:panes))
+    end
+
+    # applicationShouldTerminate: (Cmd+Q) across every window.
+    def application_should_terminate?
+      save_window_state
+      confirm_discard_unsaved?(@window_states.flat_map { |ws| ws[:tabs].to_a.flat_map(&:panes) })
     end
 
     def confirm_open_window(argv)
@@ -4840,6 +4898,7 @@ module Echoes
       # tick would message the freed object. Keep it alive; the
       # windowWillClose: observer does the bookkeeping.
       ObjC::MSG_VOID_I.call(new_window, ObjC.sel('setReleasedWhenClosed:'), 0)
+      ObjC::MSG_VOID_1.call(new_window, ObjC.sel('setDelegate:'), new_view)
 
       @window = new_window
       @view = new_view

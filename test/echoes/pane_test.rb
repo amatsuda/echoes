@@ -177,3 +177,31 @@ class Echoes::PaneUnsavedChangesTest < Test::Unit::TestCase
     assert pane.unsaved_changes?
   end
 end
+
+class Echoes::PaneBusyTest < Test::Unit::TestCase
+  def wait_until(seconds)
+    deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + seconds
+    until yield
+      return false if Process.clock_gettime(Process::CLOCK_MONOTONIC) > deadline
+      sleep 0.02
+    end
+    true
+  end
+
+  test "busy? reports a foreground job that isn't the shell itself" do
+    # A job-control shell puts `sleep` in its own process group and
+    # hands it the terminal; `fg` keeps the shell alive behind it.
+    pane = Echoes::Pane.new(command: ["/bin/sh", "-c", "set -m; sleep 30 & fg %1"], rows: 5, cols: 20)
+    assert wait_until(3) { pane.busy? }, "expected the pane to be busy while sleep holds the terminal"
+    assert_equal 'sleep', pane.foreground_process_name
+    pane.close
+  end
+
+  test "busy? is false for an idle shell and for closed panes" do
+    pane = Echoes::Pane.new(command: ["/bin/sh", "-c", "sleep 30"], rows: 5, cols: 20)
+    sleep 0.2
+    refute pane.busy?   # sh exec'd sleep (same pid) or runs it in its own group
+    pane.close
+    refute pane.busy?
+  end
+end

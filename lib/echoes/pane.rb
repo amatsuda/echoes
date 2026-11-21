@@ -3,6 +3,7 @@
 require 'pty'
 require 'uri'
 require 'socket'
+require 'fiddle'
 
 module Echoes
   # A Pane is one shell session within a Tab. It owns a Screen (the cell
@@ -109,6 +110,30 @@ module Echoes
     # it throws the edits away, so the GUI asks first.
     def unsaved_changes?
       editor? && @editor.modified?
+    end
+
+    TCGETPGRP = Fiddle::Function.new(Fiddle::Handle::DEFAULT['tcgetpgrp'], [Fiddle::TYPE_INT], Fiddle::TYPE_INT)
+
+    # Something other than the shell itself owns the pty's foreground:
+    # an interactive shell gives each job its own process group, so a
+    # foreground group that isn't the shell's means a command is
+    # running (ssh, vim, a build).
+    def busy?
+      return false if editor? || embedded? || @reaped || @pty_read.nil? || @pty_read.closed?
+      pgrp = TCGETPGRP.call(@pty_read.fileno)
+      pgrp > 0 && pgrp != @pty_pid
+    rescue IOError, SystemCallError
+      false
+    end
+
+    # Name of the foreground process, for the "still running" prompt.
+    def foreground_process_name
+      pgrp = TCGETPGRP.call(@pty_read.fileno)
+      return nil unless pgrp > 0
+      name = IO.popen(['ps', '-o', 'comm=', '-p', pgrp.to_s], &:read).to_s.strip
+      name.empty? ? nil : File.basename(name)
+    rescue IOError, SystemCallError
+      nil
     end
 
     # The directory the shell last announced via OSC 7, as a local
