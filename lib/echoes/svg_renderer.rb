@@ -75,7 +75,10 @@ module Echoes
     @snap_invoke_closure = Fiddle::Closure::BlockCaller.new(
       V, [P, P, P]
     ) do |_block, image_ptr, error_ptr|
-      @snap_image = image_ptr.null? ? nil : image_ptr
+      # WebKit owns this NSImage and releases it when the handler
+      # returns; rasterize reads it after pump_until, so hold our own
+      # reference until then.
+      @snap_image = image_ptr.null? ? nil : ObjC.retain(image_ptr)
       @snap_error = !error_ptr.null?
       @snap_done = true
     end
@@ -151,6 +154,11 @@ module Echoes
           warn "echoes SvgRenderer: #{e.class}: #{e.message}"
           nil
         ensure
+          if @snap_image
+            ObjC.release(@snap_image)
+            @snap_image = nil
+          end
+          ObjC.release(snap_config) if snap_config && !snap_config.null?
           @rendering = false
         end
       end
