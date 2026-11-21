@@ -133,3 +133,11 @@ class Echoes::SvgSnifferTest < Test::Unit::TestCase
     assert_nil S.intrinsic_size(big)
   end
 end
+
+class Echoes::SvgSnifferInfiniteSizeTest < Test::Unit::TestCase
+  def test_intrinsic_size_rejects_infinite_dimensions
+    assert_nil Echoes::SvgSniffer.intrinsic_size(%(<svg width="1e400" height="1"/>))
+    assert_nil Echoes::SvgSniffer.intrinsic_size(%(<svg viewBox="0 0 1e999 1"/>))
+    assert_nil Echoes::SvgSniffer.intrinsic_size(%(<svg width="#{'9' * 400}" height="1"/>))
+  end
+end

@@ -126,17 +126,19 @@ module Echoes
 
     def svg_dim_to_pixels(value, cell_px, screen_size)
       return nil if value.nil? || value.empty? || value == 'auto'
-      if value.end_with?('px')
-        n = value.to_f
-        n.positive? ? n.round : nil
-      elsif value.end_with?('%')
-        return nil if cell_px <= 0
-        (screen_size * value.to_f / 100.0 * cell_px).round
-      else
-        return nil if cell_px <= 0
-        n = value.to_f
-        n.positive? ? (n * cell_px).round : nil
-      end
+      px =
+        if value.end_with?('px')
+          value.to_f
+        elsif value.end_with?('%')
+          return nil if cell_px <= 0
+          screen_size * value.to_f / 100.0 * cell_px
+        else
+          return nil if cell_px <= 0
+          value.to_f * cell_px
+        end
+      # `width=1e400px` parses to Infinity, and Infinity.round raises
+      # out of the parser.
+      px.finite? && px.positive? ? px.round : nil
     end
 
     # Translate the wire's `width=` / `height=` into cell counts

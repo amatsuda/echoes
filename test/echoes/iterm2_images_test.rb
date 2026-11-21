@@ -311,3 +311,12 @@ module Echoes::Iterm2Images
     end
   end
 end
+
+class Echoes::Iterm2ImagesInfiniteDimensionTest < Test::Unit::TestCase
+  test "an SVG dimension that parses to Infinity is ignored instead of raising" do
+    assert_nil Echoes::Iterm2Images.svg_dim_to_pixels('1e400px', 8.0, 80)
+    assert_nil Echoes::Iterm2Images.svg_dim_to_pixels('1e400%', 8.0, 80)
+    assert_nil Echoes::Iterm2Images.svg_dim_to_pixels('1e400', 8.0, 80)
+    assert_equal 100, Echoes::Iterm2Images.svg_dim_to_pixels('100px', 8.0, 80)
+  end
+end

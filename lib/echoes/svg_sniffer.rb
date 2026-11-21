@@ -55,7 +55,7 @@ module Echoes
         end
       end
 
-      return nil unless w && h && w.positive? && h.positive?
+      return nil unless w && h && w.positive? && h.positive? && w.finite? && h.finite?
       [w.round, h.round]
     end
 
