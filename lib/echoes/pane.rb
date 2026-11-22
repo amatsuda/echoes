@@ -307,14 +307,35 @@ module Echoes
       end
       @pty_write.close rescue nil
       @pty_read.close rescue nil
-      # Once closed, nothing calls alive? on this pane again, so the
-      # child would sit as a zombie until Echoes exits. Hand the
-      # reaping to a detached waiter. A pid alive? already reaped is
-      # left alone: the number may belong to a new process by now.
+      # A pid alive? already reaped is left alone: the number may
+      # belong to a new process by now.
       return if @reaped
-      Process.kill(:HUP, @pty_pid) rescue nil
-      Process.detach(@pty_pid) rescue nil
       @reaped = true
+      end_child(@pty_pid)
+    end
+
+    # How long the child gets to act on each signal before the next.
+    CLOSE_GRACE_S = { TERM: 1.0, KILL: 3.0 }.freeze
+
+    # Once closed, nothing calls alive? on this pane again, so the
+    # child would sit as a zombie until Echoes exits. Hang up on it
+    # (what the kernel does when a terminal goes away) and hand the
+    # reaping to a detached waiter. A child that ignores HUP -- a
+    # nohup'd job, or anything spawned under a parent that ignores
+    # it, as CI runners do -- would otherwise outlive its tab, so
+    # insist with TERM and then KILL if it's still around.
+    def end_child(pid)
+      Process.kill(:HUP, pid) rescue nil
+      waiter = Process.detach(pid) rescue nil
+      return unless waiter
+      Thread.new do
+        CLOSE_GRACE_S.each do |sig, grace|
+          break if waiter.join(grace)
+          Process.kill(sig, pid) rescue nil
+        end
+      rescue StandardError
+        nil
+      end
     end
 
     def process_output(data)

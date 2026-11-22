@@ -115,6 +115,16 @@ class Echoes::PaneLifecycleTest < Test::Unit::TestCase
     assert wait_until(3) { process_gone?(pid) }, "pid #{pid} is still around (zombie?)"
   end
 
+  test "close ends a child that ignores HUP" do
+    # trap "" makes HUP ignored, and SIG_IGN survives exec, so this is
+    # a child the hangup alone would never reach. It's also how a CI
+    # runner that ignores HUP in the parent hands children to us.
+    pane = Echoes::Pane.new(command: ["/bin/sh", "-c", 'trap "" HUP; exec sleep 30'], rows: 5, cols: 10)
+    pid = pane.pty_pid
+    pane.close
+    assert wait_until(5) { process_gone?(pid) }, "pid #{pid} survived close"
+  end
+
   test "close after the child was already reaped does nothing" do
     pane = Echoes::Pane.new(command: "/usr/bin/true", rows: 5, cols: 10)
     assert wait_until(3) { !pane.alive? }

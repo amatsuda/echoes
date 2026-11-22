@@ -12,6 +12,8 @@ jobs:
     runs-on: macos-latest
     name: Ruby ${{ matrix.ruby }}
     strategy:
+      # Let the other Ruby finish when one fails: both results are useful.
+      fail-fast: false
       matrix:
         ruby:
           # 3.2 is the gemspec's minimum; 4.0 the development Ruby.
