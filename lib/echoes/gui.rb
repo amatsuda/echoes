@@ -684,6 +684,24 @@ module Echoes
         gui.log_crash(e, context: 'key_down')
       end
 
+      @key_up_closure = Fiddle::Closure::BlockCaller.new(
+        Fiddle::TYPE_VOID,
+        [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP]
+      ) do |_self, _cmd, event|
+        gui.key_up(event)
+      rescue => e
+        gui.log_crash(e, context: 'key_up')
+      end
+
+      @flags_changed_closure = Fiddle::Closure::BlockCaller.new(
+        Fiddle::TYPE_VOID,
+        [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP]
+      ) do |_self, _cmd, event|
+        gui.flags_changed(event)
+      rescue => e
+        gui.log_crash(e, context: 'flags_changed')
+      end
+
       @accepts_fr_closure = Fiddle::Closure::BlockCaller.new(
         Fiddle::TYPE_INT,
         [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP]
@@ -1196,6 +1214,8 @@ module Echoes
       @view_class = ObjC.define_class('EchoesTerminalView', 'NSView', {
         'drawRect:'             => ['v@:{CGRect=dddd}', @draw_rect_closure],
         'keyDown:'              => ['v@:@', @key_down_closure],
+        'keyUp:'                => ['v@:@', @key_up_closure],
+        'flagsChanged:'         => ['v@:@', @flags_changed_closure],
         'acceptsFirstResponder' => ['c@:', @accepts_fr_closure],
         'timerFired:'           => ['v@:@', @timer_fired_closure],
         'isFlipped'             => ['c@:', @is_flipped_closure],
@@ -2061,6 +2081,20 @@ module Echoes
         return
       end
 
+      # kitty keyboard protocol: once the program has pushed flags, the
+      # encoder decides; :legacy hands the key back to the paths below.
+      kflags = pane.screen.keyboard_flags
+      if kflags != 0 && @marked_text.nil?
+        key = kitty_key(event_ptr, flags, key_repeat?(event_ptr) ? :repeat : :press)
+        seq = key && KittyKeyboard.encode(key, kflags)
+        if seq.is_a?(String)
+          pane.write_input(seq)
+          return
+        elsif seq.nil? && key
+          return
+        end
+      end
+
       mod = modifier_param(flags)
 
       if chars == "\u{19}"  # NSBackTabCharacter (Shift+Tab on macOS)
@@ -2124,6 +2158,95 @@ module Echoes
       ObjC::MSG_VOID_I.call(@view, ObjC.sel('setNeedsDisplay:'), 1)
     end
 
+    # --- kitty keyboard protocol events ---
+
+    # Releases are only reported when the program asked for event types.
+    def key_up(event_ptr)
+      pane = kitty_target_pane
+      return unless pane
+      kflags = pane.screen.keyboard_flags
+      return if kflags & KittyKeyboard::REPORT_EVENTS == 0
+
+      flags = ObjC::MSG_RET_L.call(event_ptr, ObjC.sel('modifierFlags'))
+      key = kitty_key(event_ptr, flags, :release)
+      seq = key && KittyKeyboard.encode(key, kflags)
+      pane.write_input(seq) if seq.is_a?(String)
+    rescue Errno::EIO, IOError
+      nil
+    end
+
+    # Modifier keys on their own exist only once all keys are reported.
+    def flags_changed(event_ptr)
+      pane = kitty_target_pane
+      return unless pane
+      kflags = pane.screen.keyboard_flags
+      return if kflags & KittyKeyboard::REPORT_ALL == 0
+
+      flags = ObjC::MSG_RET_L.call(event_ptr, ObjC.sel('modifierFlags'))
+      key_code = ObjC::MSG_RET_L.call(event_ptr, ObjC.sel('keyCode')) & 0xFFFF
+      name, event = self.class.modifier_key_change(key_code, flags)
+      return unless name
+
+      key = KittyKeyboard::Key.new(functional: name, event: event,
+                                   mods: self.class.kitty_modifiers(flags, Echoes.config.option_as_alt))
+      seq = KittyKeyboard.encode(key, kflags)
+      pane.write_input(seq) if seq.is_a?(String)
+    rescue Errno::EIO, IOError
+      nil
+    end
+
+    # The pane whose program may have pushed keyboard flags; nil while
+    # something in Echoes itself (search, copy mode, the editor, the
+    # embedded shell) owns the keyboard.
+    def kitty_target_pane
+      return nil if @search_mode
+      pane = current_tab&.active_pane
+      return nil unless pane
+      return nil if pane.copy_mode&.active || pane.editor? || pane.embedded?
+      pane
+    end
+
+    def key_repeat?(event_ptr)
+      (ObjC::MSG_RET_L.call(event_ptr, ObjC.sel('isARepeat')) & 0xFF) != 0
+    end
+
+    # Build the encoder's view of an NSEvent. Returns nil for a dead key
+    # that the input method is composing (Option+e before the e), so
+    # the composition still happens even while a program wants every
+    # key as an escape code.
+    def kitty_key(event_ptr, flags, event)
+      chars = ObjC.to_ruby_string(ObjC::MSG_PTR.call(event_ptr, ObjC.sel('characters')))
+      unshifted = ObjC.to_ruby_string(ObjC::MSG_PTR_L.call(event_ptr, ObjC.sel('charactersByApplyingModifiers:'), 0))
+      shifted = ObjC.to_ruby_string(ObjC::MSG_PTR_L.call(event_ptr, ObjC.sel('charactersByApplyingModifiers:'),
+                                                       ObjC::NSEventModifierFlagShift))
+      key_code = ObjC::MSG_RET_L.call(event_ptr, ObjC.sel('keyCode')) & 0xFFFF
+      numpad = (flags & ObjC::NSEventModifierFlagNumericPad) != 0
+      option_held = (flags & ObjC::NSEventModifierFlagOption) != 0
+      option_is_alt = option_held && self.class.option_is_alt?(flags, Echoes.config.option_as_alt)
+
+      functional = self.class.functional_key_for(unshifted.empty? ? chars : unshifted, numpad)
+      if functional.nil? && chars.empty? && (flags & (ObjC::NSEventModifierFlagControl | ObjC::NSEventModifierFlagCommand)) == 0 && !option_is_alt
+        return nil
+      end
+
+      text = chars
+      # Alt means "not text" here, and functional keys other than the
+      # keypad's text keys produce none (their characters are private
+      # use placeholders).
+      text = nil if option_is_alt
+      text = nil if functional && !KEYPAD_TEXT_KEYS.include?(functional)
+
+      KittyKeyboard::Key.new(
+        codepoint: functional ? nil : unshifted[0]&.ord,
+        functional: functional,
+        shifted: (shifted[0]&.ord unless functional || shifted.empty?),
+        base: (KittyKeyboard.base_layout_codepoint(key_code) unless functional),
+        text: text,
+        mods: self.class.kitty_modifiers(flags, Echoes.config.option_as_alt),
+        event: event
+      )
+    end
+
     # --- IME (Input Method Editor) callbacks ---
 
     def ime_insert_text(text_ptr)
@@ -2135,6 +2258,16 @@ module Echoes
       return unless tab
       pane = tab.active_pane
       return unless pane
+      # Text the input method composed has no key behind it; a program
+      # reporting all keys with associated text gets it as key 0.
+      kflags = pane.screen.keyboard_flags
+      if kflags != 0
+        seq = KittyKeyboard.encode(KittyKeyboard::Key.new(text: text, mods: 0, event: :press), kflags)
+        if seq.is_a?(String)
+          pane.write_input(seq)
+          return
+        end
+      end
       pane.write_input(text)
     rescue Errno::EIO, IOError
       close_tab(@active_tab)
@@ -5206,6 +5339,70 @@ module Echoes
       when :right then (flags & NX_DEVICERALTKEYMASK) != 0
       else true
       end
+    end
+
+    # The rest of NSEvent's device-dependent modifier bits, used to
+    # tell which of a pair of modifier keys changed in flagsChanged:.
+    NX_DEVICELCTLKEYMASK   = 0x0001
+    NX_DEVICELSHIFTKEYMASK = 0x0002
+    NX_DEVICERSHIFTKEYMASK = 0x0004
+    NX_DEVICELCMDKEYMASK   = 0x0008
+    NX_DEVICERCMDKEYMASK   = 0x0010
+    NX_DEVICERCTLKEYMASK   = 0x2000
+
+    # kitty keyboard protocol modifier bits for an NSEvent's flags.
+    # Option is Alt only when configured to act as it; otherwise it is
+    # composing a character and is no modifier at all to the program.
+    def self.kitty_modifiers(flags, option_as_alt)
+      mods = 0
+      mods |= KittyKeyboard::SHIFT if (flags & ObjC::NSEventModifierFlagShift) != 0
+      mods |= KittyKeyboard::CTRL if (flags & ObjC::NSEventModifierFlagControl) != 0
+      mods |= KittyKeyboard::SUPER if (flags & ObjC::NSEventModifierFlagCommand) != 0
+      mods |= KittyKeyboard::CAPS_LOCK if (flags & ObjC::NSEventModifierFlagCapsLock) != 0
+      if (flags & ObjC::NSEventModifierFlagOption) != 0 && option_is_alt?(flags, option_as_alt)
+        mods |= KittyKeyboard::ALT
+      end
+      mods
+    end
+
+    # NSEvent's function-key placeholders (U+F700..) and the C0 bytes
+    # that stand for keys, named as the protocol's functional keys.
+    FUNCTIONAL_KEY_CHARS = {
+      "\u{F700}" => :up, "\u{F701}" => :down, "\u{F702}" => :left, "\u{F703}" => :right,
+      **(1..35).to_h { |n| [[0xF704 + n - 1].pack('U'), :"f#{n}"] },
+      "\u{F727}" => :insert, "\u{F728}" => :delete, "\u{F729}" => :home, "\u{F72B}" => :end,
+      "\u{F72C}" => :page_up, "\u{F72D}" => :page_down,
+      "\u{F72E}" => :print_screen, "\u{F72F}" => :scroll_lock, "\u{F730}" => :pause, "\u{F735}" => :menu,
+      "\e" => :escape, "\r" => :enter, "\t" => :tab, "\x19" => :tab, "\x7f" => :backspace,
+      "\x03" => :kp_enter,
+    }.freeze
+
+    KEYPAD_KEY_CHARS = {
+      **(0..9).to_h { |n| [n.to_s, :"kp_#{n}"] },
+      '.' => :kp_decimal, '/' => :kp_divide, '*' => :kp_multiply, '-' => :kp_subtract,
+      '+' => :kp_add, '=' => :kp_equal, ',' => :kp_separator,
+    }.freeze
+    KEYPAD_TEXT_KEYS = KEYPAD_KEY_CHARS.values.freeze
+
+    def self.functional_key_for(chars, numpad)
+      return nil if chars.nil? || chars.empty?
+      (numpad && KEYPAD_KEY_CHARS[chars]) || FUNCTIONAL_KEY_CHARS[chars]
+    end
+
+    # keyCode of a flagsChanged: event => [protocol key, bit that is set
+    # while that key is down]. Caps Lock has no down state: it toggles.
+    MODIFIER_KEY_CODES = {
+      56 => [:left_shift, NX_DEVICELSHIFTKEYMASK], 60 => [:right_shift, NX_DEVICERSHIFTKEYMASK],
+      59 => [:left_control, NX_DEVICELCTLKEYMASK], 62 => [:right_control, NX_DEVICERCTLKEYMASK],
+      58 => [:left_alt, NX_DEVICELALTKEYMASK],     61 => [:right_alt, NX_DEVICERALTKEYMASK],
+      55 => [:left_super, NX_DEVICELCMDKEYMASK],   54 => [:right_super, NX_DEVICERCMDKEYMASK],
+      57 => [:caps_lock, nil],
+    }.freeze
+
+    def self.modifier_key_change(key_code, flags)
+      name, mask = MODIFIER_KEY_CODES[key_code]
+      return nil unless name
+      [name, (mask.nil? || (flags & mask) != 0) ? :press : :release]
     end
 
     def self.control_sequence(chars, flags)

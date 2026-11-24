@@ -111,6 +111,7 @@ module Echoes
                                NSWindowStyleMaskMiniaturizable | NSWindowStyleMaskResizable
     NSBackingStoreBuffered = 2
 
+    NSEventModifierFlagCapsLock = 1 << 16
     NSEventModifierFlagShift   = 1 << 17
     NSEventModifierFlagControl = 1 << 18
     NSEventModifierFlagOption  = 1 << 19

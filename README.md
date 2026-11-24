@@ -81,6 +81,14 @@ bundle exec exe/echoes -t  # TTY mode
   …) ships them.
 - **Synchronized output (DEC 2026)** — full-frame updates from tmux,
   Neovim, and IDEs land atomically instead of tearing.
+- **Kitty keyboard protocol** — programs that push flags with
+  `CSI > flags u` (Neovim, fish, Helix, Zellij, kitty's own kittens)
+  get keys as `CSI code;mods u`: Ctrl+I apart from Tab, Esc apart from
+  an Alt prefix, Shift+Enter apart from Enter. All five enhancements
+  are supported (disambiguate, event types with key repeat and release,
+  alternate keys, report all keys, associated text), with separate
+  flag stacks for the main and alternate screens. Programs that never
+  ask see exactly the legacy xterm bytes they always did.
 - **Find** — Cmd+F opens the search bar; while it's focused, Cmd+R
   toggles regex mode and Cmd+I toggles case-insensitive matching.
 - **Pane capture** — a running program can snapshot its own pane to

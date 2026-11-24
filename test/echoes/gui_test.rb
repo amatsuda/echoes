@@ -820,3 +820,73 @@ class Echoes::GUIMouseReportBypassTest < Test::Unit::TestCase
     refute Echoes::GUI.mouse_report_bypass?(ObjC::NSEventModifierFlagOption, :off)
   end
 end
+
+class Echoes::GUIKittyKeyboardTest < Test::Unit::TestCase
+  KK    = Echoes::KittyKeyboard
+  SHIFT = Echoes::ObjC::NSEventModifierFlagShift
+  CTRL  = Echoes::ObjC::NSEventModifierFlagControl
+  OPT   = Echoes::ObjC::NSEventModifierFlagOption | Echoes::GUI::NX_DEVICELALTKEYMASK
+  CMD   = Echoes::ObjC::NSEventModifierFlagCommand
+  CAPS  = Echoes::ObjC::NSEventModifierFlagCapsLock
+
+  test "NSEvent modifier flags become protocol modifier bits" do
+    assert_equal 0, Echoes::GUI.kitty_modifiers(0, :both)
+    assert_equal KK::SHIFT | KK::CTRL, Echoes::GUI.kitty_modifiers(SHIFT | CTRL, :both)
+    assert_equal KK::SUPER, Echoes::GUI.kitty_modifiers(CMD, :both)
+    assert_equal KK::CAPS_LOCK, Echoes::GUI.kitty_modifiers(CAPS, :both)
+  end
+
+  test "Option counts as Alt only when it is configured to act as Alt" do
+    assert_equal KK::ALT, Echoes::GUI.kitty_modifiers(OPT, :both)
+    assert_equal KK::ALT, Echoes::GUI.kitty_modifiers(OPT, :left)
+    assert_equal 0, Echoes::GUI.kitty_modifiers(OPT, :right)
+    assert_equal 0, Echoes::GUI.kitty_modifiers(OPT, :none)
+  end
+
+  test "functional keys are recognised from the unmodified characters" do
+    assert_equal :up, Echoes::GUI.functional_key_for("\u{F700}", false)
+    assert_equal :up, Echoes::GUI.functional_key_for("\u{F700}", true), "arrows carry the numeric pad flag on macOS"
+    assert_equal :f1, Echoes::GUI.functional_key_for("\u{F704}", false)
+    assert_equal :f12, Echoes::GUI.functional_key_for("\u{F70F}", false)
+    assert_equal :f13, Echoes::GUI.functional_key_for("\u{F710}", false)
+    assert_equal :insert, Echoes::GUI.functional_key_for("\u{F727}", false)
+    assert_equal :delete, Echoes::GUI.functional_key_for("\u{F728}", false)
+    assert_equal :home, Echoes::GUI.functional_key_for("\u{F729}", false)
+    assert_equal :end, Echoes::GUI.functional_key_for("\u{F72B}", false)
+    assert_equal :page_up, Echoes::GUI.functional_key_for("\u{F72C}", false)
+    assert_equal :page_down, Echoes::GUI.functional_key_for("\u{F72D}", false)
+    assert_equal :escape, Echoes::GUI.functional_key_for("\e", false)
+    assert_equal :enter, Echoes::GUI.functional_key_for("\r", false)
+    assert_equal :kp_enter, Echoes::GUI.functional_key_for("\x03", true)
+    assert_equal :tab, Echoes::GUI.functional_key_for("\t", false)
+    assert_equal :backspace, Echoes::GUI.functional_key_for("\x7f", false)
+    assert_nil Echoes::GUI.functional_key_for("a", false)
+    assert_nil Echoes::GUI.functional_key_for("", false)
+  end
+
+  test "keypad text keys are told apart from the main keyboard" do
+    assert_equal :kp_1, Echoes::GUI.functional_key_for("1", true)
+    assert_nil Echoes::GUI.functional_key_for("1", false)
+    assert_equal :kp_add, Echoes::GUI.functional_key_for("+", true)
+    assert_equal :kp_decimal, Echoes::GUI.functional_key_for(".", true)
+    assert_equal :kp_divide, Echoes::GUI.functional_key_for("/", true)
+    assert_equal :kp_multiply, Echoes::GUI.functional_key_for("*", true)
+    assert_equal :kp_subtract, Echoes::GUI.functional_key_for("-", true)
+    assert_equal :kp_equal, Echoes::GUI.functional_key_for("=", true)
+  end
+
+  test "flagsChanged key codes name the modifier key and whether it went down" do
+    assert_equal [:left_shift, :press], Echoes::GUI.modifier_key_change(56, SHIFT | Echoes::GUI::NX_DEVICELSHIFTKEYMASK)
+    assert_equal [:left_shift, :release], Echoes::GUI.modifier_key_change(56, SHIFT | Echoes::GUI::NX_DEVICERSHIFTKEYMASK)
+    assert_equal [:right_shift, :press], Echoes::GUI.modifier_key_change(60, SHIFT | Echoes::GUI::NX_DEVICERSHIFTKEYMASK)
+    assert_equal [:left_control, :press], Echoes::GUI.modifier_key_change(59, CTRL | Echoes::GUI::NX_DEVICELCTLKEYMASK)
+    assert_equal [:right_control, :release], Echoes::GUI.modifier_key_change(62, 0)
+    assert_equal [:left_alt, :press], Echoes::GUI.modifier_key_change(58, OPT)
+    assert_equal [:right_alt, :release], Echoes::GUI.modifier_key_change(61, 0)
+    assert_equal [:left_super, :press], Echoes::GUI.modifier_key_change(55, CMD | Echoes::GUI::NX_DEVICELCMDKEYMASK)
+    assert_equal [:right_super, :release], Echoes::GUI.modifier_key_change(54, 0)
+    assert_equal [:caps_lock, :press], Echoes::GUI.modifier_key_change(57, CAPS)
+    assert_equal [:caps_lock, :press], Echoes::GUI.modifier_key_change(57, 0), "Caps Lock only ever toggles"
+    assert_nil Echoes::GUI.modifier_key_change(63, 0), "the fn key has no protocol code"
+  end
+end
