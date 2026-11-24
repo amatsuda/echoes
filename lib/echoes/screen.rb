@@ -60,6 +60,7 @@ module Echoes
       @cell_pixel_height = 16.0
       @application_cursor_keys = false
       @bracketed_paste_mode = false
+      @keyboard_stacks = { main: [], alt: [] }
       @focus_reporting = false
       @sync_active = false  # DEC private mode 2026 (synchronized output)
       @auto_wrap = true
@@ -953,6 +954,47 @@ module Echoes
     # that isn't visible. On by default, as in kitty and iTerm2.
     attr_writer :alternate_scroll
 
+    # --- kitty keyboard protocol flag stacks ---
+    # https://sw.kovidgoyal.net/kitty/keyboard-protocol/
+    # Programs push the enhancements they want (CSI > flags u) and pop
+    # them on exit; the main and alternate screens keep separate
+    # stacks. Only the five bits the spec defines are kept.
+    KEYBOARD_FLAGS_MASK = 0b11111
+    KEYBOARD_STACK_LIMIT = 8
+
+    def keyboard_flags
+      keyboard_stack.last || 0
+    end
+
+    def push_keyboard_flags(flags)
+      stack = keyboard_stack
+      stack.shift if stack.size >= KEYBOARD_STACK_LIMIT
+      stack.push(flags.to_i & KEYBOARD_FLAGS_MASK)
+    end
+
+    def pop_keyboard_flags(count = 1)
+      keyboard_stack.pop([count.to_i, 1].max)
+    end
+
+    # Mode 1 replaces the current flags, 2 ors bits in, 3 clears them.
+    # An empty stack is treated as holding 0, so a set there is a push
+    # and a later pop undoes it.
+    def set_keyboard_flags(flags, mode = 1)
+      flags = flags.to_i & KEYBOARD_FLAGS_MASK
+      current = keyboard_flags
+      value = case mode
+              when 2 then current | flags
+              when 3 then current & ~flags
+              else flags
+              end
+      stack = keyboard_stack
+      if stack.empty?
+        stack.push(value)
+      else
+        stack[-1] = value
+      end
+    end
+
     def alternate_scroll?
       @alternate_scroll.nil? ? true : @alternate_scroll
     end
@@ -1243,6 +1285,10 @@ module Echoes
     def switch_to_main_screen
       return unless @using_alt_screen
 
+      # A TUI that died without popping must not leave its keyboard
+      # flags for the next program that enters the alternate screen.
+      @keyboard_stacks[:alt].clear
+
       current_rows = @rows
       current_cols = @cols
 
@@ -1372,6 +1418,7 @@ module Echoes
       @mouse_tracking = :off
       @mouse_encoding = :default
       @application_keypad = false
+      @keyboard_stacks.each_value(&:clear)
       @title_stack.clear
       @command_marks.clear
       @bg_fills.clear
@@ -1408,6 +1455,10 @@ module Echoes
     end
 
     private
+
+    def keyboard_stack
+      @keyboard_stacks[@using_alt_screen ? :alt : :main]
+    end
 
     # R, G, B from a colon-form truecolour SGR: [38, 2, R, G, B] (five
     # elements) or [38, 2, cs, R, G, B] with a colour-space id that is

@@ -1774,3 +1774,55 @@ class Echoes::ParserAlternateScrollTest < Test::Unit::TestCase
     assert screen.alternate_scroll?
   end
 end
+
+class Echoes::ParserKeyboardProtocolTest < Test::Unit::TestCase
+  setup do
+    @screen = Echoes::Screen.new(rows: 5, cols: 10)
+    @responses = []
+    @parser = Echoes::Parser.new(@screen, writer: ->(s) { @responses << s })
+  end
+
+  test "CSI > flags u pushes" do
+    @parser.feed("\e[>1u")
+    assert_equal 1, @screen.keyboard_flags
+    @parser.feed("\e[>15u")
+    assert_equal 15, @screen.keyboard_flags
+  end
+
+  test "CSI > u pushes zero" do
+    @parser.feed("\e[>1u\e[>u")
+    assert_equal 0, @screen.keyboard_flags
+    @parser.feed("\e[<u")
+    assert_equal 1, @screen.keyboard_flags
+  end
+
+  test "CSI < n u pops n entries, default one" do
+    @parser.feed("\e[>1u\e[>2u\e[>4u")
+    @parser.feed("\e[<u")
+    assert_equal 2, @screen.keyboard_flags
+    @parser.feed("\e[<2u")
+    assert_equal 0, @screen.keyboard_flags
+  end
+
+  test "CSI = flags ; mode u sets" do
+    @parser.feed("\e[=1u")
+    assert_equal 1, @screen.keyboard_flags
+    @parser.feed("\e[=8;2u")
+    assert_equal 9, @screen.keyboard_flags
+    @parser.feed("\e[=1;3u")
+    assert_equal 8, @screen.keyboard_flags
+  end
+
+  test "CSI ? u reports the current flags" do
+    @parser.feed("\e[?u")
+    assert_equal ["\e[?0u"], @responses
+    @parser.feed("\e[>5u\e[?u")
+    assert_equal "\e[?5u", @responses.last
+  end
+
+  test "plain CSI u still restores the cursor" do
+    @parser.feed("\e[3;4H\e[s\e[1;1H\e[u")
+    assert_equal [2, 3], [@screen.cursor.row, @screen.cursor.col]
+    assert_equal 0, @screen.keyboard_flags
+  end
+end

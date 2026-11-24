@@ -841,7 +841,7 @@ module Echoes
     # private sequence (`\e[?4m` XTQMODKEYS, `\e[?1r` XTRESTORE,
     # `\e[?1049s` XTSAVE) is ignored instead of running as its plain
     # ANSI meaning.
-    PRIVATE_FLAG_FINALS = %w[h l n].freeze
+    PRIVATE_FLAG_FINALS = %w[h l n u].freeze
     # Likewise for intermediates: only `!p` (DECSTR) and ` q`
     # (DECSCUSR) are implemented; `\e[2 @` (SL) must not run as ICH,
     # nor `\e[…$r` (DECCARA) as DECSTBM.
@@ -849,8 +849,11 @@ module Echoes
 
     def dispatch_csi(final)
       if @csi_prefix
+        params = collect_params
         if @csi_prefix == 0x3E && final == 'c'
-          dispatch_da2(collect_params)
+          dispatch_da2(params)
+        elsif final == 'u'
+          dispatch_keyboard_flags(@csi_prefix, params)
         end
         return
       end
@@ -889,7 +892,12 @@ module Echoes
         bottom = @screen.rows if bottom < 1
         @screen.set_scroll_region(top - 1, bottom - 1)
       when 's' then @screen.save_cursor
-      when 'u' then @screen.restore_cursor
+      when 'u'
+        if @private_flag
+          @writer&.call("\e[?#{@screen.keyboard_flags}u")
+        else
+          @screen.restore_cursor
+        end
       when 'g' then @screen.clear_tab_stop(params[0] || 0)
       when 'c' then dispatch_da(params)
       when 'n' then dispatch_dsr(params)
@@ -972,6 +980,17 @@ module Echoes
 
       # VT220 with ANSI color support
       @writer.call("\e[?62;22c")
+    end
+
+    # kitty keyboard protocol: CSI > flags u pushes, CSI < n u pops,
+    # CSI = flags ; mode u sets. (CSI ? u, the query, is handled with
+    # the other private-flag finals.)
+    def dispatch_keyboard_flags(prefix, params)
+      case prefix
+      when 0x3E then @screen.push_keyboard_flags(params[0] || 0)
+      when 0x3C then @screen.pop_keyboard_flags(params[0] || 1)
+      when 0x3D then @screen.set_keyboard_flags(params[0] || 0, params[1] || 1)
+      end
     end
 
     def dispatch_da2(params)

@@ -1471,3 +1471,88 @@ class Echoes::ScreenPlacementAndShiftTest < Test::Unit::TestCase
     refute screen.row_wrapped?(2)
   end
 end
+
+class Echoes::ScreenKeyboardFlagsTest < Test::Unit::TestCase
+  setup do
+    @screen = Echoes::Screen.new(rows: 5, cols: 10)
+  end
+
+  test "no flags until a program asks" do
+    assert_equal 0, @screen.keyboard_flags
+  end
+
+  test "push and pop keep a stack" do
+    @screen.push_keyboard_flags(1)
+    @screen.push_keyboard_flags(15)
+    assert_equal 15, @screen.keyboard_flags
+    @screen.pop_keyboard_flags
+    assert_equal 1, @screen.keyboard_flags
+    @screen.pop_keyboard_flags
+    assert_equal 0, @screen.keyboard_flags
+  end
+
+  test "popping past the bottom leaves no flags" do
+    @screen.push_keyboard_flags(1)
+    @screen.pop_keyboard_flags(5)
+    assert_equal 0, @screen.keyboard_flags
+    @screen.pop_keyboard_flags
+    assert_equal 0, @screen.keyboard_flags
+  end
+
+  test "unknown flag bits are ignored" do
+    @screen.push_keyboard_flags(0b1100000 | 1)
+    assert_equal 1, @screen.keyboard_flags
+  end
+
+  test "the stack is capped and evicts the oldest entry" do
+    (1..Echoes::Screen::KEYBOARD_STACK_LIMIT + 2).each { |i| @screen.push_keyboard_flags(i & 31) }
+    assert_equal (Echoes::Screen::KEYBOARD_STACK_LIMIT + 2) & 31, @screen.keyboard_flags
+    Echoes::Screen::KEYBOARD_STACK_LIMIT.times { @screen.pop_keyboard_flags }
+    assert_equal 0, @screen.keyboard_flags, "oldest entries should have been evicted"
+  end
+
+  test "set replaces the current flags in mode 1" do
+    @screen.push_keyboard_flags(3)
+    @screen.set_keyboard_flags(8, 1)
+    assert_equal 8, @screen.keyboard_flags
+    @screen.pop_keyboard_flags
+    assert_equal 0, @screen.keyboard_flags
+  end
+
+  test "set on an empty stack behaves like a push so pop undoes it" do
+    @screen.set_keyboard_flags(1)
+    assert_equal 1, @screen.keyboard_flags
+    @screen.pop_keyboard_flags
+    assert_equal 0, @screen.keyboard_flags
+  end
+
+  test "set mode 2 ors bits in and mode 3 clears them" do
+    @screen.push_keyboard_flags(1)
+    @screen.set_keyboard_flags(8, 2)
+    assert_equal 9, @screen.keyboard_flags
+    @screen.set_keyboard_flags(1, 3)
+    assert_equal 8, @screen.keyboard_flags
+  end
+
+  test "the alternate screen has its own stack, dropped on exit" do
+    @screen.push_keyboard_flags(1)
+    @screen.switch_to_alt_screen
+    assert_equal 0, @screen.keyboard_flags
+    @screen.push_keyboard_flags(31)
+    assert_equal 31, @screen.keyboard_flags
+    @screen.switch_to_main_screen
+    assert_equal 1, @screen.keyboard_flags
+    @screen.switch_to_alt_screen
+    assert_equal 0, @screen.keyboard_flags, "a crashed TUI's flags must not leak into the next one"
+  end
+
+  test "RIS clears both stacks" do
+    @screen.push_keyboard_flags(1)
+    @screen.switch_to_alt_screen
+    @screen.push_keyboard_flags(2)
+    @screen.reset
+    assert_equal 0, @screen.keyboard_flags
+    @screen.switch_to_alt_screen
+    assert_equal 0, @screen.keyboard_flags
+  end
+end
