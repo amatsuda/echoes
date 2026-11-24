@@ -1556,3 +1556,14 @@ class Echoes::ScreenKeyboardFlagsTest < Test::Unit::TestCase
     assert_equal 0, @screen.keyboard_flags
   end
 end
+
+class Echoes::ScreenModifyOtherKeysTest < Test::Unit::TestCase
+  test "modifyOtherKeys is off until a program turns it on, and RIS turns it off" do
+    screen = Echoes::Screen.new(rows: 5, cols: 10)
+    assert_equal 0, screen.modify_other_keys
+    screen.modify_other_keys = 2
+    assert_equal 2, screen.modify_other_keys
+    screen.reset
+    assert_equal 0, screen.modify_other_keys
+  end
+end

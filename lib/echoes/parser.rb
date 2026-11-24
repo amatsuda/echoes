@@ -841,7 +841,7 @@ module Echoes
     # private sequence (`\e[?4m` XTQMODKEYS, `\e[?1r` XTRESTORE,
     # `\e[?1049s` XTSAVE) is ignored instead of running as its plain
     # ANSI meaning.
-    PRIVATE_FLAG_FINALS = %w[h l n u].freeze
+    PRIVATE_FLAG_FINALS = %w[h l n u m].freeze
     # Likewise for intermediates: only `!p` (DECSTR) and ` q`
     # (DECSCUSR) are implemented; `\e[2 @` (SL) must not run as ICH,
     # nor `\e[…$r` (DECCARA) as DECSTBM.
@@ -854,6 +854,8 @@ module Echoes
           dispatch_da2(params)
         elsif final == 'u'
           dispatch_keyboard_flags(@csi_prefix, params)
+        elsif @csi_prefix == 0x3E && final == 'm'
+          dispatch_xtmodkeys(params)
         end
         return
       end
@@ -883,7 +885,13 @@ module Echoes
       when 'b' then @screen.repeat_char(params[0] || 1)
       when 'S' then @screen.scroll_up(params[0] || 1)
       when 'T' then @screen.scroll_down(params[0] || 1)
-      when 'm' then @screen.set_graphics(collect_sgr_params)
+      when 'm'
+        if @private_flag
+          # XTQMODKEYS: CSI ? 4 m asks for the modifyOtherKeys level.
+          @writer&.call("\e[>4;#{@screen.modify_other_keys}m") if params[0] == 4
+        else
+          @screen.set_graphics(collect_sgr_params)
+        end
       when 'r'
         # DECSTBM: 0 or omitted means the default for both ends.
         top    = params[0].to_i
@@ -990,6 +998,17 @@ module Echoes
       when 0x3E then @screen.push_keyboard_flags(params[0] || 0)
       when 0x3C then @screen.pop_keyboard_flags(params[0] || 1)
       when 0x3D then @screen.set_keyboard_flags(params[0] || 0, params[1] || 1)
+      end
+    end
+
+    # XTMODKEYS: CSI > 4 ; level m sets modifyOtherKeys; CSI > 4 m and
+    # a bare CSI > m reset it. The other resources (modifyCursorKeys,
+    # modifyFunctionKeys, ...) are ignored.
+    def dispatch_xtmodkeys(params)
+      if params.all?(&:nil?)
+        @screen.modify_other_keys = 0
+      elsif params[0] == 4
+        @screen.modify_other_keys = params[1] || 0
       end
     end
 

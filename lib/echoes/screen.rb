@@ -61,6 +61,7 @@ module Echoes
       @application_cursor_keys = false
       @bracketed_paste_mode = false
       @keyboard_stacks = { main: [], alt: [] }
+      @modify_other_keys = 0  # xterm CSI > 4 ; level m
       @focus_reporting = false
       @sync_active = false  # DEC private mode 2026 (synchronized output)
       @auto_wrap = true
@@ -966,6 +967,13 @@ module Echoes
       keyboard_stack.last || 0
     end
 
+    # xterm's modifyOtherKeys level (0..2), see ModifyOtherKeys.
+    attr_reader :modify_other_keys
+
+    def modify_other_keys=(level)
+      @modify_other_keys = level.to_i.clamp(0, 2)
+    end
+
     def push_keyboard_flags(flags)
       stack = keyboard_stack
       stack.shift if stack.size >= KEYBOARD_STACK_LIMIT
@@ -1419,6 +1427,7 @@ module Echoes
       @mouse_encoding = :default
       @application_keypad = false
       @keyboard_stacks.each_value(&:clear)
+      @modify_other_keys = 0
       @title_stack.clear
       @command_marks.clear
       @bg_fills.clear

@@ -1826,3 +1826,47 @@ class Echoes::ParserKeyboardProtocolTest < Test::Unit::TestCase
     assert_equal 0, @screen.keyboard_flags
   end
 end
+
+class Echoes::ParserModifyOtherKeysTest < Test::Unit::TestCase
+  setup do
+    @screen = Echoes::Screen.new(rows: 5, cols: 10)
+    @responses = []
+    @parser = Echoes::Parser.new(@screen, writer: ->(s) { @responses << s })
+  end
+
+  test "CSI > 4 ; level m sets the level" do
+    @parser.feed("\e[>4;2m")
+    assert_equal 2, @screen.modify_other_keys
+    @parser.feed("\e[>4;1m")
+    assert_equal 1, @screen.modify_other_keys
+    @parser.feed("\e[>4;0m")
+    assert_equal 0, @screen.modify_other_keys
+  end
+
+  test "CSI > 4 m and CSI > m reset it; other resources are ignored" do
+    @parser.feed("\e[>4;2m\e[>4m")
+    assert_equal 0, @screen.modify_other_keys
+    @parser.feed("\e[>4;2m\e[>m")
+    assert_equal 0, @screen.modify_other_keys
+    @parser.feed("\e[>4;2m\e[>1;3m")
+    assert_equal 2, @screen.modify_other_keys
+  end
+
+  test "levels above 2 are clamped" do
+    @parser.feed("\e[>4;7m")
+    assert_equal 2, @screen.modify_other_keys
+  end
+
+  test "CSI ? 4 m reports the level" do
+    @parser.feed("\e[?4m")
+    assert_equal ["\e[>4;0m"], @responses
+    @parser.feed("\e[>4;2m\e[?4m")
+    assert_equal "\e[>4;2m", @responses.last
+  end
+
+  test "plain SGR and the xterm sequences do not disturb each other" do
+    @parser.feed("\e[>4;2m\e[1;31mX")
+    assert_equal 2, @screen.modify_other_keys
+    assert @screen.grid[0][0].bold
+  end
+end

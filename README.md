@@ -89,6 +89,11 @@ bundle exec exe/echoes -t  # TTY mode
   alternate keys, report all keys, associated text), with separate
   flag stacks for the main and alternate screens. Programs that never
   ask see exactly the legacy xterm bytes they always did.
+- **xterm modifyOtherKeys** — for Vim, Emacs and other programs that
+  predate the kitty protocol: `CSI > 4 ; 2 m` turns on xterm's
+  `CSI 27 ; mods ; code ~` form for modified keys (level 1 only for
+  the combinations the legacy bytes cannot express), `CSI ? 4 m`
+  reports the level, and kitty flags take precedence when pushed.
 - **Find** — Cmd+F opens the search bar; while it's focused, Cmd+R
   toggles regex mode and Cmd+I toggles case-insensitive matching.
 - **Pane capture** — a running program can snapshot its own pane to

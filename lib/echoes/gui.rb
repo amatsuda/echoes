@@ -2093,6 +2093,15 @@ module Echoes
         elsif seq.nil? && key
           return
         end
+      elsif kflags == 0 && pane.screen.modify_other_keys > 0 && @marked_text.nil?
+        # xterm's modifyOtherKeys, for programs that predate the kitty
+        # protocol (Vim, Emacs). Kitty flags take precedence.
+        key = kitty_key(event_ptr, flags, :press)
+        seq = key && ModifyOtherKeys.encode(key, pane.screen.modify_other_keys)
+        if seq.is_a?(String)
+          pane.write_input(seq)
+          return
+        end
       end
 
       mod = modifier_param(flags)
