@@ -188,9 +188,12 @@ module Echoes
           end
           exit_code = result.to_i unless result == NO_EXIT_THROWN
         rescue Interrupt
+          # Raised by the INT trap. The command is over as far as the
+          # trap is concerned: say so before anything that could run it
+          # again (the reap below sleeps), or a second Ctrl-C would raise
+          # out of this rescue and end the helper.
+          @command_running = false
           interrupted = true
-          # SIGINT propagated by the trap; let the rest of the
-          # rubish runtime unwind, then fall through to command_done.
           reap_interrupted_children
           STDOUT.write "\r\n" rescue nil
           STDOUT.flush rescue nil

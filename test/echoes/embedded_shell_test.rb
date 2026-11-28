@@ -226,6 +226,24 @@ class Echoes::EmbeddedShellTest < Test::Unit::TestCase
       "expected loop to exit promptly after Ctrl-C; took #{elapsed}s"
   end
 
+  test "a second Ctrl-C while the first is being handled leaves the helper alive" do
+    # The child ignores SIGINT, so after the first Ctrl-C the helper
+    # spends its grace period polling for a child that will not die;
+    # a second Ctrl-C landing in that window used to raise a fresh
+    # Interrupt out of the handler and kill the helper.
+    @shell.submit_line(%q{/bin/sh -c "trap \"\" INT; /bin/sleep 1"})
+    sleep 0.5
+    @shell.interrupt
+    sleep 0.05
+    @shell.interrupt
+    deadline = Time.now + 3
+    sleep 0.05 while @shell.running? && Time.now < deadline
+    assert @shell.alive?, "helper should survive a second Ctrl-C"
+    @shell.read_available_output
+    @shell.submit_and_wait("echo still-here")
+    assert_includes @shell.read_available_output, "still-here"
+  end
+
   test "loops still produce all their output" do
     # Regression guard for the "first session-leader child exits →
     # kernel hangs the pty" pathology — the helper architecture keeps
