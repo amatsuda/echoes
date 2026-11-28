@@ -104,8 +104,7 @@ module Echoes
     # requests off the pipe: a resize and the reads of the helper's own
     # state it answers itself, so they are answered while a command runs,
     # as before; every request that runs rubish goes to the main thread
-    # through a queue, with execute and shutdown (an `exit` on another
-    # thread would end that thread alone).
+    # through a queue, with execute and shutdown.
     ON_READER = %w[resize cwd last_status].freeze
 
     def run
