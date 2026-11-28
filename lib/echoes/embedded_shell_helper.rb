@@ -202,7 +202,9 @@ module Echoes
         ensure
           @command_running = false
         end
-        status = exit_code || @repl.instance_variable_get(:@last_status) || (interrupted ? 130 : 0)
+        # A Ctrl-C leaves rubish's $? at the previous command's status,
+        # as the interrupted wait never set one: report 130 like bash.
+        status = exit_code || (interrupted ? 130 : @repl.instance_variable_get(:@last_status) || 0)
         # Re-announce cwd so the host's pane.screen.current_directory
         # reflects any cd/pushd/popd this command performed. Emit
         # *before* the sentinel so the host has it processed by the

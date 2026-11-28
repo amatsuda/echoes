@@ -264,6 +264,17 @@ class Echoes::EmbeddedShellTest < Test::Unit::TestCase
     assert_match(/\[1\]\+\s+Interrupt/, out, "jobs should report the job ended by the Ctrl-C:\n#{out}")
   end
 
+  test "an interrupted command reports exit status 130, not the previous command's" do
+    @shell.submit_and_wait("false")
+    assert_equal 1, @shell.last_status
+    @shell.submit_line("/bin/sleep 5")
+    sleep 0.5
+    @shell.interrupt
+    deadline = Time.now + 3
+    sleep 0.05 while @shell.running? && Time.now < deadline
+    assert_equal 130, @shell.last_status
+  end
+
   test "loops still produce all their output" do
     # Regression guard for the "first session-leader child exits →
     # kernel hangs the pty" pathology — the helper architecture keeps
