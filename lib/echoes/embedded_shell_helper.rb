@@ -169,59 +169,57 @@ module Echoes
       Reline::HISTORY << line unless line.empty? || line.strip.empty?
       reply(msg, 'started')
 
+      interrupted = false
+      exit_code = nil
+      @command_running = true
       begin
-        interrupted = false
-        exit_code = nil
-        @command_running = true
-        begin
-          # Rubish's `exit` builtin signals shutdown via `throw :exit,
-          # code`. The normal `Rubish::REPL#run` loop catches that, but
-          # we bypass `run` here, so we have to catch it ourselves —
-          # otherwise the throw escapes as UncaughtThrowError, gets
-          # logged as a rubish error, and the helper keeps prompting.
-          result = catch(:exit) do
-            @repl.send(:execute, line)
-            STDOUT.flush rescue nil
-            STDERR.flush rescue nil
-            NO_EXIT_THROWN
-          end
-          exit_code = result.to_i unless result == NO_EXIT_THROWN
-        rescue Interrupt
-          # Raised by the INT trap. The command is over as far as the
-          # trap is concerned: say so before anything that could run it
-          # again (the reap below sleeps), or a second Ctrl-C would raise
-          # out of this rescue and end the helper.
-          @command_running = false
-          interrupted = true
-          reap_interrupted_children
-          STDOUT.write "\r\n" rescue nil
+        # Rubish's `exit` builtin signals shutdown via `throw :exit,
+        # code`. The normal `Rubish::REPL#run` loop catches that, but
+        # we bypass `run` here, so we have to catch it ourselves —
+        # otherwise the throw escapes as UncaughtThrowError, gets
+        # logged as a rubish error, and the helper keeps prompting.
+        result = catch(:exit) do
+          @repl.send(:execute, line)
           STDOUT.flush rescue nil
-        rescue => e
-          STDERR.puts "rubish: #{e.class}: #{e.message}"
-        ensure
-          @command_running = false
+          STDERR.flush rescue nil
+          NO_EXIT_THROWN
         end
-        # A Ctrl-C leaves rubish's $? at the previous command's status,
-        # as the interrupted wait never set one: report 130 like bash.
-        status = exit_code || (interrupted ? 130 : @repl.instance_variable_get(:@last_status) || 0)
-        # Re-announce cwd so the host's pane.screen.current_directory
-        # reflects any cd/pushd/popd this command performed. Emit
-        # *before* the sentinel so the host has it processed by the
-        # time it reacts to command_done.
-        emit_osc7(Dir.pwd)
-        # Sentinel must be in the pty kernel buffer before host
-        # observes command_done; the structured event comes last.
-        STDOUT.write DONE_SENTINEL rescue nil
+        exit_code = result.to_i unless result == NO_EXIT_THROWN
+      rescue Interrupt
+        # Raised by the INT trap. The command is over as far as the
+        # trap is concerned: say so before anything that could run it
+        # again (the reap below sleeps), or a second Ctrl-C would raise
+        # out of this rescue and end the helper.
+        @command_running = false
+        interrupted = true
+        reap_interrupted_children
+        STDOUT.write "\r\n" rescue nil
         STDOUT.flush rescue nil
-        emit_event('command_done', exit_status: status, cwd: Dir.pwd)
-        if exit_code
-          # Give the host a beat to drain the control pipe + pty
-          # before we tear them down. After exit, the host's
-          # waitpid(WNOHANG) flips the pane's alive? to false and
-          # the dead-pane reaper closes the pane (or window).
-          sleep 0.05
-          exit(exit_code)
-        end
+      rescue => e
+        STDERR.puts "rubish: #{e.class}: #{e.message}"
+      ensure
+        @command_running = false
+      end
+      # A Ctrl-C leaves rubish's $? at the previous command's status,
+      # as the interrupted wait never set one: report 130 like bash.
+      status = exit_code || (interrupted ? 130 : @repl.instance_variable_get(:@last_status) || 0)
+      # Re-announce cwd so the host's pane.screen.current_directory
+      # reflects any cd/pushd/popd this command performed. Emit
+      # *before* the sentinel so the host has it processed by the
+      # time it reacts to command_done.
+      emit_osc7(Dir.pwd)
+      # Sentinel must be in the pty kernel buffer before host
+      # observes command_done; the structured event comes last.
+      STDOUT.write DONE_SENTINEL rescue nil
+      STDOUT.flush rescue nil
+      emit_event('command_done', exit_status: status, cwd: Dir.pwd)
+      if exit_code
+        # Give the host a beat to drain the control pipe + pty
+        # before we tear them down. After exit, the host's
+        # waitpid(WNOHANG) flips the pane's alive? to false and
+        # the dead-pane reaper closes the pane (or window).
+        sleep 0.05
+        exit(exit_code)
       end
     end
 
