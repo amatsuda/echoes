@@ -61,9 +61,11 @@ module Echoes
       # A Ruby trap-with-block survives across exec as SIG_DFL (kernel
       # only preserves SIG_IGN), so the exec'd binary still gets the
       # default-terminate behavior. The block runs on the helper main
-      # thread; from there we raise Interrupt on the command thread.
-      Signal.trap('INT')  { @command_thread&.raise(Interrupt) rescue nil }
-      Signal.trap('QUIT') { @command_thread&.raise(Interrupt) rescue nil }
+      # thread, which is also where the command runs (see #run), so the
+      # raise aborts the command; between commands the signal is ours
+      # to ignore.
+      Signal.trap('INT')  { raise Interrupt if @command_running }
+      Signal.trap('QUIT') { raise Interrupt if @command_running }
       no_rc = ENV['ECHOES_HELPER_NO_RC'] == '1'
       # login_shell: true so rubish sources /etc/profile (which runs
       # path_helper, populating PATH from /etc/paths and /etc/paths.d
@@ -85,7 +87,8 @@ module Echoes
       @control_out = IO.for_fd(4, 'w')
       @control_out.sync = true
       @write_lock = Mutex.new
-      @command_thread = nil
+      @command_running = false
+      @commands = Queue.new   # execute and shutdown requests, for the main thread
       # OSC 7 announces the working directory to the host so things
       # like new-tab-inherits-cwd and the window title pick it up via
       # the standard `screen.current_directory` path. Emit once at
@@ -94,12 +97,32 @@ module Echoes
       emit_osc7(Dir.pwd)
     end
 
+    # The command runs on the main thread: rubish forks its external
+    # commands, and the Ruby inside spinel (Fluxpinel) forks from the main
+    # thread alone, where CRuby forks from any. A reader thread takes the
+    # control requests: the ones that need no command (completion, the
+    # prompts, a resize) it answers itself, so they are answered while a
+    # command runs, as before; execute and shutdown go to the main thread
+    # through a queue (an `exit` on another thread would end that thread
+    # alone).
     def run
-      while (line = @control_in.gets)
-        msg = (JSON.parse(line) rescue nil)
-        next unless msg
-        dispatch(msg)
+      reader = Thread.new do
+        while (line = @control_in.gets)
+          msg = (JSON.parse(line) rescue nil)
+          next unless msg
+          if msg['op'] == 'execute' || msg['op'] == 'shutdown'
+            @commands << msg
+          else
+            dispatch(msg)
+          end
+        end
+        @commands << nil   # the parent closed the control pipe
       end
+      while (msg = @commands.shift)
+        exit 0 if msg['op'] == 'shutdown'
+        handle_execute(msg)
+      end
+      reader.join
     end
 
     private
@@ -107,7 +130,6 @@ module Echoes
     def dispatch(msg)
       op = msg['op']
       case op
-      when 'execute'           then handle_execute(msg)
       when 'complete'          then reply(msg, @repl.complete_at(line: msg['line'], point: msg['point']))
       when 'prompt'            then reply(msg, @repl.prompt)
       when 'prompt_segments'   then reply(msg, segments_to_array(@repl.prompt_segments))
@@ -119,7 +141,6 @@ module Echoes
       when 'last_status'       then reply(msg, @repl.instance_variable_get(:@last_status) || 0)
       when 'cwd'               then reply(msg, Dir.pwd)
       when 'resize'            then handle_resize(msg)
-      when 'shutdown'          then exit 0
       end
     end
 
@@ -136,13 +157,17 @@ module Echoes
     # the exit builtin only throws integer status codes.
     NO_EXIT_THROWN = :__rubish_helper_no_exit__
 
+    # Runs the line on the main thread (see #run), and answers 'started'
+    # first, as the host reads the reply before the command's output.
     def handle_execute(msg)
       line = msg['line'].to_s
       Reline::HISTORY << line unless line.empty? || line.strip.empty?
+      reply(msg, 'started')
 
-      @command_thread = Thread.new do
+      begin
         interrupted = false
         exit_code = nil
+        @command_running = true
         begin
           # Rubish's `exit` builtin signals shutdown via `throw :exit,
           # code`. The normal `Rubish::REPL#run` loop catches that, but
@@ -160,10 +185,13 @@ module Echoes
           interrupted = true
           # SIGINT propagated by the trap; let the rest of the
           # rubish runtime unwind, then fall through to command_done.
+          reap_interrupted_children
           STDOUT.write "\r\n" rescue nil
           STDOUT.flush rescue nil
         rescue => e
           STDERR.puts "rubish: #{e.class}: #{e.message}"
+        ensure
+          @command_running = false
         end
         status = exit_code || @repl.instance_variable_get(:@last_status) || (interrupted ? 130 : 0)
         # Re-announce cwd so the host's pane.screen.current_directory
@@ -185,7 +213,28 @@ module Echoes
           exit(exit_code)
         end
       end
-      reply(msg, 'started')
+    end
+
+    # The SIGINT that raised the Interrupt went to the foreground child
+    # too (it shares our process group), and the raise left rubish's wait
+    # before the child's end was collected: reap what has died in our
+    # group, so a Ctrl-C leaves no zombie behind. A child that is still
+    # running (a program that handles SIGINT itself) is left alone after a
+    # short wait; a background job under job control has a group of its own
+    # and is not touched.
+    def reap_interrupted_children
+      deadline = Time.now + 0.2
+      reaped = false
+      loop do
+        if Process.wait(0, Process::WNOHANG)
+          reaped = true
+          next
+        end
+        break if reaped || Time.now > deadline
+        sleep 0.01
+      end
+    rescue Errno::ECHILD, Errno::EINVAL
+      # no children in our group, or the platform has no group wait
     end
 
     def handle_resize(msg)
