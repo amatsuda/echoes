@@ -97,30 +97,36 @@ module Echoes
       emit_osc7(Dir.pwd)
     end
 
-    # The command runs on the main thread: rubish forks its external
-    # commands, and the Ruby inside spinel (Fluxpinel) forks from the main
-    # thread alone, where CRuby forks from any. A reader thread takes the
-    # control requests: the ones that need no command (completion, the
-    # prompts, a resize) it answers itself, so they are answered while a
-    # command runs, as before; execute and shutdown go to the main thread
-    # through a queue (an `exit` on another thread would end that thread
-    # alone).
+    # Rubish runs on the main thread: it forks its external commands, and a
+    # prompt or a completion of its can fork too (a `git` in the prompt),
+    # and the Ruby inside spinel (Fluxpinel) forks from the main thread
+    # alone, where CRuby forks from any. A reader thread takes the control
+    # requests off the pipe: a resize and the reads of the helper's own
+    # state it answers itself, so they are answered while a command runs,
+    # as before; every request that runs rubish goes to the main thread
+    # through a queue, with execute and shutdown (an `exit` on another
+    # thread would end that thread alone).
+    ON_READER = %w[resize cwd last_status].freeze
+
     def run
       reader = Thread.new do
         while (line = @control_in.gets)
           msg = (JSON.parse(line) rescue nil)
           next unless msg
-          if msg['op'] == 'execute' || msg['op'] == 'shutdown'
-            @commands << msg
-          else
+          if ON_READER.include?(msg['op'])
             dispatch(msg)
+          else
+            @commands << msg
           end
         end
         @commands << nil   # the parent closed the control pipe
       end
       while (msg = @commands.shift)
-        exit 0 if msg['op'] == 'shutdown'
-        handle_execute(msg)
+        case msg['op']
+        when 'shutdown' then exit 0
+        when 'execute'  then handle_execute(msg)
+        else dispatch(msg)
+        end
       end
       reader.join
     end
