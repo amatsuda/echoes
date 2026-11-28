@@ -244,6 +244,26 @@ class Echoes::EmbeddedShellTest < Test::Unit::TestCase
     assert_includes @shell.read_available_output, "still-here"
   end
 
+  test "Ctrl-C on a foreground command keeps the status of a background job for `jobs`" do
+    # Without job control the background job shares the helper's
+    # process group, so the Ctrl-C ends it as well, and its end must
+    # reach rubish's job table rather than be swallowed by the helper's
+    # reap. The foreground command ignores SIGINT so that the job is the
+    # only child to die within the helper's reap window.
+    @shell.submit_and_wait("/bin/sleep 100 &")
+    @shell.read_available_output
+    @shell.submit_line(%q{/bin/sh -c "trap \"\" INT; /bin/sleep 1"})
+    sleep 0.5
+    @shell.interrupt
+    deadline = Time.now + 3
+    sleep 0.05 while @shell.running? && Time.now < deadline
+    sleep 0.3  # let the pty catch up before draining it
+    @shell.read_available_output
+    @shell.submit_and_wait("jobs")
+    out = @shell.read_available_output
+    assert_match(/\[1\]\+\s+Interrupt/, out, "jobs should report the job ended by the Ctrl-C:\n#{out}")
+  end
+
   test "loops still produce all their output" do
     # Regression guard for the "first session-leader child exits →
     # kernel hangs the pty" pathology — the helper architecture keeps

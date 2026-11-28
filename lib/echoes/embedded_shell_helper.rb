@@ -229,17 +229,20 @@ module Echoes
     # before the child's end was collected: reap what has died in our
     # group, so a Ctrl-C leaves no zombie behind. A child that is still
     # running (a program that handles SIGINT itself) is left alone after a
-    # short wait; a background job under job control has a group of its own
-    # and is not touched.
+    # short wait. Without job control a background job shares the group
+    # as well, and the signal ends it too: its status belongs to rubish's
+    # job table, so every status collected here is handed over (a no-op
+    # for a pid the table does not know).
     def reap_interrupted_children
-      deadline = Time.now + 0.2
+      deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + 0.2
       reaped = false
       loop do
-        if Process.wait(0, Process::WNOHANG)
+        if (ended = Process.wait2(0, Process::WNOHANG))
+          Rubish::JobManager.instance.update_status(*ended)
           reaped = true
           next
         end
-        break if reaped || Time.now > deadline
+        break if reaped || Process.clock_gettime(Process::CLOCK_MONOTONIC) > deadline
         sleep 0.01
       end
     rescue Errno::ECHILD, Errno::EINVAL
